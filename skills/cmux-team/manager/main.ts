@@ -741,6 +741,19 @@ async function cmdStart(): Promise<void> {
     process.exit(1);
   }
 
+  // --- v0.4.0: c11 必須 / 非 c11 multiplexer 上では起動拒否 ---
+  // ELEVENS_BACKEND が明示されていれば opt-in 経路として通す（cmux も含む、
+  // ただし cmux 明示は別途 DEPRECATION_NOTICE が出る）。
+  // auto-detect で c11 multiplexer 上にいると判断できなければ refuse + exit 1。
+  const backendDecision = cmux.detectBackendDecision(process.env);
+  if (backendDecision.kind === "refuse") {
+    console.error("[elevens] " + backendDecision.reason);
+    if (backendDecision.observed.bundleId) {
+      console.error(`[elevens] (observed CMUX_BUNDLE_ID=${backendDecision.observed.bundleId})`);
+    }
+    process.exit(1);
+  }
+
   // --- preflight チェック ---
   // daemon 起動前に前提を検証し、失敗時は即 exit
   // （daemon / Master / Conductor を spawn した後で失敗すると

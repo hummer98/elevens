@@ -39,7 +39,80 @@ async function writeFakeCmux(script: string): Promise<void> {
   await chmod(path, 0o755);
 }
 
-import { send, setStatus, isAlive, __setIsAliveImpl, __setTreeImpl, listSiblingSurfaces } from "./cmux";
+import { send, setStatus, isAlive, __setIsAliveImpl, __setTreeImpl, listSiblingSurfaces, detectBackendDecision } from "./cmux";
+
+describe("detectBackendDecision (v0.4.0+ c11 必須化)", () => {
+  test("ELEVENS_BACKEND=c11 明示 → kind=explicit, backend=c11", () => {
+    const r = detectBackendDecision({ ELEVENS_BACKEND: "c11" });
+    expect(r.kind).toBe("explicit");
+    if (r.kind === "explicit") expect(r.backend).toBe("c11");
+  });
+
+  test("ELEVENS_BACKEND=cmux 明示 → kind=explicit, backend=cmux (legacy opt-in)", () => {
+    const r = detectBackendDecision({ ELEVENS_BACKEND: "cmux" });
+    expect(r.kind).toBe("explicit");
+    if (r.kind === "explicit") expect(r.backend).toBe("cmux");
+  });
+
+  test("ELEVENS_BACKEND=絶対パス指定 → kind=explicit, backend=パスそのまま", () => {
+    const r = detectBackendDecision({ ELEVENS_BACKEND: "/opt/c11-dev/bin/c11" });
+    expect(r.kind).toBe("explicit");
+    if (r.kind === "explicit") expect(r.backend).toBe("/opt/c11-dev/bin/c11");
+  });
+
+  test("ELEVENS_BACKEND 空文字 + CMUX_BUNDLE_ID=com.stage11.c11 → 空文字を無視して auto c11", () => {
+    const r = detectBackendDecision({ ELEVENS_BACKEND: "", CMUX_BUNDLE_ID: "com.stage11.c11" });
+    expect(r.kind).toBe("auto");
+    if (r.kind === "auto") expect(r.backend).toBe("c11");
+  });
+
+  test("CMUX_BUNDLE_ID=com.stage11.c11 のみ → kind=auto, backend=c11", () => {
+    const r = detectBackendDecision({ CMUX_BUNDLE_ID: "com.stage11.c11" });
+    expect(r.kind).toBe("auto");
+    if (r.kind === "auto") {
+      expect(r.backend).toBe("c11");
+      expect(r.bundle).toBe("com.stage11.c11");
+    }
+  });
+
+  test("CMUX_BUNDLED_CLI_PATH に /c11.app/ 含む (CMUX_BUNDLE_ID 不在) → kind=auto, backend=c11 (backup)", () => {
+    const r = detectBackendDecision({
+      CMUX_BUNDLED_CLI_PATH: "/Applications/c11.app/Contents/Resources/bin/c11",
+    });
+    expect(r.kind).toBe("auto");
+    if (r.kind === "auto") expect(r.backend).toBe("c11");
+  });
+
+  test("env が空 → kind=refuse (c11 必須)", () => {
+    const r = detectBackendDecision({});
+    expect(r.kind).toBe("refuse");
+    if (r.kind === "refuse") {
+      expect(r.reason).toContain("c11-first");
+      expect(r.reason).toContain("ELEVENS_BACKEND=cmux"); // legacy opt-in を案内
+      expect(r.observed.bundleId).toBeUndefined();
+    }
+  });
+
+  test("CMUX_BUNDLE_ID=com.manaflow.cmux (cmux multiplexer) → kind=refuse + observed に bundleId", () => {
+    const r = detectBackendDecision({ CMUX_BUNDLE_ID: "com.manaflow.cmux" });
+    expect(r.kind).toBe("refuse");
+    if (r.kind === "refuse") {
+      expect(r.observed.bundleId).toBe("com.manaflow.cmux");
+    }
+  });
+
+  test("CMUX_BUNDLED_CLI_PATH が cmux.app → kind=refuse (c11.app 以外)", () => {
+    const r = detectBackendDecision({
+      CMUX_BUNDLED_CLI_PATH: "/Applications/cmux.app/Contents/Resources/bin/cmux",
+    });
+    expect(r.kind).toBe("refuse");
+  });
+
+  test("ELEVENS_BACKEND が opt-in なら CMUX_BUNDLE_ID が cmux でも refuse しない", () => {
+    const r = detectBackendDecision({ ELEVENS_BACKEND: "cmux", CMUX_BUNDLE_ID: "com.manaflow.cmux" });
+    expect(r.kind).toBe("explicit");
+  });
+});
 
 describe("send / setStatus のエラー伝搬 (T163)", () => {
   test("send() 失敗時 Error.message に stderr が含まれる", async () => {

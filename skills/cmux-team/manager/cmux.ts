@@ -13,14 +13,66 @@ const execFile = promisify(execFileCb);
  * `ELEVENS_BACKEND=c11` で c11、`ELEVENS_BACKEND=cmux`（または未設定）で cmux。
  * 任意の文字列も受け付ける（絶対パスやカスタムビルド差し替え用）。
  *
- * **NOTE on auto-detect**: c11 surface は `CMUX_BUNDLE_ID=com.stage11.c11` を
- * export している (一次情報) ので将来的に自動判別できる余地はあるが、
- * SUBSTRATE_BINARY が module load 時に `const` で確定する設計と既存テスト群
- * (CI 上は cmux default を前提) の整合上、現状は **`ELEVENS_BACKEND` 明示が
- * 必須**。auto-detect 化は v0.4.0+ で test infrastructure 再設計と一緒に行う
- * (issue #1 ADR の補足参照)。
+ * v0.4.0+: `cmdStart` 起動経路で **auto-detect が c11 でなかった場合は refuse** に切替。
+ * ただし SUBSTRATE_BINARY 自体は module load 時に確定し続ける（既存テスト互換）。
+ * 起動可否判定は `detectBackendDecision()` を起動経路で呼ぶ設計。
  */
 export const SUBSTRATE_BINARY: string = process.env.ELEVENS_BACKEND?.trim() || "cmux";
+
+/**
+ * elevens start の起動可否判定 (v0.4.0+ で導入)。
+ *
+ * **方針**: c11-first。auto-detect で c11 multiplexer 上にいないと判断したら refuse。
+ * `ELEVENS_BACKEND` を user が明示している場合は opt-in と見做して起動許可（cmux 含む）。
+ *
+ * 優先順位:
+ *   1. `ELEVENS_BACKEND` env 明示 → そのまま `{ kind: "explicit", backend }` を返す
+ *   2. auto-detect: `CMUX_BUNDLE_ID === "com.stage11.c11"` → c11 と判定
+ *   3. auto-detect backup: `CMUX_BUNDLED_CLI_PATH` が `/c11.app/` を含む → c11
+ *   4. それ以外 → `{ kind: "refuse", reason }` を返し、cmdStart で exit 1
+ *
+ * cmdStart 以外の経路 (mailbox / send / status 等) は refuse しない（既存 daemon との
+ * 通信ユーティリティとして動かしたい場合があるため）。
+ */
+export type BackendDecision =
+  | { kind: "explicit"; backend: string; bundle?: string }
+  | { kind: "auto"; backend: "c11"; bundle: string }
+  | { kind: "refuse"; reason: string; observed: { bundleId?: string; cliPath?: string } };
+
+export function detectBackendDecision(env: NodeJS.ProcessEnv = process.env): BackendDecision {
+  const explicit = env.ELEVENS_BACKEND?.trim();
+  if (explicit) {
+    return { kind: "explicit", backend: explicit, bundle: env.CMUX_BUNDLE_ID };
+  }
+  if (env.CMUX_BUNDLE_ID === "com.stage11.c11") {
+    return { kind: "auto", backend: "c11", bundle: env.CMUX_BUNDLE_ID };
+  }
+  const cliPath = env.CMUX_BUNDLED_CLI_PATH;
+  if (cliPath && /\/c11\.app\//.test(cliPath)) {
+    return { kind: "auto", backend: "c11", bundle: env.CMUX_BUNDLE_ID ?? "(unknown via CLI path)" };
+  }
+  // refuse path
+  return {
+    kind: "refuse",
+    reason: [
+      "elevens は c11-first です。c11 multiplexer 上で起動するか、明示的にレガシー backend を",
+      "選択してください。",
+      "",
+      "対処方法:",
+      "  (a) c11 surface 内で `elevens start` を実行する (推奨)",
+      "      Stage 11 Agentics の c11 をインストールして surface を開いてから起動",
+      "  (b) 明示的に cmux backend を opt-in する (legacy):",
+      "      ELEVENS_BACKEND=cmux elevens start",
+      "      ※ cmux backend は v0.3.0 以降 deprecated です (DEPRECATION_NOTICE が log されます)",
+      "  (c) 明示的に c11 backend を指定する (PATH 上の c11 binary を使う):",
+      "      ELEVENS_BACKEND=c11 elevens start",
+    ].join("\n"),
+    observed: {
+      bundleId: env.CMUX_BUNDLE_ID,
+      cliPath: env.CMUX_BUNDLED_CLI_PATH,
+    },
+  };
+}
 
 /**
  * Backend が c11 かどうかの判定（basename ベース）。

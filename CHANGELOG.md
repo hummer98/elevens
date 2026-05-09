@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.4.0] - 2026-05-10
+
+**c11 必須化** — Phase 3 の最終ステップ。auto-detect で c11 multiplexer 上にいると判断できなければ `elevens start` を refuse + exit 1。これは **breaking change** で、cmux multiplexer 運用ユーザーは ELEVENS_BACKEND=cmux 明示が必要になる。
+
+### Added
+
+- **`detectBackendDecision(env)` を `cmux.ts` に export**: `{ kind: "explicit"|"auto"|"refuse", backend, ... }` の discriminated union を返す純粋関数。env のみ依存で test 容易。優先順位:
+  1. `ELEVENS_BACKEND` 明示 → kind=explicit (c11/cmux/任意パスをそのまま)
+  2. `CMUX_BUNDLE_ID === "com.stage11.c11"` → kind=auto, backend=c11
+  3. `CMUX_BUNDLED_CLI_PATH` に `/c11.app/` 含む → kind=auto, backend=c11 (backup)
+  4. それ以外 → kind=refuse + 案内メッセージ
+- **`cmdStart` 起動経路で kind=refuse を見て exit 1**: error メッセージは (a) c11 surface での実行を推奨、(b) `ELEVENS_BACKEND=cmux` 明示で legacy opt-in、(c) `ELEVENS_BACKEND=c11` で PATH 上の c11 binary 指定、の 3 通りの対処を案内
+- **TDD**: `cmux.test.ts` に 10 ケース新設 (explicit / auto / refuse / observed bundle id / 空文字 / 絶対パス指定 / cmux 多重 / cmux.app)。582 pass / 0 fail across 9 files
+
+### Changed (BREAKING)
+
+- **`elevens start` は c11-first**: 環境が c11 でないと判定された場合、警告ではなく **拒否** に変更。v0.3.x までは `cmux` backend を default として走らせて DEPRECATION_NOTICE で警告するだけだったが、**dual-write 観測期間 (Phase 2) を経て成熟したため** Phase 3 終盤として強制移行に踏み切る
+- **判断基準 (issue #1 ADR-007 を補足)**: 「警告して continue」は migration を先延ばしにするだけで結局誰もが永遠に warning を踏み続ける。auto-detect での refuse + 明示 opt-in 経路の保持で、**移行コストは1コマンド** (`ELEVENS_BACKEND=cmux` を export するだけ)、構造的安全性は最大化される
+- 既存 daemon (v0.3.x で起動済み) は影響を受けない (refuse は `cmdStart` 起動時のみ)
+
+### Migration (cmux multiplexer ユーザー向け)
+
+```bash
+# 既存の運用を維持したい場合 (legacy opt-in、Phase 4 までサポート)
+export ELEVENS_BACKEND=cmux
+elevens start
+# (DEPRECATION_NOTICE は引き続き出る)
+
+# c11 に移行したい場合 (推奨)
+# Stage 11 Agentics の c11 をインストールして surface を開いてから:
+elevens start  # auto-detect で c11 として起動
+```
+
+### 触らなかった箇所
+
+- `mailbox` / `send` / `status` / `metrics` 等の CLI utility は refuse しない (既存 daemon との通信用途を温存)
+- `SUBSTRATE_BINARY` (module-level const) は据え置き — 既存テスト群との互換のため、refuse 判定は `detectBackendDecision()` 経由 (env を引数に取る純粋関数) に分離
+- ENV 名 (`CMUX_*`) / file path (`.team/`、`cmux.sock`) / hook signal type は不変
+
 ## [0.3.2] - 2026-05-10
 
 ### Removed (BREAKING for those who relied on it — actually 0.3.0 で導入したばかりの仕様撤回)
