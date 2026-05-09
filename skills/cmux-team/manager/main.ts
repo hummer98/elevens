@@ -38,6 +38,7 @@ import { collectSessionEnrichment } from "./session-enrichment";
 // T358: events.jsonl writer
 import { emitEvent } from "./events-writer";
 import { runEventsCli } from "./events-cli";
+import { runMailboxCli } from "./mailbox-cli";
 import { runMetricsCli } from "./metrics-cli";
 import { runMetricsSnapshotCli } from "./metrics-snapshot";
 import { runMetricsCompareCli } from "./metrics-compare";
@@ -6188,6 +6189,15 @@ switch (command) {
         process.exit(1);
     }
     break;
+  }
+  case "mailbox": {
+    process.exit(
+      await runMailboxCli({
+        args: args.slice(1),
+        stdout: process.stdout,
+        stderr: process.stderr,
+      })
+    );
   }
   case "gh":
     await cmdGh();
