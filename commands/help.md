@@ -1,11 +1,11 @@
 ---
 allowed-tools: Bash, Read, Glob, Grep
-description: "cmux-team プラグインの全コマンド・スキル一覧と起動条件を表示"
+description: "elevens プラグインの全コマンド・スキル一覧と起動条件を表示"
 ---
 
-# /cmux-team:help
+# /elevens:help
 
-cmux-team Claude Code プラグインの全スラッシュコマンドとスキルの概要・起動条件を一覧表示する。
+elevens Claude Code プラグインの全スラッシュコマンドとスキルの概要・起動条件を一覧表示する。
 
 ## 手順
 
@@ -16,8 +16,8 @@ cmux-team Claude Code プラグインの全スラッシュコマンドとスキ�
 ```bash
 PLUGIN_DIR=""
 
-# 1. cmux-team バイナリの実体パスから逆算
-CMUX_BIN=$(which cmux-team 2>/dev/null)
+# 1. elevens バイナリの実体パスから逆算（後方互換のため cmux-team alias も試す）
+CMUX_BIN=$(which elevens 2>/dev/null || which cmux-team 2>/dev/null)
 if [ -n "$CMUX_BIN" ]; then
   REAL_BIN=$(realpath "$CMUX_BIN" 2>/dev/null || readlink -f "$CMUX_BIN" 2>/dev/null || echo "$CMUX_BIN")
   CANDIDATE=$(dirname "$(dirname "$REAL_BIN")")
@@ -27,20 +27,20 @@ fi
 # 2. npm グローバル root
 if [ -z "$PLUGIN_DIR" ]; then
   NPM_ROOT=$(npm root -g 2>/dev/null)
-  CANDIDATE="$NPM_ROOT/@hummer98/cmux-team"
+  CANDIDATE="$NPM_ROOT/@hummer98/elevens"
   [ -d "$CANDIDATE/commands" ] && PLUGIN_DIR="$CANDIDATE"
 fi
 
 # 3. ~/.claude/plugins
 if [ -z "$PLUGIN_DIR" ]; then
-  CANDIDATE="$HOME/.claude/plugins/cmux-team"
+  CANDIDATE="$HOME/.claude/plugins/elevens"
   [ -d "$CANDIDATE/commands" ] && PLUGIN_DIR="$CANDIDATE"
 fi
 
 echo "${PLUGIN_DIR:-NOT_FOUND}"
 ```
 
-`NOT_FOUND` の場合: 「プラグインが見つかりません。`npm install -g @hummer98/cmux-team` を確認してください」と表示して終了。
+`NOT_FOUND` の場合: 「プラグインが見つかりません。`npm install -g @hummer98/elevens` を確認してください」と表示して終了。
 
 ### 2. スラッシュコマンドを収集
 
@@ -49,7 +49,7 @@ ls "$PLUGIN_DIR/commands/"
 ```
 
 各 `.md` ファイルを `Read` で開き、frontmatter の `description` とファイル名（拡張子除く）を取得する。
-コマンド名は `/cmux-team:<ファイル名>` 形式になる。
+コマンド名は `/elevens:<ファイル名>` 形式になる。
 
 ### 3. スキルを収集
 
@@ -67,11 +67,11 @@ find "$PLUGIN_DIR/skills" -name "SKILL.md" | sort
 
 ## スラッシュコマンド
 
-ユーザーが明示的に `/cmux-team:<name>` と入力して呼び出す。
+ユーザーが明示的に `/elevens:<name>` と入力して呼び出す。
 
 | コマンド | 説明 |
 |---------|------|
-| `/cmux-team:<name1>` | description |
+| `/elevens:<name1>` | description |
 | ...                  | ...         |
 
 ---

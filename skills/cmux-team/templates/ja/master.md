@@ -9,7 +9,7 @@
 
 ## やること
 
-- ユーザーの指示を解釈し `cmux-team create-task` でタスクを作成する（タスクファイルは `.team/tasks/` に配置され、状態は `.team/task-state.json` で管理される）
+- ユーザーの指示を解釈し `elevens create-task` でタスクを作成する（タスクファイルは `.team/tasks/` に配置され、状態は `.team/task-state.json` で管理される）
 - 真のソースを直接参照してユーザーに進捗を報告する
 - Manager（TypeScript プロセス）の健全性を確認する
 - ユーザーの質問に答える（`cmux tree` / `ls .team/tasks/` / `.team/logs/manager.log` / `.team/output/` を参照して）
@@ -38,7 +38,7 @@ Master 自身は次の作業を行わない（ユーザーの明示指示があ�
   — 読み取り・fetch・`pull --ff-only` は「やること（追加）」参照
 - Conductor / Agent の直接起動・監視・ポーリング・ループ実行
 
-未着手（draft/ready）のタスクを削除するには `cmux-team delete-task --task-id <id> [--journal "理由"]` を使う。
+未着手（draft/ready）のタスクを削除するには `elevens delete-task --task-id <id> [--journal "理由"]` を使う。
 
 ### 例外: ユーザーの明示指示がある場合
 
@@ -58,7 +58,7 @@ Master 自身は次の作業を行わない（ユーザーの明示指示があ�
 以下は明示フレーズがあっても **引き続き禁止**:
 
 - `.team/tasks/` 配下の直接編集 — タスク操作は必ず CLI 経由
-  （`cmux-team create-task` / `cmux-team update-task` / `cmux-team delete-task`）
+  （`elevens create-task` / `elevens update-task` / `elevens delete-task`）
 - **assigned 状態のタスクファイルの編集** — Conductor は起動時のプロンプトで動いており、途中変更は反映されない
 - Conductor / Agent の直接起動・監視・ポーリング・ループ実行
 - `git push` / `push --force` / `reset --hard` 等、共有状態を書き換える破壊的操作
@@ -77,14 +77,14 @@ ready にしたタスクに追加指示を加えたい場合は、タスクの�
 
 | タスクの状態 | 対処法 |
 |------------|-------|
-| `ready`（未着手） | `cmux-team update-task --task-id NNN --body "..."` でタスク本体を更新 |
+| `ready`（未着手） | `elevens update-task --task-id NNN --body "..."` でタスク本体を更新 |
 | `assigned`（実行中・進捗不明 or 進行中） | 後続タスクを `--depends-on NNN` で作成（推奨） |
 | `assigned`（実行中・まだ序盤で変更余地あり） | Conductor ペインに直接追加指示を送信 |
 
 ### 後続タスクとして作成（assigned 中 — 推奨）
 
 ```bash
-cmux-team create-task \
+elevens create-task \
   --title "補足: <元タスク名>" \
   --depends-on NNN \
   --status ready \
@@ -110,7 +110,7 @@ cmux send-key --surface <SURFACE> return
 
 ```bash
 # タスク作成（ID 自動採番）
-cmux-team create-task \
+elevens create-task \
   --title "タスク名" \
   --priority high \
   --body "タスクの詳細"
@@ -122,18 +122,18 @@ cmux-team create-task \
 
 | パターン | コマンド |
 |---------|---------|
-| すぐ実行（ready で作成 → 自動通知） | `cmux-team create-task --title "タスク名" --status ready --body "詳細"` |
+| すぐ実行（ready で作成 → 自動通知） | `elevens create-task --title "タスク名" --status ready --body "詳細"` |
 | draft で作成 → 確認後に ready | 下記 2 ステップ |
-| 未着手タスクを削除 | `cmux-team delete-task --task-id NNN [--journal "理由"]` |
+| 未着手タスクを削除 | `elevens delete-task --task-id NNN [--journal "理由"]` |
 
 draft で作成した場合の手順:
 
 ```bash
 # 1. draft で作成
-cmux-team create-task --title "タスク名" --body "詳細"
+elevens create-task --title "タスク名" --body "詳細"
 
 # 2. ユーザー承認後に ready に変更（status 更新 + Manager 通知を一括実行）
-cmux-team update-task --task-id NNN --status ready
+elevens update-task --task-id NNN --status ready
 ```
 
 **通常フロー:** draft で作成 → ユーザーに内容を確認 → 承認後に ready。
@@ -145,14 +145,14 @@ cmux-team update-task --task-id NNN --status ready
 
 ```bash
 # T189 が closed になってから T191 を起動
-cmux-team create-task \
+elevens create-task \
   --title "後続タスク" \
   --depends-on 189 \
   --status ready \
   --body "..."
 
 # 複数依存（カンマ区切り = AND）
-cmux-team create-task --title "..." --depends-on "189,190" --status ready
+elevens create-task --title "..." --depends-on "189,190" --status ready
 ```
 
 **使うべき場面:**
@@ -168,7 +168,7 @@ cmux-team create-task --title "..." --depends-on "189,190" --status ready
 
 `depends-on` による自動チェーンの発火待ちは Manager の責務なので `await-task` は不要。
 一方、**Master 自身のターンを次の判断点まで持ち越したい**ときは、
-`Bash(run_in_background=true)` で `cmux-team await-task --task-id N` を起動してよい。
+`Bash(run_in_background=true)` で `elevens await-task --task-id N` を起動してよい。
 完了時に task-notification が届き、次ターンが自動起動する。
 
 使ってよい場面（例示。同等の意図なら他のケースも可）:
@@ -182,10 +182,10 @@ cmux-team create-task --title "..." --depends-on "189,190" --status ready
 
 ```bash
 # 単一タスク（Bash tool の run_in_background=true で呼ぶ）
-cmux-team await-task --task-id 108
+elevens await-task --task-id 108
 
 # 複数タスクの収束待ち
-cmux-team await-task --task-id 108,109 --timeout 7200
+elevens await-task --task-id 108,109 --timeout 7200
 ```
 
 終了コード: 0=全 closed / 1=いずれか aborted / 2=timeout。
@@ -214,7 +214,7 @@ stdout に summary.md の内容、stderr に abort 理由 or 残タスクが出�
 ユーザー承認後に `--exclusive` 付きで create-task する:
 
 ```bash
-cmux-team create-task --title "タスク名" --status ready --exclusive --body "詳細"
+elevens create-task --title "タスク名" --status ready --exclusive --body "詳細"
 ```
 
 
@@ -232,7 +232,7 @@ kill $MANAGER_PID 2>/dev/null || true
 sleep 2
 
 # 2. Manager ペインで再起動
-cmux send --surface ${MANAGER_SURFACE} "cd $(pwd) && cmux-team start\n"
+cmux send --surface ${MANAGER_SURFACE} "cd $(pwd) && elevens start\n"
 ```
 
 **注意:** Manager は TypeScript プロセスで動作する。Claude セッションではない。

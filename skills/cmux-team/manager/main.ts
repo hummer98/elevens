@@ -175,7 +175,7 @@ export function findProjectRoot(opts?: { flag?: string }): string {
       throw new ProjectRootError(`project root not found: ${opts.flag}`, "not_found");
     }
     if (!existsSync(join(abs, ".team"))) {
-      throw new ProjectRootError(`not a cmux-team project: ${abs}`, "not_a_project");
+      throw new ProjectRootError(`not an elevens project: ${abs}`, "not_a_project");
     }
     return abs;
   }
@@ -350,7 +350,7 @@ function findLatestMainTs(): string {
   // npm グローバルインストール先
   try {
     const npmGlobalPrefix = execFileSync("npm", ["prefix", "-g"]).toString().trim();
-    const npmMainTs = join(npmGlobalPrefix, "lib/node_modules/cmux-team/skills/cmux-team/manager/main.ts");
+    const npmMainTs = join(npmGlobalPrefix, "lib/node_modules/@hummer98/elevens/skills/cmux-team/manager/main.ts");
     if (existsSync(npmMainTs)) return npmMainTs;
   } catch {}
 
@@ -427,7 +427,7 @@ if (import.meta.main) {
   try {
     process.chdir(PROJECT_ROOT);
   } catch (e: any) {
-    console.error(`[cmux-team] chdir "${PROJECT_ROOT}" 失敗: ${e.message}`);
+    console.error(`[elevens] chdir "${PROJECT_ROOT}" 失敗: ${e.message}`);
     process.exit(1);
   }
 }
@@ -756,7 +756,7 @@ async function cmdStart(): Promise<void> {
   }
   if (direnvStatus === "no_direnv") {
     await log("direnv_not_found", "command=start");
-    console.warn("[cmux-team] direnv が見つかりません — .envrc の環境変数は反映されません");
+    console.warn("[elevens] direnv が見つかりません — .envrc の環境変数は反映されません");
   }
 
   // layout 解決（CLI --layout > config.json > "16x9"）
@@ -810,7 +810,7 @@ async function cmdStart(): Promise<void> {
         [
           "Error: Failed to detect the project's main branch.",
           "",
-          "cmux-team は以下の順で main ブランチを解決します:",
+          "elevens は以下の順で main ブランチを解決します:",
           "  1. .team/config.json の \"mainBranch\" フィールド",
           "  2. git symbolic-ref refs/remotes/origin/HEAD",
           "  3. git symbolic-ref --short HEAD",
@@ -823,7 +823,7 @@ async function cmdStart(): Promise<void> {
           "      }",
           "",
           "  (B) または環境変数で一時指定:",
-          "      CMUX_TEAM_MAIN_BRANCH=<your-branch> cmux-team start",
+          "      CMUX_TEAM_MAIN_BRANCH=<your-branch> elevens start",
           "",
           "考えられる原因:",
           "  - 新規リポジトリで push 前 (origin/HEAD 未設定)",
@@ -1800,7 +1800,7 @@ async function cmdStatus(): Promise<void> {
   // --- ヘッダー ---
   const status = alive ? "RUNNING" : "STOPPED";
   const layout = typeof teamJson.layout === "string" ? teamJson.layout : "16x9";
-  console.log(`cmux-team  ${status}  PID ${pid || "-"}  conductors ${conductors.length}  layout=${layout}`);
+  console.log(`elevens  ${status}  PID ${pid || "-"}  conductors ${conductors.length}  layout=${layout}`);
 
   // T374: pool ヘッダー（forecast7d スパークライン + next 候補）を 1 行で表示。
   // OFF / 失敗時は summary=null となり pool ヘッダー行ごと省略する。
@@ -1957,9 +1957,9 @@ async function registerSelf(
     console.error(
       "daemon が起動していません (.team/proxy-port 不在 / proxy 死亡 / 壊れた proxy-port ファイル)。",
     );
-    console.error("cmux-team start を先に実行してください。");
+    console.error("elevens start を先に実行してください。");
     console.error(
-      "壊れた proxy-port ファイルの場合は `.team/proxy-port` を削除して `cmux-team start` をやり直してください。",
+      "壊れた proxy-port ファイルの場合は `.team/proxy-port` を削除して `elevens start` をやり直してください。",
     );
     process.exit(1);
   }
@@ -2905,7 +2905,7 @@ async function cmdSpawnConductor(): Promise<void> {
   if (!mainBranch) {
     console.error(
       "Error: config.mainBranch is not set and CMUX_TEAM_MAIN_BRANCH is empty. " +
-        "Run `cmux-team start` first to detect and persist the main branch, " +
+        "Run `elevens start` first to detect and persist the main branch, " +
         "or set CMUX_TEAM_MAIN_BRANCH=<your-branch> explicitly.",
     );
     await log("spawn_conductor_main_branch_missing", "reason=env_and_config_missing");
@@ -3634,7 +3634,7 @@ async function cmdSendAgent(): Promise<void> {
   // team.json の存在確認
   const teamJsonPath = join(PROJECT_ROOT, ".team/team.json");
   if (!existsSync(teamJsonPath)) {
-    console.error("Error: .team/team.json not found. cmux-team start を実行してください。");
+    console.error("Error: .team/team.json not found. elevens start を実行してください。");
     await log(
       "send_agent_rejected",
       `caller=${callerSurface} target=${targetSurface} reason=team_json_missing`,
@@ -3645,7 +3645,7 @@ async function cmdSendAgent(): Promise<void> {
   // 自己送信は即時 reject（retry しても通らないため）
   if (callerSurface === targetSurface) {
     console.error(
-      `Error: 自分自身 (${callerSurface}) には送信できません。cmux-team send-agent は自分が spawn した Agent 宛のみ使用可能です。`,
+      `Error: 自分自身 (${callerSurface}) には送信できません。elevens send-agent は自分が spawn した Agent 宛のみ使用可能です。`,
     );
     await log(
       "send_agent_rejected",
@@ -4177,7 +4177,7 @@ export function parseCloseTaskArgs(
     return {
       error:
         "--deliverable-kind is required (one of: files, merged, pr, none). " +
-        "See `cmux-team close-task --help` for examples.",
+        "See `elevens close-task --help` for examples.",
     };
   }
 
@@ -4450,7 +4450,7 @@ async function cmdAwaitTask(): Promise<void> {
 async function cmdAwaitAgent(): Promise<void> {
   if (hasHelpFlag()) {
     showHelp([
-      "Usage: cmux-team await-agent --surface <agent-surface> [--timeout <sec>]",
+      "Usage: elevens await-agent --surface <agent-surface> [--timeout <sec>]",
       "",
       "Wait for an agent's done marker (completed / ask / crashed / api_error / timeout).",
       "",
@@ -4858,7 +4858,7 @@ async function cmdAbortTask(): Promise<void> {
   // 8. Conductor を再起動（session-id は cmdSpawnConductor が自己生成して daemon に通知する）
   await cmux.send(conductor.surface, `export CMUX_SURFACE=${conductor.surface} CMUX_CLAUDE_HOOKS_DISABLED=1\n`);
   await sleep(500);
-  await cmux.send(conductor.surface, buildLaunchCommand(PROJECT_ROOT, "cmux-team spawn-conductor") + "\n");
+  await cmux.send(conductor.surface, buildLaunchCommand(PROJECT_ROOT, "elevens spawn-conductor") + "\n");
 
   console.log(`OK aborted ${taskId} (conductor ${conductor.surface} restarting)`);
 }
@@ -5055,7 +5055,7 @@ async function cmdRestartTask(): Promise<void> {
   // 6. Conductor を再起動（session-id は cmdSpawnConductor が自己生成して daemon に通知する）
   await cmux.send(conductor.surface, `export CMUX_SURFACE=${conductor.surface} CMUX_CLAUDE_HOOKS_DISABLED=1\n`);
   await sleep(500);
-  await cmux.send(conductor.surface, buildLaunchCommand(PROJECT_ROOT, "cmux-team spawn-conductor") + "\n");
+  await cmux.send(conductor.surface, buildLaunchCommand(PROJECT_ROOT, "elevens spawn-conductor") + "\n");
 
   // 7. TASK_CREATED 通知送信（自動再割り当て用）
   await postMessage({
@@ -5162,7 +5162,7 @@ async function cmdTraceTask(): Promise<void> {
   const taskId = args[1];
   if (!taskId) {
     console.error("Error: task ID is required");
-    console.error("Usage: cmux-team trace-task <task-id>");
+    console.error("Usage: elevens trace-task <task-id>");
     process.exit(1);
   }
 
@@ -6099,9 +6099,9 @@ if (args[0] === "--version" || args[0] === "-v") {
     const pkgUrl = new URL("../../../package.json", import.meta.url);
     const pkg = JSON.parse(await readFile(pkgUrl, "utf8")) as { version?: string };
     if (!pkg.version) throw new Error("no version field");
-    console.log(`cmux-team ${pkg.version}`);
+    console.log(`elevens ${pkg.version}`);
   } catch {
-    console.log("cmux-team (version unknown)");
+    console.log("elevens (version unknown)");
   }
   process.exit(0);
 }
@@ -6213,7 +6213,7 @@ switch (command) {
       case "migrate-subscription": await cmdTokenMigrateSubscription(); break;
       default:
         console.error(`Unknown token subcommand: ${tokenSub ?? "(none)"}`);
-        console.error("Usage: cmux-team token add|list|remove|rotate|set-plan|promote|migrate-subscription");
+        console.error("Usage: elevens token add|list|remove|rotate|set-plan|promote|migrate-subscription");
         process.exit(1);
     }
     break;
@@ -6258,7 +6258,7 @@ switch (command) {
       process.exit(0);
     }
     console.error(`Unknown command: ${command}`);
-    console.error(`Run 'cmux-team --help' for usage.`);
+    console.error(`Run 'elevens --help' for usage.`);
     process.exit(1);
 }
 }

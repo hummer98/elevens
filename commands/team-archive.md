@@ -3,7 +3,7 @@ allowed-tools: Bash, Read
 description: "完了タスクをアーカイブする（closed → archived）"
 ---
 
-# /cmux-team:team-archive
+# /elevens:team-archive
 
 `task-state.json` で closed 状態のタスクをアーカイブディレクトリに移動する。
 

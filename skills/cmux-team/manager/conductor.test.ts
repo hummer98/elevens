@@ -181,7 +181,7 @@ describe("assignTask 状態遷移 (T232 / T421 kill+spawn)", () => {
     expect(sendSpy.mock.calls[0]?.[1]).toMatch(/^export /);
     expect(sendSpy.mock.calls[0]?.[1]).toContain(`CMUX_SURFACE=${conductor.surface}`);
     // 2 回目: launchCmd（cd '<root>' && spawn-conductor --task-prompt <quoted-path>）
-    expect(sendSpy.mock.calls[1]?.[1]).toMatch(/^cd '[^']+' && cmux-team spawn-conductor --task-prompt '/);
+    expect(sendSpy.mock.calls[1]?.[1]).toMatch(/^cd '[^']+' && elevens spawn-conductor --task-prompt '/);
     expect(sendSpy.mock.calls[1]?.[1]).toMatch(/'\n$/);
     // sendKey return は呼ばれない（kill+spawn 経路は shell コマンド送信のみ）
     expect(sendKeySpy.mock.calls.length).toBe(0);
@@ -229,7 +229,7 @@ describe("assignTask kill+spawn 経路 (T421)", () => {
 
     // launchCmd は cd '<root>' && ... の形式で、path 部分が single-quote で包まれている
     const launchCmdSent = sendSpy.mock.calls[1]?.[1] as string;
-    expect(launchCmdSent).toMatch(/^cd '[^']+' && cmux-team spawn-conductor --task-prompt '\/[^']+'\n$/);
+    expect(launchCmdSent).toMatch(/^cd '[^']+' && elevens spawn-conductor --task-prompt '\/[^']+'\n$/);
   }, 30000);
 
   // T421/D7 個別 throw 検証 (T424 M3): generateConductorTaskPrompt を spy で差し替え、

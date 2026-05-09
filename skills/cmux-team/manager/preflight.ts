@@ -148,7 +148,7 @@ export async function runPreflight(projectRoot: string): Promise<PreflightResult
 export function printPreflightIssues(result: PreflightResult): void {
   if (result.ok) return;
 
-  console.error("❌ cmux-team start: 前提チェックに失敗しました");
+  console.error("❌ elevens start: 前提チェックに失敗しました");
   console.error("");
 
   for (const issue of result.issues) {

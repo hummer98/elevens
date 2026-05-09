@@ -1,10 +1,10 @@
 ---
-name: cmux-team-guide
+name: guide
 description: >
-  cmux-team のヘルプ・リファレンス（読み取り専用）。使い方の説明、概念の解説、
+  elevens のヘルプ・リファレンス（読み取り専用）。使い方の説明、概念の解説、
   CLI コマンドリファレンス、トラブルシューティングを提供する。
-  Triggers: 「cmux-team の使い方」「〜とは」「ヘルプ」「help」「how to」等の
-  質問・解説リクエスト。操作の実行自体は cmux-team スキルが担当。
+  Triggers: 「elevens の使い方」「cmux-team の使い方」「〜とは」「ヘルプ」「help」「how to」等の
+  質問・解説リクエスト。操作の実行自体は team スキルが担当。
 ---
 
 # cmux-team ユーザーガイド

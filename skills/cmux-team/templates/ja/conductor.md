@@ -64,7 +64,7 @@ TaskCreate: "テンプレート修正" → task-3
 spawn-agent → Agent 起動成功 → TaskUpdate: task-1 → in_progress
 
 # 3. Agent 完了検出後に completed に
-cmux-team await-agent が STATUS=completed で返る → TaskUpdate: task-1 → completed
+elevens await-agent が STATUS=completed で返る → TaskUpdate: task-1 → completed
 
 # 4. 全タスク完了を確認してから結果統合へ
 ```
@@ -74,7 +74,7 @@ cmux-team await-agent が STATUS=completed で返る → TaskUpdate: task-1 → 
 ## Agent 起動手順
 
 > **重要（全 Agent ロール共通）:** heredoc 本文の Role 導入文の直後に `{{PROJECT_INSTRUCTIONS}}` を 1 行独立して残すこと。
-> `cmux-team spawn-agent` が prompt-file を読み、`.team/agent-instructions/<role>.md` の内容で置換する。
+> `elevens spawn-agent` が prompt-file を読み、`.team/agent-instructions/<role>.md` の内容で置換する。
 > overlay が無ければ空文字に置換され、余分な空行は残らない。placeholder を落とすと overlay が効かないので、仕上げ前に heredoc 内に残っていることを確認する。
 
 ```bash
@@ -108,7 +108,7 @@ AGENT_PROMPT
 # 注意: --bare は OAuth 認証（Claude Max）をスキップするため使用禁止
 # spawn-agent が cmux new-surface で同じ pane 内にタブを作成する
 
-RESULT=$(cmux-team spawn-agent \
+RESULT=$(elevens spawn-agent \
   --conductor-surface $CMUX_SURFACE \
   --role impl \
   --task-title "<サブタスクの簡潔な説明>" \
@@ -122,17 +122,17 @@ echo "Agent spawned: $AGENT_SURFACE"
 **1体ずつ確実に起動すること。** 起動確認（`spawn-agent` が exit code 0 を返す）してから次を起動する。
 
 **禁止事項:**
-- `cmux new-surface` で直接タブを作成してはならない — 必ず `cmux-team spawn-agent` を使う
+- `cmux new-surface` で直接タブを作成してはならない — 必ず `elevens spawn-agent` を使う
 - `cmux send` で直接 `claude` コマンドを送信してはならない
 
 ## Agent 監視ループ
 
-Agent を起動したら `cmux-team await-agent` で done マーカーを待機する（fs.watch による push 型通知）。ポーリング不要。**Agent が完了するまで次のステップに進まない。**
+Agent を起動したら `elevens await-agent` で done マーカーを待機する（fs.watch による push 型通知）。ポーリング不要。**Agent が完了するまで次のステップに進まない。**
 
 ```bash
 # spawn-agent の結果から AGENT_SURFACE を取得済みとする
-# cmux-team await-agent が done マーカー（Agent の Stop/SessionEnd hook が書き出す）を fs.watch で待機
-cmux-team await-agent --surface "$AGENT_SURFACE" --timeout 1800
+# elevens await-agent が done マーカー（Agent の Stop/SessionEnd hook が書き出す）を fs.watch で待機
+elevens await-agent --surface "$AGENT_SURFACE" --timeout 1800
 EXIT_CODE=$?
 
 case "$EXIT_CODE" in
@@ -150,9 +150,9 @@ case "$EXIT_CODE" in
 esac
 ```
 
-複数 Agent を並列実行する場合は、`--surface` をカンマ区切りで指定する（`cmux-team await-agent` は複数 surface に対応）。
+複数 Agent を並列実行する場合は、`--surface` をカンマ区切りで指定する（`elevens await-agent` は複数 surface に対応）。
 
-**完了判定（`cmux-team await-agent` の exit code）:**
+**完了判定（`elevens await-agent` の exit code）:**
 - `0` → **完了 / ask**（stdout の `STATUS=` 行で区別。`ask` なら質問にユーザー介入が必要な場合あり）
 - `10` → **クラッシュ**（PID 死亡 or SessionEnd hook が crashed を通知）
 - `2` → **タイムアウト**
@@ -199,7 +199,7 @@ cat > "$REVIEWER_PROMPT" << REVIEW_PROMPT
 REVIEW_PROMPT
 
 # Reviewer Agent spawn（--prompt-file でファイルパスだけを渡す）
-RESULT=$(cmux-team spawn-agent \
+RESULT=$(elevens spawn-agent \
   --conductor-surface $CMUX_SURFACE \
   --role reviewer \
   --task-title "Code Review" \
@@ -219,7 +219,7 @@ Reviewer 完了後、`{{OUTPUT_DIR}}/review.md` を確認する:
 
 Reviewer のタブは確認後に閉じる（正常終了なので close-agent）:
 ```bash
-cmux-team close-agent --surface $REVIEWER_SURFACE
+elevens close-agent --surface $REVIEWER_SURFACE
 ```
 
 ### レビューをスキップする場合
@@ -231,7 +231,7 @@ cmux-team close-agent --surface $REVIEWER_SURFACE
 1. 全 Agent が完了し、テストがパスしたことを確認
 2. Agent のタブを閉じる（正常完了なので close-agent）:
    ```bash
-   cmux-team close-agent --surface $AGENT_SURFACE
+   elevens close-agent --surface $AGENT_SURFACE
    ```
 3. 変更をコミットする:
    ```bash
@@ -269,27 +269,27 @@ cmux-team close-agent --surface $REVIEWER_SURFACE
    ```
 7. **タスクを close する**（task-state.json に状態を記録）— **`--deliverable-kind` 必須**。以下は merged kind の例（最も多いパターン）。他 kind（`pr` / `files` / `none`）については `conductor-role.md` Step 11 を参照:
    ```bash
-   cmux-team close-task --task-id <TASK_ID> --deliverable-kind merged \
+   elevens close-task --task-id <TASK_ID> --deliverable-kind merged \
      --merged-into {{CONDUCTOR_ID}}/task --merge-sha $(git rev-parse {{CONDUCTOR_ID}}/task) \
      --journal "<1行の日本語サマリー>"
    ```
 8. **完了通知を送信する**:
    ```bash
-   cmux-team send CONDUCTOR_DONE --surface $CMUX_SURFACE --success true
+   elevens send CONDUCTOR_DONE --surface $CMUX_SURFACE --success true
    ```
 9. **❯ プロンプトに戻る。次のタスクの割り当てを待つ。** daemon がリセット処理（`/clear` 送信）を行う。
 
 ## プロジェクト固有の追加指示（overlay）
 
 Agent プロンプト本文に `{{PROJECT_INSTRUCTIONS}}` プレースホルダを残しておくと、
-`cmux-team spawn-agent` が実行時に `.team/agent-instructions/<role>.md` の内容を
+`elevens spawn-agent` が実行時に `.team/agent-instructions/<role>.md` の内容を
 自動展開する。overlay ファイルが無い場合は空文字に置換される。
 
 overlay の編集:
-- `cmux-team get-agent-instructions --role <role>` で内容確認
-- `cmux-team set-agent-instructions --role <role> --from-file <path>` で更新
-- `cmux-team delete-agent-instructions --role <role>` で削除
-- `cmux-team list-agent-instructions` で全ロールの有無を一覧
+- `elevens get-agent-instructions --role <role>` で内容確認
+- `elevens set-agent-instructions --role <role> --from-file <path>` で更新
+- `elevens delete-agent-instructions --role <role>` で削除
+- `elevens list-agent-instructions` で全ロールの有無を一覧
 
 Conductor が heredoc で作る Agent プロンプトは、同じ `{{PROJECT_INSTRUCTIONS}}` を
 そのまま残せばよい（shell 変数展開の対象ではない）。
@@ -297,7 +297,7 @@ Conductor が heredoc で作る Agent プロンプトは、同じ `{{PROJECT_INS
 ## やらないこと（厳守）
 
 - **自分でコードを書く・ファイルを編集する** — Edit/Write ツールを使わない。必ず Agent に委譲する
-- **Claude の Agent ツール（サブエージェント）を使う** — Agent は必ず `cmux-team spawn-agent` で別タブに spawn する
+- **Claude の Agent ツール（サブエージェント）を使う** — Agent は必ず `elevens spawn-agent` で別タブに spawn する
 - main ブランチで作業する（worktree を使う）
 - Manager や Master に直接報告する（出力ファイルを書くだけ）
 - ユーザーに確認を求める（自律的に判断する）

@@ -1,7 +1,7 @@
 ---
-name: cmux-team-analyze
+name: analyze
 description: >
-  cmux-team のメトリクス解析・cohort 比較・介入評価・複数 task 横断トレンド・
+  elevens のメトリクス解析・cohort 比較・介入評価・複数 task 横断トレンド・
   trace DB 探索を DuckDB SQL で行うスキル。Triggers: 「メトリクス解析」
   「cohort 比較」「介入評価」「baseline 比較」「複数 task の傾向」「時系列 trend」
   「trace DB から〜」「DuckDB で〜」「§11 spec の SQL を実行」等の発言。

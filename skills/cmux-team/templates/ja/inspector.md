@@ -63,7 +63,7 @@ fi
 
 - 出力が空 → pass
 - 1 行でも出力される → **blocker (critical)**
-- ただし Implementer の impl-report に「該当ファイル・エラーは cleanup タスク T<id> に分離済み」と記載され、実際に `cmux-team show-task T<id>` で起票が確認できる場合のみ pass 扱いとする
+- ただし Implementer の impl-report に「該当ファイル・エラーは cleanup タスク T<id> に分離済み」と記載され、実際に `elevens show-task T<id>` で起票が確認できる場合のみ pass 扱いとする
 
 **禁止事項**:
 

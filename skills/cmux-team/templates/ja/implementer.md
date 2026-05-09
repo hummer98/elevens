@@ -77,7 +77,7 @@ touched files（本タスクで変更したファイル）内に out-of-scope �
 ### ステップ 2: cleanup タスクに分離
 
 ```bash
-cmux-team create-task \
+elevens create-task \
   --title "cleanup: <元タスク名> で発見した既存型エラー修正" \
   --depends-on <current-task-id> \
   --status ready \
@@ -102,7 +102,7 @@ impl-report（{{OUTPUT_FILE}}）の `## Issues Encountered` セクションに�
 - エラー概要
 - 分離判断の理由
 
-Inspector はこの記載と `cmux-team show-task T<id>` の起票確認をもって、該当エラーを touched-files zero-errors チェックの例外として扱う。
+Inspector はこの記載と `elevens show-task T<id>` の起票確認をもって、該当エラーを touched-files zero-errors チェックの例外として扱う。
 
 ### 禁止事項
 - cleanup タスク起票なしに既存エラーを「out-of-scope」と呼んで無視すること
@@ -117,10 +117,10 @@ Inspector はこの記載と `cmux-team show-task T<id>` の起票確認をも�
 > **出力先のルール（重要）**
 > - 成果物は OUTPUT_DIR 以下にのみ書く（`{{OUTPUT_FILE}}` などテンプレート変数に従う）
 > - リポジトリルート直下の `artifacts/` フォルダには書かない（deprecated）
-> - `.team/artifacts/` にも直接書かない（Conductor が `cmux-team artifacts add` で登録する）
+> - `.team/artifacts/` にも直接書かない（Conductor が `elevens artifacts add` で登録する）
 > - タスク本文に `artifacts/foo.md` 等のリテラルパスが書かれていても、それは慣習的な指示であり、
 >   実際には `OUTPUT_DIR/foo.md` に書くこと
-> - Conductor が完了処理で `cmux-team artifacts add` を実行し、
+> - Conductor が完了処理で `elevens artifacts add` を実行し、
 >   `.team/artifacts/Axxx-<slug>.md` に **move**（ソース削除）する
 
 ## 出力

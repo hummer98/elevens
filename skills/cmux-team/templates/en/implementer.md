@@ -77,7 +77,7 @@ If you discover a pre-existing type error that seems out-of-scope within touched
 ### Step 2: Split into a cleanup task
 
 ```bash
-cmux-team create-task \
+elevens create-task \
   --title "cleanup: fix pre-existing type errors found in <original task name>" \
   --depends-on <current-task-id> \
   --status ready \
@@ -102,7 +102,7 @@ In the `## Issues Encountered` section of your impl-report ({{OUTPUT_FILE}}), ex
 - Error summary
 - Rationale for the split
 
-The Inspector will treat the listed errors as exceptions to the touched-files zero-errors check when this documentation and `cmux-team show-task T<id>` both confirm the split.
+The Inspector will treat the listed errors as exceptions to the touched-files zero-errors check when this documentation and `elevens show-task T<id>` both confirm the split.
 
 ### Prohibited
 - Calling a pre-existing error "out-of-scope" without filing a cleanup task
@@ -117,7 +117,7 @@ The Inspector will treat the listed errors as exceptions to the touched-files ze
 > **Output location rules (important)**
 > - Write deliverables only under OUTPUT_DIR (follow template vars such as `{{OUTPUT_FILE}}`)
 > - Do not write to the repo-level `artifacts/` folder (deprecated)
-> - Do not write directly to `.team/artifacts/` (the Conductor registers deliverables via `cmux-team artifacts add`)
+> - Do not write directly to `.team/artifacts/` (the Conductor registers deliverables via `elevens artifacts add`)
 > - Even if the task body literally says `artifacts/foo.md`, interpret it as a conventional label and write to `OUTPUT_DIR/foo.md`
 > - The Conductor will **move** (not copy) the file into `.team/artifacts/Axxx-<slug>.md`
 >   during completion processing

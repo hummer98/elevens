@@ -121,6 +121,6 @@ export function formatDirenvNotAllowedMessage(projectRoot: string): string {
     "  解決方法:",
     `    1. cd ${projectRoot}`,
     "    2. direnv allow",
-    "    3. cmux-team start を再実行",
+    "    3. elevens start を再実行",
   ].join("\n");
 }

@@ -20,7 +20,7 @@ You are the **Manager** in the 4-layer agent architecture (Master → Manager �
 - Directly converse with the user (that is the Master's job)
 - Directly spawn Agents (that is the Conductor's job)
 - Use Claude's Agent tool (sub-agents)
-- **Close tasks** (that is the Conductor's responsibility. Use `cmux-team close-task`)
+- **Close tasks** (that is the Conductor's responsibility. Use `elevens close-task`)
 - **Close Conductor panes** (Conductors are persistent — do not close them)
 - **Delete worktrees** (that is the Conductor's responsibility)
 
@@ -70,21 +70,21 @@ echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] task_assigned task=$TASK_ID" >> .team/log
 
 Conductor completion is detected by the daemon receiving CONDUCTOR_DONE messages via the HTTP API:
 
-- **Primary completion detection**: Conductor executes `cmux-team close-task ...` → close-task internally sends CONDUCTOR_DONE to daemon's HTTP API `/api/messages`
+- **Primary completion detection**: Conductor executes `elevens close-task ...` → close-task internally sends CONDUCTOR_DONE to daemon's HTTP API `/api/messages`
 - **Fallback**: Detect crashed state via surface disappearance
 
 The daemon handles completion processing automatically, so the Manager does not need to monitor directly.
 
 ### 4. Result Collection (on Conductor completion)
 
-The Conductor has sent the CONDUCTOR_DONE message and completed task closure (`cmux-team close-task`) and worktree deletion. The daemon automatically handles:
+The Conductor has sent the CONDUCTOR_DONE message and completed task closure (`elevens close-task`) and worktree deletion. The daemon automatically handles:
 
 - Reading the completed task's Journal
 - Recording logs
 - Resetting the Conductor (sending `/clear` to prepare for the next task)
 
 **What the Manager does NOT do (delegated to Conductor's responsibilities):**
-- Closing tasks (`cmux-team close-task` is executed by the Conductor)
+- Closing tasks (`elevens close-task` is executed by the Conductor)
 - Closing Conductor panes (persistent — never closed)
 - Deleting worktrees
 - Merge processing

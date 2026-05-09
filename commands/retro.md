@@ -3,7 +3,7 @@ allowed-tools: Bash, Read, Glob, Grep
 description: "直近タスクのサマリーを分析してロール・設計・CLAUDE.md の改善点を提案"
 ---
 
-# /cmux-team:retro
+# /elevens:retro
 
 直近 N 件のクローズ/アボートタスクのサマリーを読み、繰り返しパターン・設計問題・
 ロールプロンプトの改善余地を分析してレポートする。

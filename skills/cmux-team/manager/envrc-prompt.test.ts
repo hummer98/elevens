@@ -195,7 +195,7 @@ describe("ensureEnvrcHookPrompt - 追記成功時の案内", () => {
       const allOutput = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
       expect(allOutput).toContain("CMUX_CLAUDE_HOOKS_DISABLED=1 を追記しました");
       expect(allOutput).toContain("direnv allow");
-      expect(allOutput).toContain("cmux-team start を再実行");
+      expect(allOutput).toContain("elevens start を再実行");
     } finally {
       logSpy.mockRestore();
     }

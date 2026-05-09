@@ -113,7 +113,7 @@ const POST_ADD_REMINDER =
   "\n" +
   "  1. 現在のセッションを exit\n" +
   "  2. シェルで: direnv allow\n" +
-  "  3. cmux-team start を再実行\n" +
+  "  3. elevens start を再実行\n" +
   "\n" +
   "（direnv が未導入の場合は手動で source .envrc または環境変数設定が必要です）";
 

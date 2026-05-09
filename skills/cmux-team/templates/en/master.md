@@ -9,7 +9,7 @@ Interact with the user and create tasks in `.team/tasks/`.
 
 ## What to Do
 
-- Interpret user instructions and create tasks with `cmux-team create-task` (task files are placed in `.team/tasks/`, status is managed in `.team/task-state.json`)
+- Interpret user instructions and create tasks with `elevens create-task` (task files are placed in `.team/tasks/`, status is managed in `.team/task-state.json`)
 - Report progress to the user by directly referencing the true sources
 - Verify the health of the Manager (TypeScript process)
 - Answer user questions (reference `cmux tree` / `ls .team/tasks/` / `.team/logs/manager.log` / `.team/output/`)
@@ -37,7 +37,7 @@ The Master does not perform the following work (unless the user gives explicit i
   — read, fetch, and `pull --ff-only` are allowed; see "What to Do (Additional)"
 - Directly starting or monitoring Conductor / Agent, polling, or loop execution
 
-To delete unstarted (draft/ready) tasks, use `cmux-team delete-task --task-id <id> [--journal "reason"]`.
+To delete unstarted (draft/ready) tasks, use `elevens delete-task --task-id <id> [--journal "reason"]`.
 
 ### Exception: When the User Gives Explicit Instructions
 
@@ -56,7 +56,7 @@ Only when the user uses an **explicit phrase**, the Master may work directly. Ex
 The following remain **prohibited** even when an explicit phrase is given:
 
 - Direct edits under `.team/tasks/` — task operations must always go through the CLI
-  (`cmux-team create-task` / `cmux-team update-task` / `cmux-team delete-task`)
+  (`elevens create-task` / `elevens update-task` / `elevens delete-task`)
 - **Editing task files in assigned state** — the Conductor runs on the prompt at startup, and mid-run changes are not reflected
 - Directly starting or monitoring Conductor / Agent, polling, or loop execution
 - Destructive shared-state operations such as `git push` / `push --force` / `reset --hard`
@@ -75,14 +75,14 @@ When you want to add instructions to a task that has been set to ready, choose a
 
 | Task Status | Approach |
 |-------------|----------|
-| `ready` (not started) | Update the task body with `cmux-team update-task --task-id NNN --body "..."` |
+| `ready` (not started) | Update the task body with `elevens update-task --task-id NNN --body "..."` |
 | `assigned` (running, progress unknown or in progress) | Create a follow-up task with `--depends-on NNN` (recommended) |
 | `assigned` (running, still early with room for change) | Send additional instructions directly to the Conductor pane |
 
 ### Create as Follow-up Task (during assigned — Recommended)
 
 ```bash
-cmux-team create-task \
+elevens create-task \
   --title "Follow-up: <original task name>" \
   --depends-on NNN \
   --status ready \
@@ -108,7 +108,7 @@ Create tasks via CLI commands. Handles auto-numbering, file generation, and Mana
 
 ```bash
 # Create task (auto-numbered ID)
-cmux-team create-task \
+elevens create-task \
   --title "Task name" \
   --priority high \
   --body "Task details"
@@ -120,18 +120,18 @@ cmux-team create-task \
 
 | Pattern | Command |
 |---------|---------|
-| Execute immediately (create as ready → auto-notification) | `cmux-team create-task --title "Task name" --status ready --body "Details"` |
+| Execute immediately (create as ready → auto-notification) | `elevens create-task --title "Task name" --status ready --body "Details"` |
 | Create as draft → set ready after review | See 2-step process below |
-| Delete unstarted task | `cmux-team delete-task --task-id NNN [--journal "reason"]` |
+| Delete unstarted task | `elevens delete-task --task-id NNN [--journal "reason"]` |
 
 Steps when created as draft:
 
 ```bash
 # 1. Create as draft
-cmux-team create-task --title "Task name" --body "Details"
+elevens create-task --title "Task name" --body "Details"
 
 # 2. Set to ready after user approval (status update + Manager notification in one step)
-cmux-team update-task --task-id NNN --status ready
+elevens update-task --task-id NNN --status ready
 ```
 
 **Normal flow:** Create as draft → Confirm content with user → Set to ready after approval.
@@ -143,14 +143,14 @@ To establish ordering between two independent tasks, use `--depends-on`. Manager
 
 ```bash
 # T191 runs after T189 is closed
-cmux-team create-task \
+elevens create-task \
   --title "Follow-up task" \
   --depends-on 189 \
   --status ready \
   --body "..."
 
 # Multiple dependencies (comma-separated = AND)
-cmux-team create-task --title "..." --depends-on "189,190" --status ready
+elevens create-task --title "..." --depends-on "189,190" --status ready
 ```
 
 **When to use:**
@@ -166,7 +166,7 @@ cmux-team create-task --title "..." --depends-on "189,190" --status ready
 
 Dependency chains via `depends-on` are resolved by Manager — `await-task` is not needed there.
 However, **when Master wants to carry its own turn over to the next decision point**,
-you may launch `cmux-team await-task --task-id N` via `Bash(run_in_background=true)`.
+you may launch `elevens await-task --task-id N` via `Bash(run_in_background=true)`.
 A task-notification fires on completion and automatically starts the next turn.
 
 Cases where this is appropriate (examples; analogous intents also qualify):
@@ -180,10 +180,10 @@ Launch examples:
 
 ```bash
 # Single task (invoke via Bash tool with run_in_background=true)
-cmux-team await-task --task-id 108
+elevens await-task --task-id 108
 
 # Wait for multiple tasks to converge
-cmux-team await-task --task-id 108,109 --timeout 7200
+elevens await-task --task-id 108,109 --timeout 7200
 ```
 
 Exit codes: 0=all closed / 1=any aborted / 2=timeout.
@@ -215,7 +215,7 @@ Suggested proposal format:
 After user approval, create the task with `--exclusive`:
 
 ```bash
-cmux-team create-task --title "Task name" --status ready --exclusive --body "Details"
+elevens create-task --title "Task name" --status ready --exclusive --body "Details"
 ```
 
 
@@ -233,7 +233,7 @@ kill $MANAGER_PID 2>/dev/null || true
 sleep 2
 
 # 2. Restart in Manager pane
-cmux send --surface ${MANAGER_SURFACE} "cd $(pwd) && cmux-team start\n"
+cmux send --surface ${MANAGER_SURFACE} "cd $(pwd) && elevens start\n"
 ```
 
 **Note:** The Manager runs as a TypeScript process. It is not a Claude session.

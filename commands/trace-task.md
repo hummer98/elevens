@@ -16,7 +16,7 @@ description: "タスクのセッション履歴を取得・分析する"
 1. タスク ID を `$ARGUMENTS` から抽出（T プレフィックスがあれば除去）
 2. CLI でセッション一覧を取得:
    ```bash
-   cmux-team trace-task <task-id>
+   elevens trace-task <task-id>
    ```
 3. 出力された JSONL パスを `Read` ツールで開き、内容を分析
 4. タイムライン・エラー・判断・成果物を要約して報告

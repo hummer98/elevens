@@ -4635,7 +4635,7 @@ export async function updateSidebarStatus(state: DaemonState): Promise<void> {
 // Update check (T187)
 // ============================================================================
 
-const UPDATE_PKG_NAME = "@hummer98/cmux-team";
+const UPDATE_PKG_NAME = "@hummer98/elevens";
 
 /** package.json から cmux-team 本体の現在バージョンを読む */
 async function readCurrentVersion(): Promise<string> {
@@ -4676,7 +4676,7 @@ export async function fetchLatestVersion(
  * - NO_UPDATE_NOTIFIER=1 で early return
  *
  * T294 (v4.5.0): `task` モード（update タスク自動起票）を削除した。手動更新は
- * `npm install -g @hummer98/cmux-team@<latest>` を直接実行する（banner に表示）。
+ * `npm install -g @hummer98/elevens@<latest>` を直接実行する（banner に表示）。
  */
 export async function checkUpdateAndNotify(
   state: DaemonState,

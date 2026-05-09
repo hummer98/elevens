@@ -22,10 +22,10 @@
 > **出力先のルール（重要）**
 > - 成果物は OUTPUT_DIR 以下にのみ書く（`{{OUTPUT_FILE}}` などテンプレート変数に従う）
 > - リポジトリルート直下の `artifacts/` フォルダには書かない（deprecated）
-> - `.team/artifacts/` にも直接書かない（Conductor が `cmux-team artifacts add` で登録する）
+> - `.team/artifacts/` にも直接書かない（Conductor が `elevens artifacts add` で登録する）
 > - タスク本文に `artifacts/foo.md` 等のリテラルパスが書かれていても、それは慣習的な指示であり、
 >   実際には `OUTPUT_DIR/foo.md` に書くこと
-> - Conductor が完了処理で `cmux-team artifacts add` を実行し、
+> - Conductor が完了処理で `elevens artifacts add` を実行し、
 >   `.team/artifacts/Axxx-<slug>.md` に **move**（ソース削除）する
 
 ## 出力フォーマット

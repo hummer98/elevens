@@ -63,7 +63,7 @@ fi
 
 - Empty output → pass
 - Any output line → **blocker (critical)**
-- Exception: if the Implementer's impl-report documents "this file/error has been split into cleanup task T<id>" and `cmux-team show-task T<id>` confirms the task exists, treat as pass
+- Exception: if the Implementer's impl-report documents "this file/error has been split into cleanup task T<id>" and `elevens show-task T<id>` confirms the task exists, treat as pass
 
 **Prohibited**:
 

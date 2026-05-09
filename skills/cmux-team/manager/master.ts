@@ -117,7 +117,7 @@ export async function spawnMaster(
 
     // cmux-team spawn-master ラッパー経由で起動（proxy ポートを動的解決）
     // cd で cwd を project root に揃えることで direnv / shell 初期 cwd に依存しない（task 446）。
-    await cmux.send(surface, buildLaunchCommand(projectRoot, "cmux-team spawn-master") + "\n");
+    await cmux.send(surface, buildLaunchCommand(projectRoot, "elevens spawn-master") + "\n");
 
     // タブ名設定
     const num = surface.replace("surface:", "");

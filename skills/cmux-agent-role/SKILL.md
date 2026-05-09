@@ -1,9 +1,9 @@
 ---
-name: cmux-agent-role
+name: agent-role
 description: >
-  Activated when running as a cmux-team sub-agent.
+  Activated when running as an elevens sub-agent.
   Triggers: .team/team.json exists AND current session was spawned by Conductor
-  (detect via: initial prompt contains "[CMUX-TEAM-AGENT]" marker).
+  (detect via: initial prompt contains "[CMUX-TEAM-AGENT]" marker — kept as-is for trigger identity).
   Provides: output protocol, task creation, inter-agent coordination.
 ---
 

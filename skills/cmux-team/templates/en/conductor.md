@@ -64,7 +64,7 @@ TaskCreate: "Fix templates" → task-3
 spawn-agent → Agent launched successfully → TaskUpdate: task-1 → in_progress
 
 # 3. Set to completed after Agent completion detected
-cmux-team await-agent returns STATUS=completed → TaskUpdate: task-1 → completed
+elevens await-agent returns STATUS=completed → TaskUpdate: task-1 → completed
 
 # 4. Confirm all tasks completed before proceeding to result integration
 ```
@@ -74,7 +74,7 @@ No user confirmation needed. Proceed through phases autonomously.
 ## Agent Launch Procedure
 
 > **IMPORTANT (applies to every agent role):** Keep `{{PROJECT_INSTRUCTIONS}}` on its own line in the heredoc body, right after the role preamble.
-> `cmux-team spawn-agent` reads the prompt-file at spawn time and replaces this placeholder with the contents of `.team/agent-instructions/<role>.md`.
+> `elevens spawn-agent` reads the prompt-file at spawn time and replaces this placeholder with the contents of `.team/agent-instructions/<role>.md`.
 > If the overlay file is absent the placeholder is replaced with the empty string (no extra blank lines remain). Dropping it silently disables the overlay, so double-check it before finalising.
 
 ```bash
@@ -108,7 +108,7 @@ AGENT_PROMPT
 # Note: --bare skips OAuth authentication (Claude Max), so do not use it
 # spawn-agent creates a tab within the same pane using cmux new-surface
 
-RESULT=$(cmux-team spawn-agent \
+RESULT=$(elevens spawn-agent \
   --conductor-surface $CMUX_SURFACE \
   --role impl \
   --task-title "<brief subtask description>" \
@@ -122,17 +122,17 @@ echo "Agent spawned: $AGENT_SURFACE"
 **Launch one at a time with confirmation.** Confirm launch (spawn-agent returns exit code 0) before launching the next.
 
 **Prohibited:**
-- Do not create tabs directly with `cmux new-surface` — always use `cmux-team spawn-agent`
+- Do not create tabs directly with `cmux new-surface` — always use `elevens spawn-agent`
 - Do not send `claude` commands directly with `cmux send`
 
 ## Agent Monitoring Loop
 
-After launching an Agent, use `cmux-team await-agent` to wait for the done marker (push-type notification via fs.watch). No polling needed. **Do not proceed to the next step until the Agent completes.**
+After launching an Agent, use `elevens await-agent` to wait for the done marker (push-type notification via fs.watch). No polling needed. **Do not proceed to the next step until the Agent completes.**
 
 ```bash
 # Assume AGENT_SURFACE is already obtained from spawn-agent result
-# cmux-team await-agent waits for the done marker (written by the Agent's Stop/SessionEnd hook) via fs.watch
-cmux-team await-agent --surface "$AGENT_SURFACE" --timeout 1800
+# elevens await-agent waits for the done marker (written by the Agent's Stop/SessionEnd hook) via fs.watch
+elevens await-agent --surface "$AGENT_SURFACE" --timeout 1800
 EXIT_CODE=$?
 
 case "$EXIT_CODE" in
@@ -150,9 +150,9 @@ case "$EXIT_CODE" in
 esac
 ```
 
-When running multiple Agents in parallel, pass comma-separated surfaces via `--surface` (`cmux-team await-agent` supports multiple surfaces).
+When running multiple Agents in parallel, pass comma-separated surfaces via `--surface` (`elevens await-agent` supports multiple surfaces).
 
-**Completion detection (`cmux-team await-agent` exit codes):**
+**Completion detection (`elevens await-agent` exit codes):**
 - `0` → **Completed / ask** (distinguished by the `STATUS=` line in stdout. For `ask`, user intervention may be required.)
 - `10` → **Crashed** (PID death or SessionEnd hook reports crashed)
 - `2` → **Timeout**
@@ -199,7 +199,7 @@ Stop when complete.
 REVIEW_PROMPT
 
 # Spawn Reviewer Agent (pass only the file path with --prompt-file)
-RESULT=$(cmux-team spawn-agent \
+RESULT=$(elevens spawn-agent \
   --conductor-surface $CMUX_SURFACE \
   --role reviewer \
   --task-title "Code Review" \
@@ -219,7 +219,7 @@ After Reviewer completes, check `{{OUTPUT_DIR}}/review.md`:
 
 Close the Reviewer tab after review (normal completion, so use close-agent):
 ```bash
-cmux-team close-agent --surface $REVIEWER_SURFACE
+elevens close-agent --surface $REVIEWER_SURFACE
 ```
 
 ### When Skipping Review
@@ -231,7 +231,7 @@ If there are no code changes (documentation/config files only), skip the review 
 1. Confirm all Agents have completed and tests pass
 2. Close Agent tabs (normal completion, so use close-agent):
    ```bash
-   cmux-team close-agent --surface $AGENT_SURFACE
+   elevens close-agent --surface $AGENT_SURFACE
    ```
 3. Commit changes:
    ```bash
@@ -269,28 +269,28 @@ If there are no code changes (documentation/config files only), skip the review 
    ```
 7. **Close the task** (record status in task-state.json) — **`--deliverable-kind` is required**. The example below is the `merged` kind (the most common case); for other kinds (`pr` / `files` / `none`) see `conductor-role.md` Step 11:
    ```bash
-   cmux-team close-task --task-id <TASK_ID> --deliverable-kind merged \
+   elevens close-task --task-id <TASK_ID> --deliverable-kind merged \
      --merged-into {{CONDUCTOR_ID}}/task --merge-sha $(git rev-parse {{CONDUCTOR_ID}}/task) \
      --journal "<one-line summary>"
    ```
 8. **Send completion notification**:
    ```bash
-   cmux-team send CONDUCTOR_DONE --surface $CMUX_SURFACE --success true
+   elevens send CONDUCTOR_DONE --surface $CMUX_SURFACE --success true
    ```
 9. **Return to the ❯ prompt. Wait for the next task assignment.** The daemon will perform reset processing (send `/clear`).
 
 ## Project-Specific Instructions (overlay)
 
 Leaving `{{PROJECT_INSTRUCTIONS}}` somewhere in an Agent prompt lets
-`cmux-team spawn-agent` inject the contents of `.team/agent-instructions/<role>.md`
+`elevens spawn-agent` inject the contents of `.team/agent-instructions/<role>.md`
 at spawn time. If the overlay file is missing or empty the placeholder is
 replaced with the empty string.
 
 Managing overlays:
-- `cmux-team get-agent-instructions --role <role>` — print the current overlay
-- `cmux-team set-agent-instructions --role <role> --from-file <path>` — write one
-- `cmux-team delete-agent-instructions --role <role>` — remove it (idempotent)
-- `cmux-team list-agent-instructions` — summary for every role
+- `elevens get-agent-instructions --role <role>` — print the current overlay
+- `elevens set-agent-instructions --role <role> --from-file <path>` — write one
+- `elevens delete-agent-instructions --role <role>` — remove it (idempotent)
+- `elevens list-agent-instructions` — summary for every role
 
 When the Conductor hand-builds a prompt with a heredoc, keep `{{PROJECT_INSTRUCTIONS}}`
 verbatim — shell does not expand it.
@@ -298,7 +298,7 @@ verbatim — shell does not expand it.
 ## What NOT to Do (Strictly Enforced)
 
 - **Write code or edit files yourself** — Do not use Edit/Write tools. Always delegate to Agents
-- **Use Claude's Agent tool (sub-agents)** — Agents must always be spawned via `cmux-team spawn-agent` as separate tabs
+- **Use Claude's Agent tool (sub-agents)** — Agents must always be spawned via `elevens spawn-agent` as separate tabs
 - Work on the main branch (use worktree)
 - Report directly to Manager or Master (just write output files)
 - Ask the user for confirmation (make autonomous decisions)

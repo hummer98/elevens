@@ -17,7 +17,7 @@
 > 一方 `<OUTPUT_DIR>` / `<WORKTREE_PATH>` / `<CONDUCTOR_ID>` / `<TASK_STATUS_FILE>` 等の angle-bracket 表記は
 > 「タスク割り当て時に conductor-task.md で渡された値を Conductor 自身が埋める」ことを意味する。
 > bash で実行する際は environment variable か実値に置換してから実行する。
-> **curly brace `{{...}}` で書いてよいのは `{{PROJECT_ROOT}}` / `{{MAIN_BRANCH}}` / 冒頭の `{{PROJECT_COMMON_INSTRUCTIONS}}` / 冒頭の `{{PROJECT_INSTRUCTIONS}}` のみ**（いずれも `template.ts:generateConductorRolePrompt` によって実値に置換される。なお下記 heredoc サンプル内の `{{PROJECT_INSTRUCTIONS}}` は literal として保持される — それは Agent 用の overlay placeholder であり、後ほど `cmux-team spawn-agent` が展開する。それ以外の変数を curly brace で書くと runtime prompt にそのまま残り bash が失敗する）。
+> **curly brace `{{...}}` で書いてよいのは `{{PROJECT_ROOT}}` / `{{MAIN_BRANCH}}` / 冒頭の `{{PROJECT_COMMON_INSTRUCTIONS}}` / 冒頭の `{{PROJECT_INSTRUCTIONS}}` のみ**（いずれも `template.ts:generateConductorRolePrompt` によって実値に置換される。なお下記 heredoc サンプル内の `{{PROJECT_INSTRUCTIONS}}` は literal として保持される — それは Agent 用の overlay placeholder であり、後ほど `elevens spawn-agent` が展開する。それ以外の変数を curly brace で書くと runtime prompt にそのまま残り bash が失敗する）。
 
 ## フェーズ実行
 
@@ -55,8 +55,8 @@ Researcher Agent を spawn し、調査レポート（research.md または repo
 1. Researcher 用 prompt ファイルを **Conductor が bash heredoc で手書きする**
    - `templates/<locale>/researcher.md` は `{{COMMON_HEADER}}` / `{{TOPIC}}` / `{{SUB_QUESTIONS}}` / `{{OUTPUT_FILE}}` 等の未展開変数を含むため、**`--prompt-file` に直接渡してはならない**（渡すと Agent に未展開のまま流れる）
    - `template.ts` に `generateResearcherPrompt()` は存在しない。Conductor 自身がテンプレートを参考に最終プロンプトを組み立てる
-2. `cmux-team spawn-agent --role researcher --prompt-file <上記ファイル>` で Agent 起動（後述の heredoc サンプル参照）
-3. Agent の完了を `cmux-team await-agent` で待つ
+2. `elevens spawn-agent --role researcher --prompt-file <上記ファイル>` で Agent 起動（後述の heredoc サンプル参照）
+3. Agent の完了を `elevens await-agent` で待つ
 4. `<OUTPUT_DIR>/research.md` が作成されていることを確認
 5. **Plan / Design Review は skip**（調査は実装計画を必要としない）
 6. Phase 4（Inspection）に進み、Inspector にレポート品質を検品させる
@@ -116,7 +116,7 @@ Inspector Agent を spawn し、実装結果を検品させる。**Implementer �
 ## Agent 起動手順
 
 > **重要（全 Agent ロール共通）:** heredoc 本文の Role 導入文（`## Role: ...` + 1-2 行の説明）の直後に、`{{PROJECT_INSTRUCTIONS}}` を 1 行独立して残すこと。
-> `cmux-team spawn-agent` が prompt-file を読み、このプレースホルダを `.team/agent-instructions/<role>.md` の内容で置換する。
+> `elevens spawn-agent` が prompt-file を読み、このプレースホルダを `.team/agent-instructions/<role>.md` の内容で置換する。
 > overlay が無ければ空文字に置換され、余分な空行は残らない。
 > placeholder を残し忘れると overlay が効かないため、仕上げ前に heredoc 内に 1 行独立で含まれていることを目視で確認すること。
 
@@ -154,7 +154,7 @@ AGENT_PROMPT
 MAX_WAIT_SEC=7200   # 最大 2 時間で諦める
 DEADLINE=$(( $(date +%s) + MAX_WAIT_SEC ))
 while true; do
-  RESULT=$(cmux-team spawn-agent \
+  RESULT=$(elevens spawn-agent \
     --conductor-surface $CMUX_SURFACE \
     --role impl \
     --task-title "<サブタスクの簡潔な説明>" \
@@ -229,7 +229,7 @@ cat > "$PROMPT_FILE" << RESEARCHER_PROMPT
 
 {{PROJECT_INSTRUCTIONS}}
 
-あなたは cmux-team の Researcher Agent です。以下のトピックを調査し、
+あなたは elevens の Researcher Agent です。以下のトピックを調査し、
 結果を ${OUTPUT_DIR}/research.md に書き出してください。
 
 ## リサーチトピック
@@ -259,14 +259,14 @@ ${OUTPUT_DIR}/research.md に Markdown で書き出すこと。以下のセク�
 RESEARCHER_PROMPT
 
 # impl agent と同じ throttle 対応の while ループで spawn する（コード省略、上記の impl 版と同構造）
-cmux-team spawn-agent \
+elevens spawn-agent \
   --conductor-surface "$CMUX_SURFACE" \
   --role researcher \
   --task-title "<調査トピック>" \
   --prompt-file "$PROMPT_FILE"
 
 # 完了待ち
-cmux-team await-agent --surface "$AGENT_SURFACE" --timeout 1800
+elevens await-agent --surface "$AGENT_SURFACE" --timeout 1800
 ```
 
 > **重要:** `templates/{ja,en}/researcher.md` は人間向けのリファレンスであり、`{{COMMON_HEADER}}` 等の未展開変数を含む。
@@ -275,7 +275,7 @@ cmux-team await-agent --surface "$AGENT_SURFACE" --timeout 1800
 
 ## Agent 監視ループ（await-agent）
 
-Agent を起動したら、`cmux-team await-agent` でイベント駆動で完了を待つ。**Agent が完了するまで次のステップに進まない。**
+Agent を起動したら、`elevens await-agent` でイベント駆動で完了を待つ。**Agent が完了するまで次のステップに進まない。**
 
 `await-agent` は Agent の Stop/SessionEnd hook が書き出す done マーカー（`.team/conductors/<conductor>/agent-done/<agent>.done`）を fs.watch で監視する。完了したら STDOUT に `STATUS=...` ほかを出力し、status に応じた exit code で終了する:
 
@@ -289,7 +289,7 @@ Agent を起動したら、`cmux-team await-agent` でイベント駆動で完�
 
 ```bash
 # 1 Agent 待ち
-OUT=$(cmux-team await-agent --surface "$AGENT_SURFACE" --timeout 1800)
+OUT=$(elevens await-agent --surface "$AGENT_SURFACE" --timeout 1800)
 EC=$?
 STATUS=$(echo "$OUT" | grep '^STATUS=' | head -1 | cut -d= -f2)
 
@@ -300,7 +300,7 @@ case "$STATUS" in
   ask)
     QUESTION=$(echo "$OUT" | grep '^QUESTION=' | head -1 | cut -d= -f2-)
     echo "Agent $AGENT_SURFACE: AskUserQuestion -> $QUESTION"
-    # → 必要に応じて cmux-team send-agent で追加指示を出す
+    # → 必要に応じて elevens send-agent で追加指示を出す
     ;;
   crashed)
     REASON=$(echo "$OUT" | grep '^REASON=' | head -1 | cut -d= -f2-)
@@ -323,14 +323,14 @@ esac
 
 ## Agent が途中で停止した場合の回復
 
-Agent が API エラー（レート制限 / overloaded / ネットワーク断）で停止していたら、`cmux-team send-agent` で再開プロンプトを送る。`cmux send` は PreToolUse hook でブロックされるので使わないこと。
+Agent が API エラー（レート制限 / overloaded / ネットワーク断）で停止していたら、`elevens send-agent` で再開プロンプトを送る。`cmux send` は PreToolUse hook でブロックされるので使わないこと。
 
 ```bash
 # 例: レート制限で止まった Agent に「続けてください」と送る
-cmux-team send-agent --surface $AGENT_SURFACE "続けてください"
+elevens send-agent --surface $AGENT_SURFACE "続けてください"
 
 # 例: 明示的にタスクを指示しなおす
-cmux-team send-agent --surface $AGENT_SURFACE "plan.md の 3 節から再開してください"
+elevens send-agent --surface $AGENT_SURFACE "plan.md の 3 節から再開してください"
 ```
 
 **検証ルール:** `send-agent` は `.team/team.json` を参照し、**この Conductor が spawn した Agent** にのみ送信を許可する。自己送信 / 他 Conductor / 他 Conductor の Agent / 存在しない surface は reject される。`spawn-agent` 直後で team.json に未反映でも最大 1 秒（200ms × 5 回）リトライされる。
@@ -340,7 +340,7 @@ cmux-team send-agent --surface $AGENT_SURFACE "plan.md の 3 節から再開し�
 > **プロジェクト独自の `artifacts/` フォルダは非推奨**
 >
 > 一部プロジェクトは repo 直下に `artifacts/` フォルダを持つ慣習があるが、
-> cmux-team 管理下のアーティファクトは `.team/artifacts/Axxx-*.md` に一元化する。
+> elevens 管理下のアーティファクトは `.team/artifacts/Axxx-*.md` に一元化する。
 > 既存の project-level `artifacts/` はタスク側で手動マイグレーションする（本スキルは触らない）。
 
 新順序は以下の 11 ステップ。**artifact 登録は commit の前**（worktree 内に artifact を commit 対象として取り込むため）。
@@ -348,7 +348,7 @@ cmux-team send-agent --surface $AGENT_SURFACE "plan.md の 3 節から再開し�
 1. 全フェーズが完了したことを確認（Inspection で GO 判定済み）
 2. Agent のタブを閉じる（正常完了なので close-agent を使う）:
    ```bash
-   cmux-team close-agent --surface $AGENT_SURFACE
+   elevens close-agent --surface $AGENT_SURFACE
    ```
 3. **結果サマリーを書き出す**（commit の前に書く）:
    ```bash
@@ -406,7 +406,7 @@ done
 
 #### 6-2. `--project-root` フラグで worktree に登録
 
-**重要**: `cmux-team artifacts add` は move 動作（ソース削除）であり、destPath は
+**重要**: `elevens artifacts add` は move 動作（ソース削除）であり、destPath は
 `<project-root>/.team/artifacts/Axxx-<slug>.md` に決まる。
 この Step の目的は、destPath を **worktree 内**に配置して次の git commit に
 含めることなので、`--project-root "$(pwd)"` で明示的にフラグ指定する。
@@ -415,7 +415,7 @@ done
 
 ```bash
 # この時点で cd <WORKTREE_PATH> 済みであること（Step 4）
-cmux-team artifacts add "$SRC" \
+elevens artifacts add "$SRC" \
   --project-root "$(pwd)" \
   --type <research|decision|session|spec|report> \
   --title "<タスク概要を 1 行で>"
@@ -439,7 +439,7 @@ git add .team/artifacts/
 
 #### 6-4. 登録された artifact ID を控える
 
-`cmux-team artifacts add` の stdout から `Axxx` を拾い、後段の完了レポートの
+`elevens artifacts add` の stdout から `Axxx` を拾い、後段の完了レポートの
 【成果】項目に記載する。
 
 ### Step 6.5: commit 前の残課題チェック（厳守）
@@ -453,7 +453,7 @@ Inspector が GO を出した場合でも minor 以上の指摘が残ってい�
 
 - 禁止: 「後続タスクで」「別タスクとして起票予定」と書いて先送りする
 - 例外: 修正に他コンポーネント全体の設計変更が必要で本タスクのスコープを明確に超える場合のみ先送り可
-  - その場合は**実際に `cmux-team create-task` を呼んで起票し、タスク ID を summary.md に記載**してから先へ進む
+  - その場合は**実際に `elevens create-task` を呼んで起票し、タスク ID を summary.md に記載**してから先へ進む
   - 「起票予定」は禁止。起票してから「T○○ として切り出した」と書くこと
 
 **2. 自分が touch したファイルの tsc エラーが増えていないか**
@@ -653,7 +653,7 @@ fi
 完了通知は `--success false --reason "<短い日本語>"` で送信する（**reason は必須**。空だと manager.log の `conductor_done_unresolved` に `reason=-` で残りデバッグ不能になる）:
 
 ```bash
-cmux-team send CONDUCTOR_DONE --surface $CMUX_SURFACE \
+elevens send CONDUCTOR_DONE --surface $CMUX_SURFACE \
   --success false \
   --reason "Step 8 semantic resolution unresolvable: <failure_mode 短文>"
 ```
@@ -664,7 +664,7 @@ cmux-team send CONDUCTOR_DONE --surface $CMUX_SURFACE \
 - `failure_mode`: `spec_divergence` / `test_failed` / `tsc_failed` / `missing_context` / `scope_violation` / `iteration_limit` のいずれか
 - `required_input`: 人間に必要な判断（採用方針の指示など）
 - worktree は削除せず残す（人間が手動で rebase / 再投入できるよう）
-- タスク状態: `aborted` に遷移します（worktree / branch は温存）。再投入するには `cmux-team restart-task --task-id <TASK_ID>` を実行してください。中止したい場合はそのまま放置するか `cmux-team delete-task --task-id <TASK_ID>` で削除します。
+- タスク状態: `aborted` に遷移します（worktree / branch は温存）。再投入するには `elevens restart-task --task-id <TASK_ID>` を実行してください。中止したい場合はそのまま放置するか `elevens delete-task --task-id <TASK_ID>` で削除します。
 
 **この場合 `close-task` は呼ばない。** daemon 側で task-state を `aborted` に倒し、journal に `conductor_done_unresolved` を記録します（reason=judgment_pending）。人間は `restart-task` で再投入するか判断します。
 
@@ -717,12 +717,12 @@ fi
 - local `{{MAIN_BRANCH}}` の HEAD SHA
 - `git status` の出力（dirty files / ahead-behind）
 - worktree は削除せず残す（人間が手動で ff-only / 再投入できるよう）
-- タスク状態: `aborted` に遷移します（worktree / branch は温存）。再投入するには `cmux-team restart-task --task-id <TASK_ID>` を実行してください。中止したい場合はそのまま放置するか `cmux-team delete-task --task-id <TASK_ID>` で削除します。
+- タスク状態: `aborted` に遷移します（worktree / branch は温存）。再投入するには `elevens restart-task --task-id <TASK_ID>` を実行してください。中止したい場合はそのまま放置するか `elevens delete-task --task-id <TASK_ID>` で削除します。
 
 完了通知は `--success false --reason "<短い日本語>"` で送信する（**reason は必須**。空だと manager.log の `conductor_done_unresolved` に `reason=-` で残りデバッグ不能になる）:
 
 ```bash
-cmux-team send CONDUCTOR_DONE --surface $CMUX_SURFACE \
+elevens send CONDUCTOR_DONE --surface $CMUX_SURFACE \
   --success false \
   --reason "Step 9 ff-only merge failed: <ブランチ名と原因要約>"
 ```
@@ -743,22 +743,22 @@ git branch -d <タスク割り当てで指定されたブランチ名> 2>/dev/nu
 
 ```bash
 # ローカル ff-only マージ（最も多いパターン）
-cmux-team close-task --task-id <TASK_ID> --deliverable-kind merged \
+elevens close-task --task-id <TASK_ID> --deliverable-kind merged \
   --merged-into <ブランチ名> --merge-sha $(git rev-parse <ブランチ名>) \
   --journal "<1行の日本語サマリー>"
 
 # Pull Request 納品
-cmux-team close-task --task-id <TASK_ID> --deliverable-kind pr \
+elevens close-task --task-id <TASK_ID> --deliverable-kind pr \
   --pr-url <PR URL> \
   --journal "<1行の日本語サマリー>"
 
 # 調査系・ドキュメントのみ（branch を残さない）
-cmux-team close-task --task-id <TASK_ID> --deliverable-kind files \
+elevens close-task --task-id <TASK_ID> --deliverable-kind files \
   --deliverable <path1> --deliverable <path2> \
   --journal "<1行の日本語サマリー>"
 
 # 納品物なし（judgment 系を除く正常終了のみ。journal は強く推奨）
-cmux-team close-task --task-id <TASK_ID> --deliverable-kind none \
+elevens close-task --task-id <TASK_ID> --deliverable-kind none \
   --journal "<納品物なしの理由>"
 ```
 
@@ -793,24 +793,24 @@ cmux-team close-task --task-id <TASK_ID> --deliverable-kind none \
 ## プロジェクト固有の追加指示（overlay）
 
 Agent プロンプト本文に `{{PROJECT_INSTRUCTIONS}}` プレースホルダを残しておくと、
-`cmux-team spawn-agent` が実行時に `.team/agent-instructions/<role>.md` の内容を
+`elevens spawn-agent` が実行時に `.team/agent-instructions/<role>.md` の内容を
 自動展開する。overlay ファイルが無い場合は空文字に置換される。
 
 overlay の編集:
-- `cmux-team get-agent-instructions --role <role>` で内容確認
-- `cmux-team set-agent-instructions --role <role> --from-file <path>` で更新
-- `cmux-team delete-agent-instructions --role <role>` で削除
-- `cmux-team list-agent-instructions` で全ロールの有無を一覧
+- `elevens get-agent-instructions --role <role>` で内容確認
+- `elevens set-agent-instructions --role <role> --from-file <path>` で更新
+- `elevens delete-agent-instructions --role <role>` で削除
+- `elevens list-agent-instructions` で全ロールの有無を一覧
 
 Conductor が heredoc で作る Agent プロンプトは、同じ `{{PROJECT_INSTRUCTIONS}}` を
 そのまま残せばよい（shell 変数展開の対象ではない）。role alias（`impl` → `implementer`,
-`reviewer` → `design-reviewer`）は `cmux-team spawn-agent --role` 側で正規化される。
+`reviewer` → `design-reviewer`）は `elevens spawn-agent --role` 側で正規化される。
 
 ## やらないこと（厳守）
 
 - **自分でコードを書く・ファイルを編集する** — Edit/Write ツールを使わない。必ず Agent に委譲する
-- **Claude の Agent ツール（サブエージェント）を使う** — Agent は必ず `cmux-team spawn-agent` で別タブに spawn する
-- **他の surface に `cmux send` / `cmux send-key` で直接送信する** — 禁止。PreToolUse hook で実行時にブロックされる。Agent の起動は `cmux-team spawn-agent`、Agent への追加指示は `cmux-team send-agent --surface <agent-surface> <message>`、Agent の正常終了は `cmux-team close-agent`、強制終了（crash 扱い）は `cmux-team kill-agent` を使う。他の Conductor surface（自分以外）は一切触らない。他の Conductor を Inspector/Implementer として流用するのも禁止
+- **Claude の Agent ツール（サブエージェント）を使う** — Agent は必ず `elevens spawn-agent` で別タブに spawn する
+- **他の surface に `cmux send` / `cmux send-key` で直接送信する** — 禁止。PreToolUse hook で実行時にブロックされる。Agent の起動は `elevens spawn-agent`、Agent への追加指示は `elevens send-agent --surface <agent-surface> <message>`、Agent の正常終了は `elevens close-agent`、強制終了（crash 扱い）は `elevens kill-agent` を使う。他の Conductor surface（自分以外）は一切触らない。他の Conductor を Inspector/Implementer として流用するのも禁止
 - **コード変更を伴うタスクの summary.md を artifact 化する** — artifact は調査・設計判断・セッション要約の記録用。コード変更タスクの summary.md は task run 側の成果物であり artifact の役割ではない
 - {{MAIN_BRANCH}} ブランチで作業する（worktree を使う）
 - Manager や Master に直接報告する（出力ファイルを書くだけ）

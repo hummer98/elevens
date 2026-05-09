@@ -1,7 +1,7 @@
 ---
-name: cmux-team
+name: team
 description: >
-  Use when orchestrating multi-agent development via cmux.
+  Use when orchestrating multi-agent development via elevens / cmux / c11.
   Triggers: .team/ directory exists, user says "team", "spawn agents",
   "parallel", "sub-agent", or any /team-* command is invoked.
   Provides: agent spawning, monitoring, result collection, synchronization protocols.

@@ -119,7 +119,7 @@ description: "要件を対話的にブレストし仕様を策定する"
 
 次のステップ:
   タスクを作成して設計・リサーチ等を Conductor に委譲してください。
-  例: cmux-team create-task --title "アーキテクチャ設計" --status ready --body "要件定義に基づき設計を行う"
+  例: elevens create-task --title "アーキテクチャ設計" --status ready --body "要件定義に基づき設計を行う"
 ```
 
 ## 引数

@@ -145,9 +145,9 @@ export async function launchConductor(
         `launchConductor: no sessionId for task ${opts.resumeTaskId} (opts.resumeSessionId / taskState lookup both empty)`,
       );
     }
-    launchCmd = buildLaunchCommand(projectRoot, `cmux-team spawn-conductor --resume ${sessionId}`);
+    launchCmd = buildLaunchCommand(projectRoot, `elevens spawn-conductor --resume ${sessionId}`);
   } else {
-    launchCmd = buildLaunchCommand(projectRoot, "cmux-team spawn-conductor");
+    launchCmd = buildLaunchCommand(projectRoot, "elevens spawn-conductor");
   }
 
   // backend が渡されない場合はデフォルトの ClaudeCodeBackend を使う（後方互換）。
@@ -576,7 +576,7 @@ export async function assignTask(
       );
     }
     const quotedPath = shellQuote(promptFile);
-    const launchCmd = buildLaunchCommand(projectRoot, `cmux-team spawn-conductor --task-prompt ${quotedPath}`);
+    const launchCmd = buildLaunchCommand(projectRoot, `elevens spawn-conductor --task-prompt ${quotedPath}`);
 
     const env: Record<string, string> = {
       CMUX_SURFACE: conductor.surface,

@@ -157,7 +157,7 @@ describe("printPreflightIssues", () => {
       console.error = origErr;
     }
     const joined = logs.join("\n");
-    expect(joined).toContain("cmux-team start");
+    expect(joined).toContain("elevens start");
     expect(joined).toContain("git リポジトリではありません");
     expect(joined).toContain("/tmp/foo");
     expect(joined).toContain("git init");

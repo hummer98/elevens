@@ -3,13 +3,13 @@ allowed-tools: Bash, Read, Edit, Monitor
 description: "events stream を監視して PR merge / conflict resolve / pull / escalation を自動処理する"
 ---
 
-# /cmux-team:watch
+# /elevens:watch
 
-`.team/logs/events.jsonl` を `cmux-team events --follow` で tail し、Master 自身が `task_completed` の自動 PR merge / conflict resolve / `git pull --ff-only` を実行し、判断が必要な escalation event を user に提示する opt-in な watch コマンドです。
+`.team/logs/events.jsonl` を `elevens events --follow` で tail し、Master 自身が `task_completed` の自動 PR merge / conflict resolve / `git pull --ff-only` を実行し、判断が必要な escalation event を user に提示する opt-in な watch コマンドです。
 
 ## 設計方針 / 注意事項
 
-- **opt-in**: user が能動的に `/cmux-team:watch` を invoke した時のみ動く。常駐させない
+- **opt-in**: user が能動的に `/elevens:watch` を invoke した時のみ動く。常駐させない
 - **自動範囲**: `task_completed` に対する PR merge（squash + delete-branch）/ conflict resolve / main ブランチへの `git pull --ff-only` までを Master が自走する。それ以外の判断は escalate
 - **state は外部に持たない**: 過去 event の遡及処理はしない。Master の context が `/clear` 等で消えた場合は、user に再 invoke してもらう
 - **保守的に**: 迷ったら escalate。複雑な判断を自動化しない
@@ -22,12 +22,12 @@ Monitor を起動する **前に** 以下を順序通りに実行する。1 つ�
 
 ```bash
 if [ ! -f .team/daemon.pid ]; then
-  echo "Error: cmux-team daemon が起動していません。先に \`cmux-team start\` を実行してください。"
+  echo "Error: elevens daemon が起動していません。先に \`elevens start\` を実行してください。"
   exit 1
 fi
 
-cmux-team status > /tmp/cmux-team-watch-status.txt 2>&1 || {
-  echo "Error: cmux-team status が応答しません。daemon が異常停止している可能性があります。"
+elevens status > /tmp/cmux-team-watch-status.txt 2>&1 || {
+  echo "Error: elevens status が応答しません。daemon が異常停止している可能性があります。"
   cat /tmp/cmux-team-watch-status.txt
   exit 1
 }
@@ -37,7 +37,7 @@ cmux-team status > /tmp/cmux-team-watch-status.txt 2>&1 || {
 
 ```bash
 if [ ! -f .team/logs/events.jsonl ]; then
-  echo "Error: .team/logs/events.jsonl が見つかりません。events writer が動作していない可能性があります。daemon を最新版で起動し直してください（cmux-team v4.22.0+ が必要）。"
+  echo "Error: .team/logs/events.jsonl が見つかりません。events writer が動作していない可能性があります。daemon を最新版で起動し直してください（elevens v4.22.0+ が必要）。"
   exit 1
 fi
 ```
@@ -45,8 +45,8 @@ fi
 ### 3. events サブコマンド存在確認
 
 ```bash
-if ! cmux-team events --help > /dev/null 2>&1; then
-  echo "Error: 'cmux-team events' サブコマンドが利用できません。cmux-team v4.22.0 以上が必要です。\`npm install -g @hummer98/cmux-team@latest\` で更新してください。"
+if ! elevens events --help > /dev/null 2>&1; then
+  echo "Error: 'elevens events' サブコマンドが利用できません。elevens v4.22.0 以上が必要です。\`npm install -g @hummer98/elevens@latest\` で更新してください。"
   exit 1
 fi
 ```
@@ -58,7 +58,7 @@ fi
 ### コマンド
 
 ```bash
-cmux-team events --follow --types task_completed,task_completed_state_mismatch,task_aborted,task_sync_guard_rejected,task_reverted_to_ready,conductor_done_unresolved,conductor_disconnect_timeout,conductor_asking --format json
+elevens events --follow --types task_completed,task_completed_state_mismatch,task_aborted,task_sync_guard_rejected,task_reverted_to_ready,conductor_done_unresolved,conductor_disconnect_timeout,conductor_asking --format json
 ```
 
 `--types` には介入要 8 event を完全一致で指定する（順序は任意、過不足なし）:
@@ -79,7 +79,7 @@ cmux-team events --follow --types task_completed,task_completed_state_mismatch,t
 | param | value |
 |---|---|
 | `command` | 上記のコマンド全文 |
-| `description` | `cmux-team events stream watching for task_completed / escalation events` |
+| `description` | `elevens events stream watching for task_completed / escalation events` |
 | `persistent` | **`true`**（session 終了まで動き続ける） |
 
 `persistent: true` で起動すると stdout の各行（= 1 event JSON）が Master への通知になる。Master は次節の protocol に従って各行を parse・処理する。
@@ -182,7 +182,7 @@ Conductor が `close-task` を呼ばずに DONE を返した異常完了。**自
   worktree_path: <絶対パス>
   journal_summary:
     <J を多行表示>
-  → 手動で worktree を確認し、必要なら `cmux-team close-task --task-id T<NNN> --deliverable-kind ...` を実行してください。
+  → 手動で worktree を確認し、必要なら `elevens close-task --task-id T<NNN> --deliverable-kind ...` を実行してください。
 ```
 
 ### `task_aborted` (`reason == judgment_pending`)
@@ -274,7 +274,7 @@ AskUserQuestion を pass through する。
 ### 表示原則
 
 - **長い JSON はそのまま出さない**。Master が parse して必要 field のみ提示する
-- **journal_summary は多行で OK** だが、500 文字を超える場合は末尾省略 + 「`cmux-team trace-task T<NNN>` で全文取得可能」と案内する
+- **journal_summary は多行で OK** だが、500 文字を超える場合は末尾省略 + 「`elevens trace-task T<NNN>` で全文取得可能」と案内する
 - **worktree_path は絶対パス** で出す（user が cd しやすいように）
 - **task_id は `T<NNN>` 形式**（spec §6.1）。`task_id: T123` のように prefix 付きで表示
 - **`conductor_surface` は `surface:N`** 形式（spec §6 注記）。`conductor-N` 等の別名は使わない
@@ -296,7 +296,7 @@ AskUserQuestion を pass through する。
 - 抜けるだけなら `/clear` を実行してください（Monitor も session 終了で自動停止します）。最も推奨される抜け方です
 - watch を止めたいときは「stop watching」「watch やめて」など明示してください。Master が `TaskStop` で Monitor を kill して 1 行報告します
 - session を抜ける（Claude Code を終了する）場合も Monitor は自動で停止します
-- Master の context が消えた場合は再度 `/cmux-team:watch` を invoke してください（state はファイルに永続化していないので、過去 event を遡及処理することはありません）
+- Master の context が消えた場合は再度 `/elevens:watch` を invoke してください（state はファイルに永続化していないので、過去 event を遡及処理することはありません）
 
 ## Forward-compat 動作
 
@@ -304,11 +304,11 @@ events spec §8 に従い、reader である本コマンドは以下のとおり
 
 | 異常 | 動作 |
 |---|---|
-| `schema_version` が `2` 以外 | `cmux-team events` 側で skip + warn（events-cli 実装済み）。Master 側では何もしない |
-| 未知 `event` | `cmux-team events` の `KNOWN_EVENTS` で skip + warn。本コマンドの `--types` filter で更に絞られる |
+| `schema_version` が `2` 以外 | `elevens events` 側で skip + warn（events-cli 実装済み）。Master 側では何もしない |
+| 未知 `event` | `elevens events` の `KNOWN_EVENTS` で skip + warn。本コマンドの `--types` filter で更に絞られる |
 | 未知 `reason` / `kind` enum 値 | Master が exhaustive switch を **書かない**。default branch で `[log]` に流す（`task_aborted` の方針を `task_sync_guard_rejected.kind` 等にも適用） |
-| 必須 field 欠損 | `cmux-team events` 側で skip + warn。Master は受信しない |
-| JSON parse 失敗 | `cmux-team events` 側で skip + warn |
+| 必須 field 欠損 | `elevens events` 側で skip + warn。Master は受信しない |
+| JSON parse 失敗 | `elevens events` 側で skip + warn |
 | stdout に warn が紛れる | warn は **stderr** に出るので Monitor の通知（stdout 行）には混入しない |
 
 reader の責務は「自分が知っている event を正しく扱う」こと。「未知を遮断する」ことではない（spec §8）。

@@ -1,12 +1,12 @@
 ---
-name: cmux-team-gh
+name: gh
 description: >
   Use when reading GitHub issues / PRs (github.com or GitHub Enterprise) from
   the current project. Triggers: mention of an issue/PR number (e.g. "#272",
   "issue 272", "PR #42"), user asks to run `gh issue`, `gh pr`, `ghe issue`,
   `ghe pr`, wants to see review / comment status, or asks "show me open issues
-  / review requests / recent closed PRs". Use `cmux-team issue` /
-  `cmux-team pr` / `cmux-team gh` instead of invoking `gh` directly for READ
+  / review requests / recent closed PRs". Use `elevens issue` /
+  `elevens pr` / `elevens gh` instead of invoking `gh` directly for READ
   operations — the local SQLite cache avoids rate limit exhaustion. Writing
   (create / comment / close / merge / review) still goes through `gh`.
 ---

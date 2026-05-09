@@ -41,15 +41,15 @@ const en = {
   no_running_agents: "No running agents.",
   no_artifacts: "No artifacts found.",
   artifact_id_required:
-    "Error: artifact ID is required\nUsage: cmux-team artifacts show <id>",
+    "Error: artifact ID is required\nUsage: elevens artifacts show <id>",
   artifact_id_required_open:
-    "Error: artifact ID is required\nUsage: cmux-team artifacts open <id>",
+    "Error: artifact ID is required\nUsage: elevens artifacts open <id>",
   search_query_required:
-    "Error: search query is required\nUsage: cmux-team artifacts search <query>",
+    "Error: search query is required\nUsage: elevens artifacts search <query>",
   artifact_add_file_required:
-    "Error: file path is required\nUsage: cmux-team artifacts add <file> [--type <type>] [--title <title>] [--task <id>] [--tags <tag1,tag2>]",
+    "Error: file path is required\nUsage: elevens artifacts add <file> [--type <type>] [--title <title>] [--task <id>] [--tags <tag1,tag2>]",
   dashboard_startup_hint:
-    "Hint: Run 'cmux-team start' in a TTY environment",
+    "Hint: Run 'elevens start' in a TTY environment",
   task_section_header: "Task",
 
   // ── テンプレートメッセージ（tf() で変数展開） ────────────────────────────────
@@ -64,11 +64,11 @@ const en = {
 
   // ── テンプレートエラーメッセージ ──────────────────────────────────────────────
   template_dir_not_found:
-    "Template directory not found. Please run: npm install -g @hummer98/cmux-team",
+    "Template directory not found. Please run: npm install -g @hummer98/elevens",
   conductor_role_template_not_found:
-    "Conductor role template not found. Please run: npm install -g @hummer98/cmux-team",
+    "Conductor role template not found. Please run: npm install -g @hummer98/elevens",
   conductor_task_template_not_found:
-    "Conductor task template not found. Please run: npm install -g @hummer98/cmux-team",
+    "Conductor task template not found. Please run: npm install -g @hummer98/elevens",
 
   // ── e2e.ts ────────────────────────────────────────────────────────────────────
   e2e_daemon_not_confirmed:
@@ -91,10 +91,10 @@ const en = {
                              also: CMUX_TEAM_PROJECT_ROOT_CONFIRM=1 env)`,
 
   help_start: `
-cmux-team start -- launch daemon + spawn Master + show dashboard
+elevens start -- launch daemon + spawn Master + show dashboard
 
 Usage:
-  cmux-team start [--layout=<wide|16x9>] [--sleep-prevention=<off|idle|aggressive>] [--no-sleep-prevention]
+  elevens start [--layout=<wide|16x9>] [--sleep-prevention=<off|idle|aggressive>] [--no-sleep-prevention]
 
 Options:
   --layout <wide|16x9>     layout mode (default: 16x9, or config.json layout)
@@ -122,10 +122,10 @@ Notes:
 `,
 
   help_send: `
-cmux-team send -- send a message to the queue
+elevens send -- send a message to the queue
 
 Usage:
-  cmux-team send <type> [options]
+  elevens send <type> [options]
 
 Types and required/optional options:
   TASK_CREATED
@@ -179,37 +179,37 @@ Types and required/optional options:
     (no options)
 
 Examples:
-  cmux-team send TASK_CREATED --task-id 035 --task-file .team/tasks/035-example.md
-  cmux-team send SHUTDOWN
-  cmux-team send CONDUCTOR_DONE --surface surface:210 --success true
+  elevens send TASK_CREATED --task-id 035 --task-file .team/tasks/035-example.md
+  elevens send SHUTDOWN
+  elevens send CONDUCTOR_DONE --surface surface:210 --success true
 `,
 
   help_status: `
-cmux-team status -- show team status
+elevens status -- show team status
 
 Usage:
-  cmux-team status [options]
+  elevens status [options]
 
 Options:
   --log <N>     number of log lines to show (optional, default 10)
 
 Examples:
-  cmux-team status
-  cmux-team status --log 20
+  elevens status
+  elevens status --log 20
 
 Token Pool (T323):
   When token pool is enabled (CMUX_TEAM_TOKEN_POOL=1 / config / global yaml),
   the status output prepends a token pool header (capacity / next reset) and
   appends per-surface handle / utilization / cap_pct columns. When disabled,
   the layout is identical to the legacy output.
-  See: cmux-team pool status   for the full per-token dashboard.
+  See: elevens pool status   for the full per-token dashboard.
 `,
 
   help_spawn_conductor: `
-cmux-team spawn-conductor -- launch Claude Code for Conductor on the current surface (self-register)
+elevens spawn-conductor -- launch Claude Code for Conductor on the current surface (self-register)
 
 Usage:
-  cmux-team spawn-conductor [--resume <session-id>] [--task-prompt <path>] [--model <model>]
+  elevens spawn-conductor [--resume <session-id>] [--task-prompt <path>] [--model <model>]
 
 Environment:
   CMUX_SURFACE  Conductor surface ID (optional; falls back to cmux identify caller.surface_ref)
@@ -226,14 +226,14 @@ Notes:
     pre-reserved entry (T421).
   - Dynamically resolves logging proxy port and exec's Claude Code.
   - Launched with --dangerously-skip-permissions.
-  - T421: this command replaces the deprecated 'cmux-team conductor' / 'cmux-team resume'.
+  - T421: this command replaces the deprecated 'elevens conductor' / 'elevens resume'.
 `,
 
   help_spawn_agent: `
-cmux-team spawn-agent -- launch a sub-agent
+elevens spawn-agent -- launch a sub-agent
 
 Usage:
-  cmux-team spawn-agent --conductor-surface <surface> --role <role> (--prompt <text> | --prompt-file <path>) [options]
+  elevens spawn-agent --conductor-surface <surface> --role <role> (--prompt <text> | --prompt-file <path>) [options]
 
 Options:
   --conductor-surface <surface>   Conductor surface ID (required)
@@ -244,8 +244,8 @@ Options:
   --model <model>                 model to use (default: config.models.agent or "{model}")
 
 Examples:
-  cmux-team spawn-agent --conductor-surface surface:210 --role researcher --prompt "Research the API endpoints"
-  cmux-team spawn-agent --conductor-surface surface:210 --role implementer --prompt-file .team/prompts/task.md
+  elevens spawn-agent --conductor-surface surface:210 --role researcher --prompt "Research the API endpoints"
+  elevens spawn-agent --conductor-surface surface:210 --role implementer --prompt-file .team/prompts/task.md
 
 Notes:
   - Creates an Agent as a tab within the Conductor pane
@@ -254,33 +254,33 @@ Notes:
 `,
 
   help_agents: `
-cmux-team agents -- list running agents
+elevens agents -- list running agents
 
 Usage:
-  cmux-team agents
+  elevens agents
 
 Options:
   (none)
 `,
 
   help_kill_agent: `
-cmux-team kill-agent -- stop an agent
+elevens kill-agent -- stop an agent
 
 Usage:
-  cmux-team kill-agent --surface <surface>
+  elevens kill-agent --surface <surface>
 
 Options:
   --surface <surface>     surface ID of the Agent to stop (required)
 
 Examples:
-  cmux-team kill-agent --surface surface:215
+  elevens kill-agent --surface surface:215
 `,
 
   help_close_agent: `
-cmux-team close-agent -- close an agent (normal exit)
+elevens close-agent -- close an agent (normal exit)
 
 Usage:
-  cmux-team close-agent --surface <surface>
+  elevens close-agent --surface <surface>
 
 Options:
   --surface <surface>     surface ID of the Agent to close (required)
@@ -291,14 +291,14 @@ Notes:
   - For crash/abort, prefer kill-agent which records status=crashed.
 
 Examples:
-  cmux-team close-agent --surface surface:215
+  elevens close-agent --surface surface:215
 `,
 
   help_send_agent: `
-cmux-team send-agent -- send a message to an Agent spawned by this Conductor
+elevens send-agent -- send a message to an Agent spawned by this Conductor
 
 Usage:
-  cmux-team send-agent --surface <agent-surface> [--no-return] <message>
+  elevens send-agent --surface <agent-surface> [--no-return] <message>
 
 Options:
   --surface <agent-surface>   target Agent surface (required)
@@ -309,8 +309,8 @@ Environment:
   CMUX_SURFACE                caller Conductor surface (falls back to cmux identify)
 
 Examples:
-  cmux-team send-agent --surface surface:382 "Please resume from plan.md section 3"
-  cmux-team send-agent --surface surface:382 --no-return "partial line"
+  elevens send-agent --surface surface:382 "Please resume from plan.md section 3"
+  elevens send-agent --surface surface:382 --no-return "partial line"
 
 Notes:
   - Only Agents spawned by the caller Conductor are allowed (verified via .team/team.json)
@@ -319,10 +319,10 @@ Notes:
 `,
 
   help_create_task: `
-cmux-team create-task -- create a task
+elevens create-task -- create a task
 
 Usage:
-  cmux-team create-task --title <title> [options]
+  elevens create-task --title <title> [options]
 
 Options:
   --title <title>         task title (required)
@@ -340,12 +340,12 @@ Options:
                           'git pull --ff-only' and warn instead
 
 Examples:
-  cmux-team create-task --title "Fix bug" --status ready --body "Login screen error"
-  cmux-team create-task --title "Add feature" --priority high
-  cmux-team create-task --title "Refactor" --depends-on "081,082" --status ready
-  cmux-team create-task --title "hotfix" --base-branch develop --status ready
-  cmux-team create-task --title "Release v3.5.0" --run-after-all --status ready
-  cmux-team create-task --title "Release v3.53.0" --exclusive --status ready
+  elevens create-task --title "Fix bug" --status ready --body "Login screen error"
+  elevens create-task --title "Add feature" --priority high
+  elevens create-task --title "Refactor" --depends-on "081,082" --status ready
+  elevens create-task --title "hotfix" --base-branch develop --status ready
+  elevens create-task --title "Release v3.5.0" --run-after-all --status ready
+  elevens create-task --title "Release v3.53.0" --exclusive --status ready
 
 Notes:
   - If status is ready, a TASK_CREATED message is automatically sent
@@ -358,20 +358,20 @@ Notes:
   - Multiple --exclusive tasks may coexist; they run sequentially in ID order.
     A non-exclusive --run-after-all cannot coexist with any unclosed --exclusive
     task (create-task errors with RUN_AFTER_ALL_CONFLICT in either direction)
-  - When status is ready, cmux-team verifies local <mainBranch> vs origin/<mainBranch>
+  - When status is ready, elevens verifies local <mainBranch> vs origin/<mainBranch>
     and rejects create on diverged / uncommitted / detached states. Bypass with
     --force or CMUX_TEAM_SKIP_SYNC_CHECK=1
-  - On behind-ff while <mainBranch> is checked out, cmux-team auto-runs
+  - On behind-ff while <mainBranch> is checked out, elevens auto-runs
     'git pull --ff-only origin <mainBranch>' and rejects create if it fails.
     Use --no-auto-pull to skip the auto-pull (warn-only). On other branches /
     detached, behind-ff is already warn-only.
 `,
 
   help_update_task: `
-cmux-team update-task -- update a task
+elevens update-task -- update a task
 
 Usage:
-  cmux-team update-task --task-id <id> [options]
+  elevens update-task --task-id <id> [options]
 
 Options:
   --task-id <id>          task ID (required)
@@ -389,28 +389,28 @@ Options:
   * At least one of --status, --title, --body, --depends-on, or --no-exclusive is required
 
 Examples:
-  cmux-team update-task --task-id 035 --status ready
-  cmux-team update-task --task-id 035 --title "New title" --body "New description"
-  cmux-team update-task --task-id 035 --depends-on "081,082"
-  cmux-team update-task --task-id 035 --no-exclusive
+  elevens update-task --task-id 035 --status ready
+  elevens update-task --task-id 035 --title "New title" --body "New description"
+  elevens update-task --task-id 035 --depends-on "081,082"
+  elevens update-task --task-id 035 --no-exclusive
 
 Notes:
   - Tasks in assigned (running) state cannot be updated
   - Closed tasks cannot be updated (create a new task instead)
   - Changing status to ready automatically sends a TASK_CREATED message
-  - When transitioning to ready, cmux-team verifies local <mainBranch> vs
+  - When transitioning to ready, elevens verifies local <mainBranch> vs
     origin/<mainBranch> and rejects on diverged / uncommitted / detached. Bypass
     with --force or CMUX_TEAM_SKIP_SYNC_CHECK=1
-  - On behind-ff while <mainBranch> is checked out, cmux-team auto-runs
+  - On behind-ff while <mainBranch> is checked out, elevens auto-runs
     'git pull --ff-only origin <mainBranch>' and rejects update if it fails.
     Use --no-auto-pull to skip the auto-pull (warn-only).
 `,
 
   help_close_task: `
-cmux-team close-task -- mark a task as complete (closed)
+elevens close-task -- mark a task as complete (closed)
 
 Usage:
-  cmux-team close-task --task-id <id> --deliverable-kind <kind> [kind-specific flags] [--journal <text>] [--force]
+  elevens close-task --task-id <id> --deliverable-kind <kind> [kind-specific flags] [--journal <text>] [--force]
 
 Options:
   --task-id <id>                  task ID (required)
@@ -424,21 +424,21 @@ Options:
 
 Examples:
   # local ff-only merge (the most common case)
-  cmux-team close-task --task-id 035 --deliverable-kind merged \\
+  elevens close-task --task-id 035 --deliverable-kind merged \\
     --merged-into task-035/task --merge-sha $(git rev-parse task-035/task) \\
     --journal "Implementation complete, tests passed"
 
   # GitHub PR
-  cmux-team close-task --task-id 036 --deliverable-kind pr \\
+  elevens close-task --task-id 036 --deliverable-kind pr \\
     --pr-url https://github.com/owner/repo/pull/42 --journal "PR opened"
 
   # investigation / docs-only delivery (no branch produced)
-  cmux-team close-task --task-id 037 --deliverable-kind files \\
+  elevens close-task --task-id 037 --deliverable-kind files \\
     --deliverable .team/artifacts/A042.md --deliverable docs/spec/01-x.md \\
     --journal "Research summary delivered"
 
   # no deliverable (e.g. spec turned out already satisfied)
-  cmux-team close-task --task-id 038 --deliverable-kind none --journal "Already satisfied by T294"
+  elevens close-task --task-id 038 --deliverable-kind none --journal "Already satisfied by T294"
 
 Notes:
   - --deliverable-kind is mandatory; running without it exits 1
@@ -449,18 +449,18 @@ Notes:
 `,
 
   help_abort_task: `
-cmux-team abort-task -- abort a running task (sets to aborted)
+elevens abort-task -- abort a running task (sets to aborted)
 
 Usage:
-  cmux-team abort-task --task-id <id> [--journal <text>]
+  elevens abort-task --task-id <id> [--journal <text>]
 
 Options:
   --task-id <id>          task ID (required)
   --journal <text>        abort journal (optional, default: "Aborted: T{id} {title}")
 
 Examples:
-  cmux-team abort-task --task-id 035
-  cmux-team abort-task --task-id 035 --journal "Aborted due to direction change"
+  elevens abort-task --task-id 035
+  elevens abort-task --task-id 035 --journal "Aborted due to direction change"
 
 Notes:
   - Only tasks in assigned (running) state can be aborted
@@ -470,18 +470,18 @@ Notes:
 `,
 
   help_restart_task: `
-cmux-team restart-task -- restart an assigned or aborted task (re-queues as ready)
+elevens restart-task -- restart an assigned or aborted task (re-queues as ready)
 
 Usage:
-  cmux-team restart-task --task-id <id> [--journal <text>]
+  elevens restart-task --task-id <id> [--journal <text>]
 
 Options:
   --task-id <id>          task ID (required)
   --journal <text>        restart journal (optional, default: "Restarted: T{id} {title}")
 
 Examples:
-  cmux-team restart-task --task-id 035                                    # works for both assigned and aborted
-  cmux-team restart-task --task-id 035 --journal "Conductor crashed, retrying"
+  elevens restart-task --task-id 035                                    # works for both assigned and aborted
+  elevens restart-task --task-id 035 --journal "Conductor crashed, retrying"
 
 Notes:
   - Only tasks in assigned or aborted state can be restarted
@@ -492,17 +492,17 @@ Notes:
 `,
 
   help_clear_conductor: `
-cmux-team clear-conductor -- explicitly reset a broken Conductor (broken -> idle)
+elevens clear-conductor -- explicitly reset a broken Conductor (broken -> idle)
 
 Usage:
-  cmux-team clear-conductor --surface <id>
+  elevens clear-conductor --surface <id>
 
 Options:
   --surface <id>   surface ID (e.g. 112 or surface:112)
 
 Examples:
-  cmux-team clear-conductor --surface 112
-  cmux-team clear-conductor --surface surface:112
+  elevens clear-conductor --surface 112
+  elevens clear-conductor --surface surface:112
 
 Notes:
   - Only Conductors currently in broken state can be cleared
@@ -511,10 +511,10 @@ Notes:
 `,
 
   help_delete_task: `
-cmux-team delete-task -- delete a task (sets to deleted)
+elevens delete-task -- delete a task (sets to deleted)
 
 Usage:
-  cmux-team delete-task --task-id <id> [options]
+  elevens delete-task --task-id <id> [options]
 
 Options:
   --task-id <id>          task ID (required)
@@ -522,9 +522,9 @@ Options:
   --force                 force-delete a closed or aborted task (assigned still requires abort-task)
 
 Examples:
-  cmux-team delete-task --task-id 035
-  cmux-team delete-task --task-id 035 --journal "No longer needed"
-  cmux-team delete-task --task-id 035 --force                 # delete a closed/aborted task
+  elevens delete-task --task-id 035
+  elevens delete-task --task-id 035 --journal "No longer needed"
+  elevens delete-task --task-id 035 --force                 # delete a closed/aborted task
 
 Notes:
   - draft / ready tasks can be deleted without --force
@@ -536,19 +536,19 @@ Notes:
 `,
 
   help_trace_task: `
-cmux-team trace-task -- display session history for a task
+elevens trace-task -- display session history for a task
 
 Usage:
-  cmux-team trace-task <task-id> [options]
+  elevens trace-task <task-id> [options]
 
 Options:
   --no-metrics           hide the Token Usage / By role / By model metrics section
   --summary              show summary mode (stub for future)
 
 Examples:
-  cmux-team trace-task 141
-  cmux-team trace-task 141 --no-metrics
-  cmux-team trace-task 141 --summary
+  elevens trace-task 141
+  elevens trace-task 141 --no-metrics
+  elevens trace-task 141 --summary
 
 Output includes:
   - Base: base branch / SHA / source (when available)
@@ -558,10 +558,10 @@ Output includes:
 `,
 
   help_trace_hooks: `
-cmux-team trace-hooks -- display hook signal history received by the daemon
+elevens trace-hooks -- display hook signal history received by the daemon
 
 Usage:
-  cmux-team trace-hooks [options]
+  elevens trace-hooks [options]
 
 Options:
   --type <TYPE>          filter by hook type (e.g. SESSION_STARTED, SESSION_ENDED,
@@ -575,12 +575,12 @@ Options:
   --json                 emit JSON array instead of tabular output
 
 Examples:
-  cmux-team trace-hooks
-  cmux-team trace-hooks --type SESSION_ENDED --limit 20
-  cmux-team trace-hooks --surface C[665]
-  cmux-team trace-hooks --task-run task-217-1776294106 --json
-  cmux-team trace-hooks --type NOTIFICATION --role agent
-  cmux-team trace-hooks --type NOTIFICATION --task-id 265
+  elevens trace-hooks
+  elevens trace-hooks --type SESSION_ENDED --limit 20
+  elevens trace-hooks --surface C[665]
+  elevens trace-hooks --task-run task-217-1776294106 --json
+  elevens trace-hooks --type NOTIFICATION --role agent
+  elevens trace-hooks --type NOTIFICATION --task-id 265
 
 Notes:
   - Reads from .team/traces/traces.db (hook_signals table)
@@ -591,10 +591,10 @@ Notes:
 `,
 
   help_events: `
-cmux-team events -- tail / filter the events stream
+elevens events -- tail / filter the events stream
 
 Usage:
-  cmux-team events [options]
+  elevens events [options]
 
 Options:
   --follow, -f             tail -F equivalent (rotate aware). Stream new lines until SIGINT.
@@ -622,7 +622,7 @@ Exit codes:
 `,
 
   help_metrics: `
-cmux-team metrics -- per-task / per-period aggregate of events.jsonl + hook_signals + api_usage
+elevens metrics -- per-task / per-period aggregate of events.jsonl + hook_signals + api_usage
 
 Subcommands:
   snapshot                 write a daily snapshot JSON for cohort comparison.
@@ -631,7 +631,7 @@ Subcommands:
   query                    run an ad-hoc DuckDB SQL query across traces.db / events.jsonl / snapshots.
 
 Usage:
-  cmux-team metrics [options]
+  elevens metrics [options]
 
 Options:
   --task-id <id>           filter to a single task (only with --group-by task; default).
@@ -654,7 +654,7 @@ Output (--group-by day|week):
 Notes:
   - "deny_rate" = (PRE_TOOL_USE_DENIED count) / (PRE_TOOL_USE count) within the bucket window.
     Currently this only counts the Conductor's Bash deny script (cmux send/send-key block);
-    it does NOT cover all PreToolUse exit-2 hooks. Treat it as a "cmux-team Bash deny rate"
+    it does NOT cover all PreToolUse exit-2 hooks. Treat it as a "elevens Bash deny rate"
     rather than a generic hook block rate.
   - Tool calls are joined to tasks via task_sessions.session_id MIN(task_id).
     Hooks fired before task_assigned (no matching session_started row) are dropped.
@@ -666,10 +666,10 @@ Exit codes:
 `,
 
   help_metrics_snapshot: `
-cmux-team metrics snapshot -- write a daily metrics snapshot as a JSON fact
+elevens metrics snapshot -- write a daily metrics snapshot as a JSON fact
 
 Usage:
-  cmux-team metrics snapshot [--date YYYY-MM-DD] [--out <path>] [--force] [--allow-outside-project]
+  elevens metrics snapshot [--date YYYY-MM-DD] [--out <path>] [--force] [--allow-outside-project]
 
 Options:
   --date YYYY-MM-DD            UTC date to snapshot (default: yesterday UTC).
@@ -690,10 +690,10 @@ Exit codes:
 `,
 
   help_metrics_compare: `
-cmux-team metrics compare -- diff a baseline snapshot range against a comparison range
+elevens metrics compare -- diff a baseline snapshot range against a comparison range
 
 Usage:
-  cmux-team metrics compare --baseline FROM..TO --comparison FROM..TO [options]
+  elevens metrics compare --baseline FROM..TO --comparison FROM..TO [options]
 
 Options:
   --baseline FROM..TO          inclusive YYYY-MM-DD..YYYY-MM-DD range (UTC).
@@ -718,10 +718,10 @@ Exit codes:
 `,
 
   help_metrics_health: `
-cmux-team metrics health -- check that recent snapshot files are present
+elevens metrics health -- check that recent snapshot files are present
 
 Usage:
-  cmux-team metrics health [--days N] [--snapshot-dir <path>] [--format json|text]
+  elevens metrics health [--days N] [--snapshot-dir <path>] [--format json|text]
 
 Options:
   --days N                     check the last N UTC days (default: 7).
@@ -738,11 +738,11 @@ Exit codes:
 `,
 
   help_metrics_query: `
-cmux-team metrics query -- run an ad-hoc DuckDB SQL across traces.db / events.jsonl / snapshots
+elevens metrics query -- run an ad-hoc DuckDB SQL across traces.db / events.jsonl / snapshots
 
 Usage:
-  cmux-team metrics query --sql '<SQL>' [--format json|csv|tsv|table] [--explain]
-  echo '<SQL>' | cmux-team metrics query [--format ...] [--explain]
+  elevens metrics query --sql '<SQL>' [--format json|csv|tsv|table] [--explain]
+  echo '<SQL>' | elevens metrics query [--format ...] [--explain]
 
 Options:
   --sql <SQL>                  SQL to execute. Wins over stdin when both are provided.
@@ -767,7 +767,7 @@ Notes:
   - Sources that are missing on disk are skipped silently with a stderr warning.
     e.g. running on a fresh project without traces.db still allows 'SELECT 1'.
   - The connection is in-memory; ATTACH is READ_ONLY. Your queries cannot mutate facts.
-  - For recipe libraries, see the cmux-team-analyze skill (skills/cmux-team-analyze/SKILL.md).
+  - For recipe libraries, see the analyze skill (skills/cmux-team-analyze/SKILL.md).
 
 Exit codes:
   0  query exited normally
@@ -776,10 +776,10 @@ Exit codes:
 `,
 
   help_spawn_master: `
-cmux-team spawn-master -- launch Claude Code for Master (self-register)
+elevens spawn-master -- launch Claude Code for Master (self-register)
 
 Usage:
-  cmux-team spawn-master [--model <model>]
+  elevens spawn-master [--model <model>]
 
 Options:
   --model <model>   model to use (default: config.models.master or "{model}")
@@ -793,10 +793,10 @@ Notes:
 `,
 
   help_artifacts: `
-cmux-team artifacts -- manage artifacts (add moves the file, not copy)
+elevens artifacts -- manage artifacts (add moves the file, not copy)
 
 Usage:
-  cmux-team artifacts [subcommand] [options]
+  elevens artifacts [subcommand] [options]
 
 Subcommands:
   (none)                  list artifacts (default)
@@ -817,21 +817,21 @@ Options:
   --project-root <path>   (add) override project root (destination .team/artifacts/ lives under this)
 
 Examples:
-  cmux-team artifacts
-  cmux-team artifacts add ./research-notes.md
-  cmux-team artifacts add ./design.md --type decision --title "Auth method selection"
-  cmux-team artifacts show A001
-  cmux-team artifacts open A001
-  cmux-team artifacts search "authentication"
-  cmux-team artifacts --type research --task T038
-  cmux-team artifacts --validate
+  elevens artifacts
+  elevens artifacts add ./research-notes.md
+  elevens artifacts add ./design.md --type decision --title "Auth method selection"
+  elevens artifacts show A001
+  elevens artifacts open A001
+  elevens artifacts search "authentication"
+  elevens artifacts --type research --task T038
+  elevens artifacts --validate
 `,
 
   help_await_task: `
-cmux-team await-task -- wait for a task to complete (closed/aborted)
+elevens await-task -- wait for a task to complete (closed/aborted)
 
 Usage:
-  cmux-team await-task --task-id <id> [options]
+  elevens await-task --task-id <id> [options]
 
 Options:
   --task-id <id>          task ID (required, comma-separated for multiple: 108,109)
@@ -843,15 +843,15 @@ On completion:
   - timeout: prints timeout message to stderr, exits 2
 
 Examples:
-  cmux-team await-task --task-id 108
-  cmux-team await-task --task-id 108,109 --timeout 7200
+  elevens await-task --task-id 108
+  elevens await-task --task-id 108,109 --timeout 7200
 `,
 
   help_get_agent_instructions: `
-cmux-team get-agent-instructions -- print the project-local overlay for an overlay role
+elevens get-agent-instructions -- print the project-local overlay for an overlay role
 
 Usage:
-  cmux-team get-agent-instructions --role <role>
+  elevens get-agent-instructions --role <role>
 
 Options:
   --role <role>           overlay role: 8 agent roles + master + conductor (required)
@@ -868,10 +868,10 @@ Notes:
 `,
 
   help_set_agent_instructions: `
-cmux-team set-agent-instructions -- write the project-local overlay for an overlay role
+elevens set-agent-instructions -- write the project-local overlay for an overlay role
 
 Usage:
-  cmux-team set-agent-instructions --role <role> (--body <text> | --from-file <path> | --from-stdin)
+  elevens set-agent-instructions --role <role> (--body <text> | --from-file <path> | --from-stdin)
 
 Options:
   --role <role>           overlay role: 8 agent roles + master + conductor (required)
@@ -887,10 +887,10 @@ Notes:
 `,
 
   help_delete_agent_instructions: `
-cmux-team delete-agent-instructions -- remove the project-local overlay for an overlay role
+elevens delete-agent-instructions -- remove the project-local overlay for an overlay role
 
 Usage:
-  cmux-team delete-agent-instructions --role <role>
+  elevens delete-agent-instructions --role <role>
 
 Notes:
   - Overlay role: 8 agent roles + master + conductor
@@ -900,68 +900,68 @@ Notes:
 `,
 
   help_list_agent_instructions: `
-cmux-team list-agent-instructions -- list all overlay roles with their overlay status
+elevens list-agent-instructions -- list all overlay roles with their overlay status
 
 Usage:
-  cmux-team list-agent-instructions
+  elevens list-agent-instructions
 
 Notes:
   - Prints one line per role in OVERLAY_ROLES order (8 agent roles, then master, then conductor)
   - "<role> ✓ <n> bytes" if the overlay exists, "<role> ✗" otherwise
 `,
 
-  help_main: `cmux-team — multi-agent development orchestration
+  help_main: `elevens — multi-agent development orchestration
 
 Usage:
-  cmux-team --version                          show version
-  cmux-team start                              launch daemon + spawn Master
-  cmux-team send TASK_CREATED --task-id <id> --task-file <path>
-  cmux-team send SHUTDOWN
-  cmux-team status                             show status
-  cmux-team spawn-conductor [--resume <session-id>] [--task-prompt <path>] [--model <model>]
-  cmux-team spawn-agent --conductor-surface <surface> --role <role> --prompt <prompt>
+  elevens --version                          show version
+  elevens start                              launch daemon + spawn Master
+  elevens send TASK_CREATED --task-id <id> --task-file <path>
+  elevens send SHUTDOWN
+  elevens status                             show status
+  elevens spawn-conductor [--resume <session-id>] [--task-prompt <path>] [--model <model>]
+  elevens spawn-agent --conductor-surface <surface> --role <role> --prompt <prompt>
                                               (agent roles only — master/conductor reserved for system prompt overlay)
-  cmux-team agents                             list running agents
-  cmux-team close-agent --surface <surface>    close an agent (normal exit)
-  cmux-team kill-agent --surface <surface>     kill an agent (crash/force)
-  cmux-team send-agent --surface <surface> <message>    send a message to a spawned Agent
-  cmux-team create-task --title <title> [--priority <p>] [--status <s>] [--body <text>] [--depends-on <ids>] [--run-after-all] [--exclusive]
-  cmux-team update-task --task-id <id> --status <status>
-  cmux-team close-task --task-id <id> [--journal <text>]
-  cmux-team await-task --task-id <id> [--timeout <sec>]    wait for task completion
-  cmux-team abort-task --task-id <id> [--journal <text>]  abort a running task
-  cmux-team restart-task --task-id <id> [--journal <text>] restart an assigned or aborted task
-  cmux-team delete-task --task-id <id> [--journal <text>] delete a task
-  cmux-team trace-task <task-id>              display session history for a task
-  cmux-team trace-hooks                        display hook signal history
-  cmux-team events [--follow] [--types ...] [--since ...] [--format json|text]
+  elevens agents                             list running agents
+  elevens close-agent --surface <surface>    close an agent (normal exit)
+  elevens kill-agent --surface <surface>     kill an agent (crash/force)
+  elevens send-agent --surface <surface> <message>    send a message to a spawned Agent
+  elevens create-task --title <title> [--priority <p>] [--status <s>] [--body <text>] [--depends-on <ids>] [--run-after-all] [--exclusive]
+  elevens update-task --task-id <id> --status <status>
+  elevens close-task --task-id <id> [--journal <text>]
+  elevens await-task --task-id <id> [--timeout <sec>]    wait for task completion
+  elevens abort-task --task-id <id> [--journal <text>]  abort a running task
+  elevens restart-task --task-id <id> [--journal <text>] restart an assigned or aborted task
+  elevens delete-task --task-id <id> [--journal <text>] delete a task
+  elevens trace-task <task-id>              display session history for a task
+  elevens trace-hooks                        display hook signal history
+  elevens events [--follow] [--types ...] [--since ...] [--format json|text]
                                               tail / filter the events stream (.team/logs/events.jsonl)
-  cmux-team metrics [--task-id ...] [--since ...] [--format json|text|csv] [--group-by task|day|week]
+  elevens metrics [--task-id ...] [--since ...] [--format json|text|csv] [--group-by task|day|week]
                                               aggregate task / tool / token metrics from events.jsonl + hook_signals + api_usage
-  cmux-team spawn-master                       launch Master (auto-resolves proxy)
-  cmux-team artifacts                              list artifacts
-  cmux-team artifacts add <file>                   move a file into .team/artifacts/
-  cmux-team artifacts show <id>                    show artifact
-  cmux-team artifacts open <id>                    open in markdown viewer
-  cmux-team artifacts search <query>               full-text search
-  cmux-team artifacts --validate                   validate frontmatter
-  cmux-team get-agent-instructions --role <role>   print project-local overlay (agent roles + master/conductor)
-  cmux-team set-agent-instructions --role <role> (--body <t> | --from-file <p> | --from-stdin)  write overlay
-  cmux-team delete-agent-instructions --role <role> remove overlay
-  cmux-team list-agent-instructions                 list overlay status per role (10 roles)
-  cmux-team pool status                            show token pool dashboard (T323)
+  elevens spawn-master                       launch Master (auto-resolves proxy)
+  elevens artifacts                              list artifacts
+  elevens artifacts add <file>                   move a file into .team/artifacts/
+  elevens artifacts show <id>                    show artifact
+  elevens artifacts open <id>                    open in markdown viewer
+  elevens artifacts search <query>               full-text search
+  elevens artifacts --validate                   validate frontmatter
+  elevens get-agent-instructions --role <role>   print project-local overlay (agent roles + master/conductor)
+  elevens set-agent-instructions --role <role> (--body <t> | --from-file <p> | --from-stdin)  write overlay
+  elevens delete-agent-instructions --role <role> remove overlay
+  elevens list-agent-instructions                 list overlay status per role (10 roles)
+  elevens pool status                            show token pool dashboard (T323)
 
 Common options:
   --project-root <path>      override project root (read-only by default; writes require confirmation)
   --project-root-confirm     bypass the cross-project write gate (use with care)
                              also: CMUX_TEAM_PROJECT_ROOT_CONFIRM=1 env
 
-For details on each command: cmux-team <command> --help`,
+For details on each command: elevens <command> --help`,
 
   // ── gh-cache (T272) ───────────────────────────────────────────────────────
   gh_not_a_github_repo:
     "Error: not a git repository, or origin is not GitHub / GHE.\n" +
-    "  cmux-team issue/pr requires a git repo with an origin on github.com or an enterprise instance.",
+    "  elevens issue/pr requires a git repo with an origin on github.com or an enterprise instance.",
   gh_auth_missing:
     "Error: No GitHub token found for host {host}.\n" +
     "  checked: {checked}\n" +
@@ -970,15 +970,15 @@ For details on each command: cmux-team <command> --help`,
     "  export GITHUB_TOKEN=<your token>",
   gh_rate_limit_exhausted:
     "Error: GitHub rate limit exhausted. remaining={remaining} reset_at={reset_at}\n" +
-    "  Try `cmux-team issue list --stale-ok` to read from cache without syncing.",
+    "  Try `elevens issue list --stale-ok` to read from cache without syncing.",
   gh_me_not_resolved:
-    "Error: @me cannot be resolved. Run `cmux-team gh sync` first so the cache knows your viewer login.",
+    "Error: @me cannot be resolved. Run `elevens gh sync` first so the cache knows your viewer login.",
   gh_unknown_subcommand:
-    "Unknown subcommand: {sub}. Run `cmux-team gh --help`.",
+    "Unknown subcommand: {sub}. Run `elevens gh --help`.",
   gh_cache_not_initialized:
-    "Error: gh-cache.db is empty. Run `cmux-team gh sync --full` first.",
+    "Error: gh-cache.db is empty. Run `elevens gh sync --full` first.",
   gh_stale_warning:
-    "Warning: last full sync was {days} days ago. Consider `cmux-team gh sync --full`.",
+    "Warning: last full sync was {days} days ago. Consider `elevens gh sync --full`.",
   gh_issue_empty: "(no issues / PRs matched)",
   gh_sync_success:
     "Synced {mode}: issues={issues} comments={comments} reviews={reviews} duration={duration_ms}ms",
@@ -1005,11 +1005,11 @@ For details on each command: cmux-team <command> --help`,
     "Issues tab disabled (not a git repo or origin not GitHub).",
   gh_tui_disabled_no_auth:
     "Issues tab needs authentication: run `gh auth login` or set GITHUB_TOKEN.",
-  gh_help: `cmux-team gh — GitHub issue/PR cache management
+  gh_help: `elevens gh — GitHub issue/PR cache management
 
 Usage:
-  cmux-team gh sync [--full]          sync issues/PRs into .team/gh-cache.db
-  cmux-team gh status                 show cache status + rate limit
+  elevens gh sync [--full]          sync issues/PRs into .team/gh-cache.db
+  elevens gh status                 show cache status + rate limit
 
 Flags:
   --full    fetch the last 500 issues/PRs (plus attachments) from scratch
@@ -1101,15 +1101,15 @@ const ja: typeof en = {
   no_running_agents: "稼働中のエージェントはありません。",
   no_artifacts: "アーティファクトが見つかりません",
   artifact_id_required:
-    "Error: アーティファクト ID を指定してください\nUsage: cmux-team artifacts show <id>",
+    "Error: アーティファクト ID を指定してください\nUsage: elevens artifacts show <id>",
   artifact_id_required_open:
-    "Error: アーティファクト ID を指定してください\nUsage: cmux-team artifacts open <id>",
+    "Error: アーティファクト ID を指定してください\nUsage: elevens artifacts open <id>",
   search_query_required:
-    "Error: 検索クエリを指定してください\nUsage: cmux-team artifacts search <query>",
+    "Error: 検索クエリを指定してください\nUsage: elevens artifacts search <query>",
   artifact_add_file_required:
-    "Error: ファイルパスを指定してください\nUsage: cmux-team artifacts add <file> [--type <type>] [--title <title>] [--task <id>] [--tags <tag1,tag2>]",
+    "Error: ファイルパスを指定してください\nUsage: elevens artifacts add <file> [--type <type>] [--title <title>] [--task <id>] [--tags <tag1,tag2>]",
   dashboard_startup_hint:
-    "ヒント: TTY 環境で cmux-team start を実行してください",
+    "ヒント: TTY 環境で elevens start を実行してください",
   task_section_header: "タスク",
 
   // ── テンプレートメッセージ ────────────────────────────────────────────────────
@@ -1124,11 +1124,11 @@ const ja: typeof en = {
 
   // ── テンプレートエラーメッセージ ──────────────────────────────────────────────
   template_dir_not_found:
-    "Template directory not found. npm install -g @hummer98/cmux-team を実行してください",
+    "Template directory not found. npm install -g @hummer98/elevens を実行してください",
   conductor_role_template_not_found:
-    "Conductor role template not found. npm install -g @hummer98/cmux-team を実行してください",
+    "Conductor role template not found. npm install -g @hummer98/elevens を実行してください",
   conductor_task_template_not_found:
-    "Conductor task template not found. npm install -g @hummer98/cmux-team を実行してください",
+    "Conductor task template not found. npm install -g @hummer98/elevens を実行してください",
 
   // ── e2e.ts ────────────────────────────────────────────────────────────────────
   e2e_daemon_not_confirmed: "  WARNING: daemon 起動未確認。テストを続行します。",
@@ -1150,10 +1150,10 @@ const ja: typeof en = {
                              env: CMUX_TEAM_PROJECT_ROOT_CONFIRM=1 でも可）`,
 
   help_start: `
-cmux-team start -- daemon 起動 + Master spawn + ダッシュボード表示
+elevens start -- daemon 起動 + Master spawn + ダッシュボード表示
 
 Usage:
-  cmux-team start [--layout=<wide|16x9>] [--sleep-prevention=<off|idle|aggressive>] [--no-sleep-prevention]
+  elevens start [--layout=<wide|16x9>] [--sleep-prevention=<off|idle|aggressive>] [--no-sleep-prevention]
 
 Options:
   --layout <wide|16x9>     レイアウトモード (デフォルト: 16x9、または config.json の layout)
@@ -1181,10 +1181,10 @@ Notes:
 `,
 
   help_send: `
-cmux-team send -- キューにメッセージを送信
+elevens send -- キューにメッセージを送信
 
 Usage:
-  cmux-team send <type> [options]
+  elevens send <type> [options]
 
 Types と必須/任意オプション:
   TASK_CREATED
@@ -1238,36 +1238,36 @@ Types と必須/任意オプション:
     （オプションなし）
 
 Examples:
-  cmux-team send TASK_CREATED --task-id 035 --task-file .team/tasks/035-example.md
-  cmux-team send SHUTDOWN
-  cmux-team send CONDUCTOR_DONE --surface surface:210 --success true
+  elevens send TASK_CREATED --task-id 035 --task-file .team/tasks/035-example.md
+  elevens send SHUTDOWN
+  elevens send CONDUCTOR_DONE --surface surface:210 --success true
 `,
 
   help_status: `
-cmux-team status -- チームのステータスを表示
+elevens status -- チームのステータスを表示
 
 Usage:
-  cmux-team status [options]
+  elevens status [options]
 
 Options:
   --log <N>     ログ末尾の表示行数（任意、デフォルト 10）
 
 Examples:
-  cmux-team status
-  cmux-team status --log 20
+  elevens status
+  elevens status --log 20
 
 Token Pool (T323):
   token pool 機能が有効な場合（CMUX_TEAM_TOKEN_POOL=1 / config / global yaml）、
   ヘッダー直後に pool 情報（capacity / next reset）を表示し、Master / Conductor /
   Agent 行に handle / 使用率 / cap_pct を付与します。OFF 時は既存レイアウト維持。
-  全 token 一覧は: cmux-team pool status
+  全 token 一覧は: elevens pool status
 `,
 
   help_spawn_conductor: `
-cmux-team spawn-conductor -- 現在の surface で Conductor 用 Claude Code を起動・登録
+elevens spawn-conductor -- 現在の surface で Conductor 用 Claude Code を起動・登録
 
 Usage:
-  cmux-team spawn-conductor [--resume <session-id>] [--task-prompt <path>] [--model <model>]
+  elevens spawn-conductor [--resume <session-id>] [--task-prompt <path>] [--model <model>]
 
 Environment:
   CMUX_SURFACE  Conductor の surface ID（任意。未指定時は cmux identify の caller.surface_ref から自動解決）
@@ -1283,14 +1283,14 @@ Notes:
   - CONDUCTOR_REGISTERED POST で自己登録し、Manager が pre-reserved entry とマッチさせます（T421）。
   - ロギングプロキシのポートを動的に解決して Claude Code を exec します。
   - --dangerously-skip-permissions で起動されます。
-  - T421: 旧 'cmux-team conductor' / 'cmux-team resume' を本コマンドに統合しました（後方互換なし）。
+  - T421: 旧 'elevens conductor' / 'elevens resume' を本コマンドに統合しました（後方互換なし）。
 `,
 
   help_spawn_agent: `
-cmux-team spawn-agent -- サブエージェントを起動
+elevens spawn-agent -- サブエージェントを起動
 
 Usage:
-  cmux-team spawn-agent --conductor-surface <surface> --role <role> (--prompt <text> | --prompt-file <path>) [options]
+  elevens spawn-agent --conductor-surface <surface> --role <role> (--prompt <text> | --prompt-file <path>) [options]
 
 Options:
   --conductor-surface <surface>   Conductor の surface ID（必須）
@@ -1301,8 +1301,8 @@ Options:
   --model <model>                 使用するモデル（デフォルト: config.models.agent or "{model}"）
 
 Examples:
-  cmux-team spawn-agent --conductor-surface surface:210 --role researcher --prompt "調査してください"
-  cmux-team spawn-agent --conductor-surface surface:210 --role implementer --prompt-file .team/prompts/task.md
+  elevens spawn-agent --conductor-surface surface:210 --role researcher --prompt "調査してください"
+  elevens spawn-agent --conductor-surface surface:210 --role implementer --prompt-file .team/prompts/task.md
 
 Notes:
   - Conductor ペイン内にタブとして Agent を作成します
@@ -1311,33 +1311,33 @@ Notes:
 `,
 
   help_agents: `
-cmux-team agents -- 稼働中のエージェント一覧を表示
+elevens agents -- 稼働中のエージェント一覧を表示
 
 Usage:
-  cmux-team agents
+  elevens agents
 
 Options:
   なし
 `,
 
   help_kill_agent: `
-cmux-team kill-agent -- エージェントを停止
+elevens kill-agent -- エージェントを停止
 
 Usage:
-  cmux-team kill-agent --surface <surface>
+  elevens kill-agent --surface <surface>
 
 Options:
   --surface <surface>     停止する Agent の surface ID（必須）
 
 Examples:
-  cmux-team kill-agent --surface surface:215
+  elevens kill-agent --surface surface:215
 `,
 
   help_close_agent: `
-cmux-team close-agent -- Agent を正常終了
+elevens close-agent -- Agent を正常終了
 
 Usage:
-  cmux-team close-agent --surface <surface>
+  elevens close-agent --surface <surface>
 
 Options:
   --surface <surface>     正常終了する Agent の surface ID（必須）
@@ -1348,14 +1348,14 @@ Notes:
   - クラッシュや強制停止には kill-agent を使う（status=crashed として記録）。
 
 Examples:
-  cmux-team close-agent --surface surface:215
+  elevens close-agent --surface surface:215
 `,
 
   help_send_agent: `
-cmux-team send-agent -- この Conductor が spawn した Agent にメッセージを送る
+elevens send-agent -- この Conductor が spawn した Agent にメッセージを送る
 
 Usage:
-  cmux-team send-agent --surface <agent-surface> [--no-return] <message>
+  elevens send-agent --surface <agent-surface> [--no-return] <message>
 
 Options:
   --surface <agent-surface>   送信先 Agent の surface（必須）
@@ -1366,8 +1366,8 @@ Environment:
   CMUX_SURFACE                呼び出し側 Conductor の surface（未設定時は cmux identify）
 
 Examples:
-  cmux-team send-agent --surface surface:382 "plan.md の 3 節から再開してください"
-  cmux-team send-agent --surface surface:382 --no-return "途中行"
+  elevens send-agent --surface surface:382 "plan.md の 3 節から再開してください"
+  elevens send-agent --surface surface:382 --no-return "途中行"
 
 Notes:
   - 呼び出し元 Conductor が spawn した Agent のみに送信可（.team/team.json で検証）
@@ -1376,10 +1376,10 @@ Notes:
 `,
 
   help_create_task: `
-cmux-team create-task -- タスクを作成
+elevens create-task -- タスクを作成
 
 Usage:
-  cmux-team create-task --title <title> [options]
+  elevens create-task --title <title> [options]
 
 Options:
   --title <title>         タスクタイトル（必須）
@@ -1397,12 +1397,12 @@ Options:
                           を抑止し warn 扱いで続行する
 
 Examples:
-  cmux-team create-task --title "バグ修正" --status ready --body "ログイン画面のエラー"
-  cmux-team create-task --title "新機能追加" --priority high
-  cmux-team create-task --title "リファクタ" --depends-on "081,082" --status ready
-  cmux-team create-task --title "hotfix" --base-branch develop --status ready
-  cmux-team create-task --title "リリース v3.5.0" --run-after-all --status ready
-  cmux-team create-task --title "リリース v3.53.0" --exclusive --status ready
+  elevens create-task --title "バグ修正" --status ready --body "ログイン画面のエラー"
+  elevens create-task --title "新機能追加" --priority high
+  elevens create-task --title "リファクタ" --depends-on "081,082" --status ready
+  elevens create-task --title "hotfix" --base-branch develop --status ready
+  elevens create-task --title "リリース v3.5.0" --run-after-all --status ready
+  elevens create-task --title "リリース v3.53.0" --exclusive --status ready
 
 Notes:
   - status が ready の場合、TASK_CREATED メッセージが自動送信され、
@@ -1419,17 +1419,17 @@ Notes:
   - status=ready で作成するとき、local <mainBranch> と origin/<mainBranch> の整合性を
     検査し、diverged / uncommitted / detached は reject されます。
     バイパスは --force または CMUX_TEAM_SKIP_SYNC_CHECK=1
-  - behind-ff かつ <mainBranch> を checkout 中の場合、cmux-team が
+  - behind-ff かつ <mainBranch> を checkout 中の場合、elevens が
     'git pull --ff-only origin <mainBranch>' を自動実行し、失敗すると create を reject します。
     --no-auto-pull で auto-pull を抑止して warn 扱いに切り替えられます
     （他ブランチ checkout 中 / detached の behind-ff は元から warn のみ）
 `,
 
   help_update_task: `
-cmux-team update-task -- タスクを更新
+elevens update-task -- タスクを更新
 
 Usage:
-  cmux-team update-task --task-id <id> [options]
+  elevens update-task --task-id <id> [options]
 
 Options:
   --task-id <id>          タスク ID（必須）
@@ -1447,10 +1447,10 @@ Options:
   ※ --status, --title, --body, --depends-on, --no-exclusive のうち少なくとも1つが必要
 
 Examples:
-  cmux-team update-task --task-id 035 --status ready
-  cmux-team update-task --task-id 035 --title "新タイトル" --body "新しい説明"
-  cmux-team update-task --task-id 035 --depends-on "081,082"
-  cmux-team update-task --task-id 035 --no-exclusive
+  elevens update-task --task-id 035 --status ready
+  elevens update-task --task-id 035 --title "新タイトル" --body "新しい説明"
+  elevens update-task --task-id 035 --depends-on "081,082"
+  elevens update-task --task-id 035 --no-exclusive
 
 Notes:
   - assigned（実行中）のタスクは更新できません
@@ -1459,16 +1459,16 @@ Notes:
   - ready への遷移時に local <mainBranch> と origin/<mainBranch> の整合性を検査し、
     diverged / uncommitted / detached は reject されます。バイパスは --force
     または CMUX_TEAM_SKIP_SYNC_CHECK=1
-  - behind-ff かつ <mainBranch> を checkout 中の場合、cmux-team が
+  - behind-ff かつ <mainBranch> を checkout 中の場合、elevens が
     'git pull --ff-only origin <mainBranch>' を自動実行し、失敗すると update を reject します。
     --no-auto-pull で auto-pull を抑止して warn 扱いに切り替えられます
 `,
 
   help_close_task: `
-cmux-team close-task -- タスクを完了（closed）にする
+elevens close-task -- タスクを完了（closed）にする
 
 Usage:
-  cmux-team close-task --task-id <id> --deliverable-kind <kind> [kind 別フラグ] [--journal <text>] [--force]
+  elevens close-task --task-id <id> --deliverable-kind <kind> [kind 別フラグ] [--journal <text>] [--force]
 
 Options:
   --task-id <id>                  タスク ID（必須）
@@ -1482,21 +1482,21 @@ Options:
 
 Examples:
   # ローカル ff-only マージ（最も多いパターン）
-  cmux-team close-task --task-id 035 --deliverable-kind merged \\
+  elevens close-task --task-id 035 --deliverable-kind merged \\
     --merged-into task-035/task --merge-sha $(git rev-parse task-035/task) \\
     --journal "実装完了、テストパス"
 
   # GitHub PR 納品
-  cmux-team close-task --task-id 036 --deliverable-kind pr \\
+  elevens close-task --task-id 036 --deliverable-kind pr \\
     --pr-url https://github.com/owner/repo/pull/42 --journal "PR を open"
 
   # 調査系・ドキュメントのみ（branch を残さない納品）
-  cmux-team close-task --task-id 037 --deliverable-kind files \\
+  elevens close-task --task-id 037 --deliverable-kind files \\
     --deliverable .team/artifacts/A042.md --deliverable docs/spec/01-x.md \\
     --journal "リサーチ結果納品"
 
   # 納品物なし（例: 既に T294 で満たされていた）
-  cmux-team close-task --task-id 038 --deliverable-kind none --journal "T294 で既に充足"
+  elevens close-task --task-id 038 --deliverable-kind none --journal "T294 で既に充足"
 
 Notes:
   - --deliverable-kind は必須です。未指定時は exit 1 になります
@@ -1507,18 +1507,18 @@ Notes:
 `,
 
   help_abort_task: `
-cmux-team abort-task -- 実行中タスクを中止（aborted）にする
+elevens abort-task -- 実行中タスクを中止（aborted）にする
 
 Usage:
-  cmux-team abort-task --task-id <id> [--journal <text>]
+  elevens abort-task --task-id <id> [--journal <text>]
 
 Options:
   --task-id <id>          タスク ID（必須）
   --journal <text>        中止ジャーナル（任意、デフォルト: "中断: T{id} {title}"）
 
 Examples:
-  cmux-team abort-task --task-id 035
-  cmux-team abort-task --task-id 035 --journal "方針変更のため中止"
+  elevens abort-task --task-id 035
+  elevens abort-task --task-id 035 --journal "方針変更のため中止"
 
 Notes:
   - assigned（実行中）のタスクのみ中止できます
@@ -1528,18 +1528,18 @@ Notes:
 `,
 
   help_restart_task: `
-cmux-team restart-task -- assigned または aborted のタスクを再実行（ready に戻す）
+elevens restart-task -- assigned または aborted のタスクを再実行（ready に戻す）
 
 Usage:
-  cmux-team restart-task --task-id <id> [--journal <text>]
+  elevens restart-task --task-id <id> [--journal <text>]
 
 Options:
   --task-id <id>          タスク ID（必須）
   --journal <text>        再実行ジャーナル（任意、デフォルト: "再実行: T{id} {title}"）
 
 Examples:
-  cmux-team restart-task --task-id 035                                    # assigned / aborted どちらでも実行可
-  cmux-team restart-task --task-id 035 --journal "Conductor がクラッシュしたため再実行"
+  elevens restart-task --task-id 035                                    # assigned / aborted どちらでも実行可
+  elevens restart-task --task-id 035 --journal "Conductor がクラッシュしたため再実行"
 
 Notes:
   - assigned（実行中）または aborted のタスクを再実行できます
@@ -1550,17 +1550,17 @@ Notes:
 `,
 
   help_clear_conductor: `
-cmux-team clear-conductor -- broken Conductor を明示的にリセットする（broken → idle）
+elevens clear-conductor -- broken Conductor を明示的にリセットする（broken → idle）
 
 Usage:
-  cmux-team clear-conductor --surface <id>
+  elevens clear-conductor --surface <id>
 
 Options:
   --surface <id>   surface ID（例: 112 または surface:112）
 
 Examples:
-  cmux-team clear-conductor --surface 112
-  cmux-team clear-conductor --surface surface:112
+  elevens clear-conductor --surface 112
+  elevens clear-conductor --surface surface:112
 
 Notes:
   - broken 状態の Conductor のみクリアできます
@@ -1569,10 +1569,10 @@ Notes:
 `,
 
   help_delete_task: `
-cmux-team delete-task -- タスクを削除（deleted）にする
+elevens delete-task -- タスクを削除（deleted）にする
 
 Usage:
-  cmux-team delete-task --task-id <id> [options]
+  elevens delete-task --task-id <id> [options]
 
 Options:
   --task-id <id>          タスク ID（必須）
@@ -1580,9 +1580,9 @@ Options:
   --force                 closed / aborted のタスクを強制削除する（assigned は依然 abort-task が必要）
 
 Examples:
-  cmux-team delete-task --task-id 035
-  cmux-team delete-task --task-id 035 --journal "不要になったため削除"
-  cmux-team delete-task --task-id 035 --force                  # closed / aborted を強制削除
+  elevens delete-task --task-id 035
+  elevens delete-task --task-id 035 --journal "不要になったため削除"
+  elevens delete-task --task-id 035 --force                  # closed / aborted を強制削除
 
 Notes:
   - draft / ready のタスクは --force なしで削除できます
@@ -1594,19 +1594,19 @@ Notes:
 `,
 
   help_trace_task: `
-cmux-team trace-task -- タスクのセッション履歴を表示
+elevens trace-task -- タスクのセッション履歴を表示
 
 Usage:
-  cmux-team trace-task <task-id> [options]
+  elevens trace-task <task-id> [options]
 
 Options:
   --no-metrics           Token Usage / By role / By model セクションを非表示にする
   --summary              要約モード（将来拡張用スタブ）
 
 Examples:
-  cmux-team trace-task 141
-  cmux-team trace-task 141 --no-metrics
-  cmux-team trace-task 141 --summary
+  elevens trace-task 141
+  elevens trace-task 141 --no-metrics
+  elevens trace-task 141 --summary
 
 Output includes:
   - Base 行: base branch / SHA / source（記録がある場合）
@@ -1616,10 +1616,10 @@ Output includes:
 `,
 
   help_trace_hooks: `
-cmux-team trace-hooks -- daemon が受信した hook シグナル履歴を表示
+elevens trace-hooks -- daemon が受信した hook シグナル履歴を表示
 
 Usage:
-  cmux-team trace-hooks [options]
+  elevens trace-hooks [options]
 
 Options:
   --type <TYPE>          hook type で絞り込み（SESSION_STARTED / SESSION_ENDED /
@@ -1633,12 +1633,12 @@ Options:
   --json                 tabular の代わりに JSON 配列を出力
 
 Examples:
-  cmux-team trace-hooks
-  cmux-team trace-hooks --type SESSION_ENDED --limit 20
-  cmux-team trace-hooks --surface C[665]
-  cmux-team trace-hooks --task-run task-217-1776294106 --json
-  cmux-team trace-hooks --type NOTIFICATION --role agent
-  cmux-team trace-hooks --type NOTIFICATION --task-id 265
+  elevens trace-hooks
+  elevens trace-hooks --type SESSION_ENDED --limit 20
+  elevens trace-hooks --surface C[665]
+  elevens trace-hooks --task-run task-217-1776294106 --json
+  elevens trace-hooks --type NOTIFICATION --role agent
+  elevens trace-hooks --type NOTIFICATION --task-id 265
 
 Notes:
   - .team/traces/traces.db の hook_signals テーブルから読み込みます
@@ -1649,10 +1649,10 @@ Notes:
 `,
 
   help_events: `
-cmux-team events -- tail / filter the events stream
+elevens events -- tail / filter the events stream
 
 Usage:
-  cmux-team events [options]
+  elevens events [options]
 
 Options:
   --follow, -f             tail -F equivalent (rotate aware). Stream new lines until SIGINT.
@@ -1680,7 +1680,7 @@ Exit codes:
 `,
 
   help_metrics: `
-cmux-team metrics -- events.jsonl + hook_signals + api_usage を per-task / 期間で集計する
+elevens metrics -- events.jsonl + hook_signals + api_usage を per-task / 期間で集計する
 
 Subcommands:
   snapshot                 cohort 比較用に日次 snapshot JSON を書き出す。
@@ -1689,7 +1689,7 @@ Subcommands:
   query                    traces.db / events.jsonl / snapshots を横断する DuckDB ad-hoc SQL を実行する。
 
 Usage:
-  cmux-team metrics [options]
+  elevens metrics [options]
 
 Options:
   --task-id <id>           1 タスクにフィルタ（--group-by task=既定 のみで有効）
@@ -1713,7 +1713,7 @@ Options:
   - "deny_rate" = (PRE_TOOL_USE_DENIED 件数) / (PRE_TOOL_USE 件数) で計算される。
     現状これは Conductor の Bash deny script（cmux send / send-key の block）のみを数えており、
     PreToolUse hook が exit 2 で deny したケースを網羅していない。
-    「cmux-team の Bash deny 率」と読むべきで、汎用的な hook block 率ではない。
+    「elevens の Bash deny 率」と読むべきで、汎用的な hook block 率ではない。
   - tool call と task の紐付けは task_sessions.session_id を MIN(task_id) で集約して JOIN する。
     task_assigned 前に発火した hook（session_started 未到達）は集計から除外される。
   - tool_response.content は hook 受信時点で 1KB に切り詰められる（success / error フラグは保持）。
@@ -1724,10 +1724,10 @@ Exit codes:
 `,
 
   help_metrics_snapshot: `
-cmux-team metrics snapshot -- 1 日分の metrics snapshot を JSON として書き出す
+elevens metrics snapshot -- 1 日分の metrics snapshot を JSON として書き出す
 
 Usage:
-  cmux-team metrics snapshot [--date YYYY-MM-DD] [--out <path>] [--force] [--allow-outside-project]
+  elevens metrics snapshot [--date YYYY-MM-DD] [--out <path>] [--force] [--allow-outside-project]
 
 Options:
   --date YYYY-MM-DD            snapshot 対象の日（UTC）。省略時は「昨日 UTC」。
@@ -1748,10 +1748,10 @@ Exit codes:
 `,
 
   help_metrics_compare: `
-cmux-team metrics compare -- baseline / comparison 2 期間の cohort 比較
+elevens metrics compare -- baseline / comparison 2 期間の cohort 比較
 
 Usage:
-  cmux-team metrics compare --baseline FROM..TO --comparison FROM..TO [options]
+  elevens metrics compare --baseline FROM..TO --comparison FROM..TO [options]
 
 Options:
   --baseline FROM..TO          両端含む YYYY-MM-DD..YYYY-MM-DD（UTC）。
@@ -1775,10 +1775,10 @@ Exit codes:
 `,
 
   help_metrics_health: `
-cmux-team metrics health -- 直近 snapshot 欠損チェック
+elevens metrics health -- 直近 snapshot 欠損チェック
 
 Usage:
-  cmux-team metrics health [--days N] [--snapshot-dir <path>] [--format json|text]
+  elevens metrics health [--days N] [--snapshot-dir <path>] [--format json|text]
 
 Options:
   --days N                     直近 N 日の UTC snapshot をチェック（既定: 7）。
@@ -1795,11 +1795,11 @@ Exit codes:
 `,
 
   help_metrics_query: `
-cmux-team metrics query -- traces.db / events.jsonl / snapshots を横断する DuckDB ad-hoc SQL
+elevens metrics query -- traces.db / events.jsonl / snapshots を横断する DuckDB ad-hoc SQL
 
 Usage:
-  cmux-team metrics query --sql '<SQL>' [--format json|csv|tsv|table] [--explain]
-  echo '<SQL>' | cmux-team metrics query [--format ...] [--explain]
+  elevens metrics query --sql '<SQL>' [--format json|csv|tsv|table] [--explain]
+  echo '<SQL>' | elevens metrics query [--format ...] [--explain]
 
 Options:
   --sql <SQL>                  実行する SQL。stdin と同時指定された場合は --sql を優先する。
@@ -1824,7 +1824,7 @@ Options:
   - 不在 source は stderr に warn を出して silent に skip。
     例: traces.db が無い fresh project でも 'SELECT 1' は通る。
   - 接続は in-memory、ATTACH は READ_ONLY。fact を mutate することはできない。
-  - recipe ライブラリは cmux-team-analyze skill を参照（skills/cmux-team-analyze/SKILL.md）。
+  - recipe ライブラリは analyze skill を参照（skills/cmux-team-analyze/SKILL.md）。
 
 Exit codes:
   0  正常終了
@@ -1833,10 +1833,10 @@ Exit codes:
 `,
 
   help_spawn_master: `
-cmux-team spawn-master -- Master 用 Claude Code を起動（self-register）
+elevens spawn-master -- Master 用 Claude Code を起動（self-register）
 
 Usage:
-  cmux-team spawn-master [--model <model>]
+  elevens spawn-master [--model <model>]
 
 Options:
   --model <model>   使用するモデル（デフォルト: config.models.master or "{model}"）
@@ -1850,10 +1850,10 @@ Notes:
 `,
 
   help_artifacts: `
-cmux-team artifacts -- アーティファクト管理（add は move 動作）
+elevens artifacts -- アーティファクト管理（add は move 動作）
 
 Usage:
-  cmux-team artifacts [subcommand] [options]
+  elevens artifacts [subcommand] [options]
 
 Subcommands:
   (なし)                  アーティファクト一覧表示（デフォルト）
@@ -1874,21 +1874,21 @@ Options:
   --project-root <path>   (add) プロジェクトルートを上書き（dest の .team/artifacts/ がここ基準になる）
 
 Examples:
-  cmux-team artifacts
-  cmux-team artifacts add ./research-notes.md
-  cmux-team artifacts add ./design.md --type decision --title "認証方式の選定"
-  cmux-team artifacts show A001
-  cmux-team artifacts open A001
-  cmux-team artifacts search "認証"
-  cmux-team artifacts --type research --task T038
-  cmux-team artifacts --validate
+  elevens artifacts
+  elevens artifacts add ./research-notes.md
+  elevens artifacts add ./design.md --type decision --title "認証方式の選定"
+  elevens artifacts show A001
+  elevens artifacts open A001
+  elevens artifacts search "認証"
+  elevens artifacts --type research --task T038
+  elevens artifacts --validate
 `,
 
   help_await_task: `
-cmux-team await-task -- タスクの完了（closed/aborted）を待機する
+elevens await-task -- タスクの完了（closed/aborted）を待機する
 
 Usage:
-  cmux-team await-task --task-id <id> [options]
+  elevens await-task --task-id <id> [options]
 
 Options:
   --task-id <id>          タスク ID（必須、カンマ区切りで複数指定可: 108,109）
@@ -1900,15 +1900,15 @@ Options:
   - timeout: タイムアウトメッセージを stderr に出力して exit 2
 
 Examples:
-  cmux-team await-task --task-id 108
-  cmux-team await-task --task-id 108,109 --timeout 7200
+  elevens await-task --task-id 108
+  elevens await-task --task-id 108,109 --timeout 7200
 `,
 
   help_get_agent_instructions: `
-cmux-team get-agent-instructions -- 指定 overlay ロールの project-local overlay を表示
+elevens get-agent-instructions -- 指定 overlay ロールの project-local overlay を表示
 
 Usage:
-  cmux-team get-agent-instructions --role <role>
+  elevens get-agent-instructions --role <role>
 
 Options:
   --role <role>           overlay ロール: Agent 8 ロール + master + conductor（必須）
@@ -1925,10 +1925,10 @@ Notes:
 `,
 
   help_set_agent_instructions: `
-cmux-team set-agent-instructions -- 指定 overlay ロールの project-local overlay を書き込む
+elevens set-agent-instructions -- 指定 overlay ロールの project-local overlay を書き込む
 
 Usage:
-  cmux-team set-agent-instructions --role <role> (--body <text> | --from-file <path> | --from-stdin)
+  elevens set-agent-instructions --role <role> (--body <text> | --from-file <path> | --from-stdin)
 
 Options:
   --role <role>           overlay ロール: Agent 8 ロール + master + conductor（必須）
@@ -1944,10 +1944,10 @@ Notes:
 `,
 
   help_delete_agent_instructions: `
-cmux-team delete-agent-instructions -- 指定 overlay ロールの project-local overlay を削除
+elevens delete-agent-instructions -- 指定 overlay ロールの project-local overlay を削除
 
 Usage:
-  cmux-team delete-agent-instructions --role <role>
+  elevens delete-agent-instructions --role <role>
 
 Notes:
   - overlay ロール: Agent 8 ロール + master + conductor
@@ -1957,10 +1957,10 @@ Notes:
 `,
 
   help_list_agent_instructions: `
-cmux-team list-agent-instructions -- 全 overlay ロールの overlay 有無を一覧表示
+elevens list-agent-instructions -- 全 overlay ロールの overlay 有無を一覧表示
 
 Usage:
-  cmux-team list-agent-instructions
+  elevens list-agent-instructions
 
 Notes:
   - OVERLAY_ROLES の順で 1 ロール 1 行ずつ出力（Agent 8 ロール → master → conductor）
@@ -1968,58 +1968,58 @@ Notes:
   - overlay なし: "<role> ✗"
 `,
 
-  help_main: `cmux-team — マルチエージェント開発オーケストレーション
+  help_main: `elevens — マルチエージェント開発オーケストレーション
 
 Usage:
-  cmux-team --version                          バージョン表示
-  cmux-team start                              daemon 起動 + Master spawn
-  cmux-team send TASK_CREATED --task-id <id> --task-file <path>
-  cmux-team send SHUTDOWN
-  cmux-team status                             ステータス表示
-  cmux-team spawn-conductor [--resume <session-id>] [--task-prompt <path>] [--model <model>]
-  cmux-team spawn-agent --conductor-surface <surface> --role <role> --prompt <prompt>
+  elevens --version                          バージョン表示
+  elevens start                              daemon 起動 + Master spawn
+  elevens send TASK_CREATED --task-id <id> --task-file <path>
+  elevens send SHUTDOWN
+  elevens status                             ステータス表示
+  elevens spawn-conductor [--resume <session-id>] [--task-prompt <path>] [--model <model>]
+  elevens spawn-agent --conductor-surface <surface> --role <role> --prompt <prompt>
                                               （Agent ロールのみ — master/conductor は overlay 専用）
-  cmux-team agents                             稼働中エージェント一覧
-  cmux-team close-agent --surface <surface>    Agent を正常終了
-  cmux-team kill-agent --surface <surface>     Agent を強制停止（crash 扱い）
-  cmux-team send-agent --surface <surface> <message>    Agent にメッセージ送信
-  cmux-team create-task --title <title> [--priority <p>] [--status <s>] [--body <text>] [--depends-on <ids>] [--run-after-all] [--exclusive]
-  cmux-team update-task --task-id <id> --status <status>
-  cmux-team close-task --task-id <id> [--journal <text>]
-  cmux-team await-task --task-id <id> [--timeout <sec>]    タスク完了待ち
-  cmux-team abort-task --task-id <id> [--journal <text>] 実行中タスクを中止
-  cmux-team restart-task --task-id <id> [--journal <text>] assigned または aborted のタスクを再実行
-  cmux-team delete-task --task-id <id> [--journal <text>] タスクを削除
-  cmux-team trace-task <task-id>              タスクのセッション履歴を表示
-  cmux-team trace-hooks                        hook シグナル履歴を表示
-  cmux-team events [--follow] [--types ...] [--since ...] [--format json|text]
+  elevens agents                             稼働中エージェント一覧
+  elevens close-agent --surface <surface>    Agent を正常終了
+  elevens kill-agent --surface <surface>     Agent を強制停止（crash 扱い）
+  elevens send-agent --surface <surface> <message>    Agent にメッセージ送信
+  elevens create-task --title <title> [--priority <p>] [--status <s>] [--body <text>] [--depends-on <ids>] [--run-after-all] [--exclusive]
+  elevens update-task --task-id <id> --status <status>
+  elevens close-task --task-id <id> [--journal <text>]
+  elevens await-task --task-id <id> [--timeout <sec>]    タスク完了待ち
+  elevens abort-task --task-id <id> [--journal <text>] 実行中タスクを中止
+  elevens restart-task --task-id <id> [--journal <text>] assigned または aborted のタスクを再実行
+  elevens delete-task --task-id <id> [--journal <text>] タスクを削除
+  elevens trace-task <task-id>              タスクのセッション履歴を表示
+  elevens trace-hooks                        hook シグナル履歴を表示
+  elevens events [--follow] [--types ...] [--since ...] [--format json|text]
                                               events ストリームを tail / filter（.team/logs/events.jsonl）
-  cmux-team metrics [--task-id ...] [--since ...] [--format json|text|csv] [--group-by task|day|week]
+  elevens metrics [--task-id ...] [--since ...] [--format json|text|csv] [--group-by task|day|week]
                                               events.jsonl + hook_signals + api_usage を per-task / 期間で集計
-  cmux-team spawn-master                      Master 起動（proxy 自動解決）
-  cmux-team artifacts                              アーティファクト一覧
-  cmux-team artifacts add <file>                   ファイルを .team/artifacts/ に移動
-  cmux-team artifacts show <id>                    アーティファクト表示
-  cmux-team artifacts open <id>                    Markdown ビューアで開く
-  cmux-team artifacts search <query>               全文検索
-  cmux-team artifacts --validate                   フロントマター検証
-  cmux-team get-agent-instructions --role <role>   project-local overlay を表示（Agent ロール + master/conductor）
-  cmux-team set-agent-instructions --role <role> (--body <t> | --from-file <p> | --from-stdin)  overlay を書き込み
-  cmux-team delete-agent-instructions --role <role> overlay を削除
-  cmux-team list-agent-instructions                 ロールごとの overlay 有無を一覧（10 ロール）
-  cmux-team pool status                            token pool ダッシュボード表示 (T323)
+  elevens spawn-master                      Master 起動（proxy 自動解決）
+  elevens artifacts                              アーティファクト一覧
+  elevens artifacts add <file>                   ファイルを .team/artifacts/ に移動
+  elevens artifacts show <id>                    アーティファクト表示
+  elevens artifacts open <id>                    Markdown ビューアで開く
+  elevens artifacts search <query>               全文検索
+  elevens artifacts --validate                   フロントマター検証
+  elevens get-agent-instructions --role <role>   project-local overlay を表示（Agent ロール + master/conductor）
+  elevens set-agent-instructions --role <role> (--body <t> | --from-file <p> | --from-stdin)  overlay を書き込み
+  elevens delete-agent-instructions --role <role> overlay を削除
+  elevens list-agent-instructions                 ロールごとの overlay 有無を一覧（10 ロール）
+  elevens pool status                            token pool ダッシュボード表示 (T323)
 
 共通オプション:
   --project-root <path>      project root を上書き（read はデフォルト許可、write は確認 prompt）
   --project-root-confirm     cross-project write gate を skip（write コマンド限定）
                              env: CMUX_TEAM_PROJECT_ROOT_CONFIRM=1 でも可
 
-各コマンドの詳細: cmux-team <command> --help`,
+各コマンドの詳細: elevens <command> --help`,
 
   // ── gh-cache (T272) ───────────────────────────────────────────────────────
   gh_not_a_github_repo:
     "Error: git リポジトリ外、または origin が GitHub / GHE ではありません。\n" +
-    "  cmux-team issue/pr は origin が github.com または Enterprise インスタンスである必要があります。",
+    "  elevens issue/pr は origin が github.com または Enterprise インスタンスである必要があります。",
   gh_auth_missing:
     "Error: host {host} の GitHub トークンが見つかりません。\n" +
     "  確認先: {checked}\n" +
@@ -2028,15 +2028,15 @@ Usage:
     "  export GITHUB_TOKEN=<your token>",
   gh_rate_limit_exhausted:
     "Error: GitHub API のレート制限に到達しました。remaining={remaining} reset_at={reset_at}\n" +
-    "  `cmux-team issue list --stale-ok` でキャッシュから読み取れます（同期せずに表示）。",
+    "  `elevens issue list --stale-ok` でキャッシュから読み取れます（同期せずに表示）。",
   gh_me_not_resolved:
-    "Error: @me を解決できません。先に `cmux-team gh sync` を実行して viewer login をキャッシュしてください。",
+    "Error: @me を解決できません。先に `elevens gh sync` を実行して viewer login をキャッシュしてください。",
   gh_unknown_subcommand:
-    "Unknown subcommand: {sub}. `cmux-team gh --help` を参照してください。",
+    "Unknown subcommand: {sub}. `elevens gh --help` を参照してください。",
   gh_cache_not_initialized:
-    "Error: gh-cache.db が空です。先に `cmux-team gh sync --full` を実行してください。",
+    "Error: gh-cache.db が空です。先に `elevens gh sync --full` を実行してください。",
   gh_stale_warning:
-    "Warning: 最後の full sync から {days} 日経過しています。`cmux-team gh sync --full` の実行を検討してください。",
+    "Warning: 最後の full sync から {days} 日経過しています。`elevens gh sync --full` の実行を検討してください。",
   gh_issue_empty: "(該当する issue / PR はありません)",
   gh_sync_success:
     "同期完了 {mode}: issues={issues} comments={comments} reviews={reviews} duration={duration_ms}ms",
@@ -2063,11 +2063,11 @@ Usage:
     "Issues タブは無効（git リポジトリでないか、origin が GitHub ではありません）。",
   gh_tui_disabled_no_auth:
     "Issues タブには認証が必要です。`gh auth login` を実行するか GITHUB_TOKEN を設定してください。",
-  gh_help: `cmux-team gh — GitHub issue/PR キャッシュ管理
+  gh_help: `elevens gh — GitHub issue/PR キャッシュ管理
 
 Usage:
-  cmux-team gh sync [--full]          issue/PR を .team/gh-cache.db に同期
-  cmux-team gh status                 キャッシュ状態とレート制限を表示
+  elevens gh sync [--full]          issue/PR を .team/gh-cache.db に同期
+  elevens gh status                 キャッシュ状態とレート制限を表示
 
 Flags:
   --full    直近 500 件の issue/PR（とその添付）を最初から取得する

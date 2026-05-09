@@ -201,22 +201,22 @@ describe("spawnMaster launch 文字列", () => {
     renameTabSpy.mockRestore();
   });
 
-  test("projectRoot が cd '<root>' && cmux-team spawn-master の形式で送信される", async () => {
+  test("projectRoot が cd '<root>' && elevens spawn-master の形式で送信される", async () => {
     await spawnMaster("/abs/project/root");
     expect(sendSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
     const launchCall = sendSpy.mock.calls[0]?.[1] as string;
-    expect(launchCall).toBe("cd '/abs/project/root' && cmux-team spawn-master\n");
+    expect(launchCall).toBe("cd '/abs/project/root' && elevens spawn-master\n");
   });
 
   test("path に空白を含む projectRoot も正しく single-quote で包まれる", async () => {
     await spawnMaster("/home/user/my project");
     const launchCall = sendSpy.mock.calls[0]?.[1] as string;
-    expect(launchCall).toBe("cd '/home/user/my project' && cmux-team spawn-master\n");
+    expect(launchCall).toBe("cd '/home/user/my project' && elevens spawn-master\n");
   });
 
   test("path に単一引用符を含む projectRoot は '\\'\\'' で escape される", async () => {
     await spawnMaster("/has' quote/root");
     const launchCall = sendSpy.mock.calls[0]?.[1] as string;
-    expect(launchCall).toBe("cd '/has'\\'' quote/root' && cmux-team spawn-master\n");
+    expect(launchCall).toBe("cd '/has'\\'' quote/root' && elevens spawn-master\n");
   });
 });

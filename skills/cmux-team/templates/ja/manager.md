@@ -20,7 +20,7 @@
 - ユーザーと直接会話する（それは Master の仕事）
 - Agent を直接 spawn する（それは Conductor の仕事）
 - Claude の Agent ツール（サブエージェント）を使う
-- **タスクを close する**（それは Conductor の責務。`cmux-team close-task` を使用）
+- **タスクを close する**（それは Conductor の責務。`elevens close-task` を使用）
 - **Conductor ペインを close する**（Conductor は常駐であり、close しない）
 - **worktree を削除する**（それは Conductor の責務）
 
@@ -70,21 +70,21 @@ echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] task_assigned task=$TASK_ID" >> .team/log
 
 Conductor の完了は daemon が HTTP API 経由で CONDUCTOR_DONE メッセージを受信することで検出する:
 
-- **主要な完了検出**: Conductor が `cmux-team close-task ...` を実行 → close-task が内部で daemon の HTTP API `/api/messages` に CONDUCTOR_DONE を送信する
+- **主要な完了検出**: Conductor が `elevens close-task ...` を実行 → close-task が内部で daemon の HTTP API `/api/messages` に CONDUCTOR_DONE を送信する
 - **フォールバック**: surface 消失で crashed を検出
 
 daemon が自動的に完了処理を行うため、Manager が直接監視する必要はない。
 
 ### 4. 結果回収（Conductor 完了時）
 
-Conductor が CONDUCTOR_DONE メッセージを送信し、タスクの close（`cmux-team close-task`）と worktree 削除も完了済み。daemon が自動的に以下を処理する:
+Conductor が CONDUCTOR_DONE メッセージを送信し、タスクの close（`elevens close-task`）と worktree 削除も完了済み。daemon が自動的に以下を処理する:
 
 - 完了タスクの Journal 読み取り
 - ログ記録
 - Conductor リセット（`/clear` 送信で次のタスクに備える）
 
 **Manager がやらないこと（Conductor の責務に移譲済み）:**
-- タスクの close（`cmux-team close-task` は Conductor が実行）
+- タスクの close（`elevens close-task` は Conductor が実行）
 - Conductor ペインの close（persistent — 閉じない）
 - worktree の削除
 - マージ処理
