@@ -440,6 +440,11 @@ export type ConductorState = z.infer<typeof ConductorState> & {
    *  SESSION_STARTED で `assigning → running` 遷移時にクリアされる。
    *  ランタイム限定（永続化対象外）。 */
   killInProgressUntil?: number;
+  /** Phase 2 観測パイプライン: c11 surface metadata `mailbox.*` の変化を
+   *  watch するための teardown handle。register 時に spawnConductorMailboxWatcher が
+   *  set し、close / clear / disconnect / stopDaemon で呼ばれる。
+   *  ランタイム限定（永続化対象外）。cmux backend では no-op の `() => {}` が入る。 */
+  mailboxWatcherStop?: () => void;
 };
 
 /**

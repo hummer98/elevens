@@ -503,6 +503,51 @@ export function insertHookSignal(db: Database, message: QueueMessage): number {
   return Number(result.lastInsertRowid);
 }
 
+/**
+ * Phase 2 観測パイプライン: c11 surface metadata (`mailbox.*`) の変化を
+ * `hook_signals` に書き込む専用 helper。`insertHookSignal` は QueueMessage 前提で
+ * 列マッピングが固定だが、metadata 経路は QueueMessage を介さない（hook 由来でない）ため
+ * 専用 helper を分けて、`source='metadata'` で記録経路を区別できるようにする。
+ *
+ * - `type` は `MAILBOX_CHANGED` 固定
+ * - `source` は `metadata` 固定（hook 由来の `startup`/`resume`/... と排他）
+ * - payload_json には MailboxChange 1 件分の全情報を JSON で残す
+ */
+export interface MailboxObservation {
+  timestamp: string;
+  surface: string;
+  taskId?: string | null;
+  taskRunId?: string | null;
+  /** MailboxChange の単一エントリを serialize したもの */
+  payload: Record<string, unknown>;
+}
+
+export function insertMailboxObservation(
+  db: Database,
+  obs: MailboxObservation,
+): number {
+  const json = JSON.stringify(obs.payload);
+  let safeJson = json;
+  if (json.length > HOOK_SIGNAL_PAYLOAD_LIMIT) {
+    safeJson = json.slice(0, HOOK_SIGNAL_PAYLOAD_LIMIT);
+    console.warn(
+      `[trace-store] hook_signal_payload_truncated type=MAILBOX_CHANGED size=${json.length}`,
+    );
+  }
+  const stmt = db.prepare(`
+    INSERT INTO hook_signals (timestamp, type, surface, source, task_id, task_run_id, payload_json)
+    VALUES ($timestamp, 'MAILBOX_CHANGED', $surface, 'metadata', $task_id, $task_run_id, $payload_json)
+  `);
+  const result = stmt.run({
+    $timestamp: obs.timestamp,
+    $surface: obs.surface,
+    $task_id: obs.taskId ?? null,
+    $task_run_id: obs.taskRunId ?? null,
+    $payload_json: safeJson,
+  });
+  return Number(result.lastInsertRowid);
+}
+
 export function getHookSignals(
   db: Database,
   opts: {

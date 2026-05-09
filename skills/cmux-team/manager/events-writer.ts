@@ -131,6 +131,21 @@ export type EventStreamRecord =
       surface: string;
       kind: string;
       message?: string;
+    }
+  | {
+      // Phase 2 観測パイプライン: c11 surface metadata (`mailbox.*`) の変化を
+      // events.jsonl に流す。trace DB の hook_signals (source='metadata') と
+      // dual-write することで、metadata 経路の観測完全性を retrospective に検証できる。
+      // schema_version は bump しない（add-only）。
+      event: "mailbox_changed";
+      conductor_surface: string;
+      task_id?: string;
+      changes: Array<{
+        kind: "added" | "changed" | "removed";
+        key: string;
+        value?: unknown;
+        previous?: unknown;
+      }>;
     };
 
 /**

@@ -29,8 +29,10 @@ import { classifyStopPayload, DEFAULT_TAIL_BYTES } from "./classify-stop";
 import type { AgentState, ConductorState, MasterState, QueueMessage, RateLimitInfo, LayoutMode, Deliverable } from "./schema";
 import { THROTTLE_5H_THRESHOLD, LAYOUT_MAX_CONDUCTORS, isAssignableStatus } from "./schema";
 import type { Database } from "bun:sqlite";
-import { initDB, insertHookSignal, insertTaskSession, updateNotificationEnrichment } from "./trace-store";
+import { initDB, insertHookSignal, insertMailboxObservation, insertTaskSession, updateNotificationEnrichment } from "./trace-store";
 import type { NotificationEnrichment } from "./trace-store";
+// Phase 2 観測パイプライン: c11 surface metadata `mailbox.*` の変化を watch する
+import { watchMailbox as defaultWatchMailbox, type MailboxChange, type MailboxTarget } from "./c11-features";
 import { isStale5h } from "./rate-limit-persistence";
 import { normalizeSurfaceForPath as normalizeSurfaceForPathImpl } from "./paths";
 // T279: FSM shadow observer (observe only, no state mutation).
@@ -490,6 +492,11 @@ export function stopDaemon(state: DaemonState): void {
     if (conductor.pidWatcherInterval) {
       clearInterval(conductor.pidWatcherInterval);
       conductor.pidWatcherInterval = undefined;
+    }
+    // Phase 2 観測パイプライン: mailbox watcher の poll loop を停止
+    if (conductor.mailboxWatcherStop) {
+      try { conductor.mailboxWatcherStop(); } catch { /* best-effort */ }
+      conductor.mailboxWatcherStop = undefined;
     }
     for (const agent of conductor.agents) {
       if (agent.pidWatcherInterval) {
@@ -1176,6 +1183,8 @@ async function applyRestorePlan(
     if (typeof c.pid === "number") {
       spawnPidWatcher(state, c, c.pid);
     }
+    // Phase 2 観測パイプライン: alive restore で復元された Conductor にも mailbox watcher を起動
+    void spawnConductorMailboxWatcher(state, c);
     for (const a of c.agents) {
       if (typeof a.pid === "number") {
         spawnAgentPidWatcher(state, c, a, a.pid);
@@ -1242,6 +1251,12 @@ async function applyRestorePlan(
       });
     } catch (e: any) {
       // rollback: pre-set state を消し、task-state を ready に戻す
+      // Phase 2 観測パイプライン: pre-set 経路では watcher は未起動のはずだが、
+      //   万一 set されていれば teardown しておく（防御的）
+      const stale = state.conductors.get(surface);
+      if (stale?.mailboxWatcherStop) {
+        try { stale.mailboxWatcherStop(); } catch { /* best-effort */ }
+      }
       state.conductors.delete(surface);
       // T303: REVERT_TO_READY(launch_failed)
       await applyTaskEvent(state.projectRoot, {
@@ -1892,6 +1907,10 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
         conductor.lastHookAt = message.timestamp;
         notifyStateChanged("daemon.ts:handleMessage:session-started-conductor");
         spawnPidWatcher(state, conductor, message.pid);
+        // Phase 2 観測パイプライン: SESSION_STARTED 経路でも mailbox watcher を確実に起動。
+        //   resume / reconnect / clear 後の再起動でも observation を継続させるため、
+        //   `spawnConductorMailboxWatcher` の再呼び出し冪等性（旧 stop → 新 start）を活用する。
+        void spawnConductorMailboxWatcher(state, conductor);
 
         // T203 C3 / T303: updateTaskSessionId に D5 3 段 guard を集約。
         // hook 配布物は taskRunId を知らないが、daemon 内部の突合で mismatch を検出する。
@@ -2088,6 +2107,11 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
       });
       notifyStateChanged("daemon.ts:handleMessage:conductor-registered");
       await log("conductor_registered", formatSurface(message.surface, "C"));
+      // Phase 2 観測パイプライン: register 直後に mailbox watcher を起動。
+      //   PID watcher は SESSION_STARTED で起動するが、mailbox は metadata 経路なので
+      //   pid 不要。register 時点で開始して `mailbox.role`/`mailbox.status` の初期申告を捕捉する。
+      const newConductor = state.conductors.get(message.surface);
+      if (newConductor) void spawnConductorMailboxWatcher(state, newConductor);
       // T279 shadow: REGISTERED 新規登録は reducer 上 no-op (shadow 側も pre-existing state 扱い)。
       try {
         const ev: FsmEvent = { type: "REGISTERED" };
@@ -2754,6 +2778,12 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
         if (conductor.pidWatcherInterval) {
           clearInterval(conductor.pidWatcherInterval);
           conductor.pidWatcherInterval = undefined;
+        }
+        // Phase 2 観測パイプライン: SESSION_CLEAR で claude が kill される。
+        //   metadata 監視も一旦停止（SESSION_STARTED で再起動される）。
+        if (conductor.mailboxWatcherStop) {
+          try { conductor.mailboxWatcherStop(); } catch { /* best-effort */ }
+          conductor.mailboxWatcherStop = undefined;
         }
         // T421/D5: ユーザー手動 /clear → claude を kill して reserved に戻す
         //   （旧挙動は claude セッションを保持していたため token が解放されないバグの主因）。
@@ -3706,6 +3736,125 @@ async function handleRuntimeEvent(state: DaemonState, event: RuntimeEvent): Prom
   }
 }
 
+// ---------------------------------------------------------------------------
+// Phase 2 観測パイプライン: per-Conductor mailbox watcher
+// ---------------------------------------------------------------------------
+//
+// c11 surface metadata `mailbox.*` の変化を watch して、trace DB の hook_signals
+// (source='metadata') と events.jsonl に dual-write する shadow 観測。既存の
+// `done` marker file watcher / spawnPidWatcher / close 判定には**触らない**。
+// 観測のみで、FSM や close 判定への影響は無い。
+//
+// cmux backend では `watchMailbox` が即 resolve（no-op の `() => {}` を返す）。
+// c11 backend で mailbox 非対応 build の場合も同様。
+
+/** テスト用に差し替え可能にする watcher factory の signature。 */
+export type MailboxWatcherFactory = (
+  target: MailboxTarget,
+  onChange: (changes: MailboxChange[]) => void | Promise<void>,
+  opts?: { intervalMs?: number },
+) => Promise<{ stop: () => void }>;
+
+let mailboxWatcherImpl: MailboxWatcherFactory | null = null;
+
+/** テスト用: `spawnConductorMailboxWatcher` が使う watcher factory を差し替える。`null` で元に戻す。 */
+export function __setMailboxWatcherImpl(impl: MailboxWatcherFactory | null): void {
+  mailboxWatcherImpl = impl;
+}
+
+function getMailboxWatcherFactory(): MailboxWatcherFactory {
+  return mailboxWatcherImpl ?? defaultWatchMailbox;
+}
+
+/**
+ * Conductor surface に対する mailbox.* watcher を起動する。
+ *
+ * - 既に watcher が起動中なら旧 watcher を stop してから新規起動（再 register に対する冪等性）
+ * - factory が throw しても daemon を落とさない（best-effort 観測）
+ * - change 検出ごとに insertMailboxObservation + emitEvent('mailbox_changed') を呼ぶ
+ * - cmux backend では factory が即 `{ stop: () => {} }` を返す（c11-features.ts の仕様）
+ */
+export async function spawnConductorMailboxWatcher(
+  state: DaemonState,
+  conductor: ConductorState,
+): Promise<void> {
+  // 旧 watcher が残っていれば stop（lifecycle の冪等性）
+  if (conductor.mailboxWatcherStop) {
+    try {
+      conductor.mailboxWatcherStop();
+    } catch (e: any) {
+      await log("error", `mailbox_watcher_stop_failed surface=${conductor.surface} ${e?.message ?? e}`);
+    }
+    conductor.mailboxWatcherStop = undefined;
+  }
+
+  const factory = getMailboxWatcherFactory();
+  const target: MailboxTarget = { kind: "surface", ref: conductor.surface };
+  let handle: { stop: () => void };
+  try {
+    handle = await factory(target, async (changes) => {
+      // change を 1 件ずつ trace DB に書く（個別 row のほうが集計が容易）
+      const ts = new Date().toISOString();
+      for (const ch of changes) {
+        const payload: Record<string, unknown> = {
+          kind: ch.kind,
+          key: ch.key,
+        };
+        if (ch.kind === "added") payload.value = ch.value;
+        else if (ch.kind === "changed") {
+          payload.value = ch.value;
+          payload.previous = ch.previous;
+        } else if (ch.kind === "removed") {
+          payload.previous = ch.previous;
+        }
+        if (state.traceDb) {
+          try {
+            insertMailboxObservation(state.traceDb, {
+              timestamp: ts,
+              surface: conductor.surface,
+              taskId: conductor.taskId ?? null,
+              taskRunId: conductor.taskRunId ?? null,
+              payload,
+            });
+          } catch (e: any) {
+            await log(
+              "error",
+              `mailbox_observation_insert_failed surface=${conductor.surface} ${e?.message ?? e}`,
+            );
+          }
+        }
+      }
+      // events.jsonl は 1 tick = 1 record（複数 change を 1 行に集約）
+      try {
+        await emitEvent({
+          event: "mailbox_changed",
+          conductor_surface: conductor.surface,
+          ...(conductor.taskId ? { task_id: conductor.taskId } : {}),
+          changes: changes.map((ch) => {
+            if (ch.kind === "added") return { kind: ch.kind, key: ch.key, value: ch.value };
+            if (ch.kind === "changed")
+              return { kind: ch.kind, key: ch.key, value: ch.value, previous: ch.previous };
+            return { kind: ch.kind, key: ch.key, previous: ch.previous };
+          }),
+        });
+      } catch (e: any) {
+        await log(
+          "error",
+          `mailbox_event_emit_failed surface=${conductor.surface} ${e?.message ?? e}`,
+        );
+      }
+    }, { intervalMs: 1500 });
+  } catch (e: any) {
+    // factory 自体が throw した場合は best-effort で諦める（daemon は継続）
+    await log(
+      "error",
+      `mailbox_watcher_spawn_failed surface=${conductor.surface} ${e?.message ?? e}`,
+    );
+    return;
+  }
+  conductor.mailboxWatcherStop = handle.stop;
+}
+
 /** PID ウォッチャー: 指定 PID の終了を検出して disconnected にする */
 export function spawnPidWatcher(
   state: DaemonState,
@@ -4026,6 +4175,11 @@ async function forceCloseDisconnectedConductor(
   if (conductor.pidWatcherInterval) {
     clearInterval(conductor.pidWatcherInterval);
     conductor.pidWatcherInterval = undefined;
+  }
+  // Phase 2 観測パイプライン: broken 化に伴う mailbox watcher の teardown
+  if (conductor.mailboxWatcherStop) {
+    try { conductor.mailboxWatcherStop(); } catch { /* best-effort */ }
+    conductor.mailboxWatcherStop = undefined;
   }
 
   // 3. resetConductor で worktree/branch/タブ名をクリーンアップし broken 状態に遷移
