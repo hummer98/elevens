@@ -51,21 +51,15 @@ export function detectBackendDecision(env: NodeJS.ProcessEnv = process.env): Bac
   if (cliPath && /\/c11\.app\//.test(cliPath)) {
     return { kind: "auto", backend: "c11", bundle: env.CMUX_BUNDLE_ID ?? "(unknown via CLI path)" };
   }
-  // refuse path
+  // refuse path: c11 surface 起動のみを案内する。
+  // ELEVENS_BACKEND env による escape hatch は仕様としては存在するが、
+  // user 向けエラーメッセージでは敢えて言及せず、c11 への移行を促す。
   return {
     kind: "refuse",
     reason: [
-      "elevens は c11-first です。c11 multiplexer 上で起動するか、明示的にレガシー backend を",
-      "選択してください。",
-      "",
-      "対処方法:",
-      "  (a) c11 surface 内で `elevens start` を実行する (推奨)",
-      "      Stage 11 Agentics の c11 をインストールして surface を開いてから起動",
-      "  (b) 明示的に cmux backend を opt-in する (legacy):",
-      "      ELEVENS_BACKEND=cmux elevens start",
-      "      ※ cmux backend は v0.3.0 以降 deprecated です (DEPRECATION_NOTICE が log されます)",
-      "  (c) 明示的に c11 backend を指定する (PATH 上の c11 binary を使う):",
-      "      ELEVENS_BACKEND=c11 elevens start",
+      "elevens は c11 multiplexer 上での起動を必要とします。",
+      "Stage 11 Agentics の c11 (https://github.com/Stage-11-Agentics/c11) をインストールして、",
+      "c11 surface 内で `elevens start` を実行してください。",
     ].join("\n"),
     observed: {
       bundleId: env.CMUX_BUNDLE_ID,

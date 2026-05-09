@@ -87,8 +87,11 @@ describe("detectBackendDecision (v0.4.0+ c11 必須化)", () => {
     const r = detectBackendDecision({});
     expect(r.kind).toBe("refuse");
     if (r.kind === "refuse") {
-      expect(r.reason).toContain("c11-first");
-      expect(r.reason).toContain("ELEVENS_BACKEND=cmux"); // legacy opt-in を案内
+      expect(r.reason).toContain("c11");
+      expect(r.reason).toContain("Stage-11-Agentics/c11"); // c11 install 案内 URL
+      // refuse message は cmux opt-in を案内しない (c11 一本化方針)
+      expect(r.reason).not.toContain("ELEVENS_BACKEND=cmux");
+      expect(r.reason).not.toContain("(a)");
       expect(r.observed.bundleId).toBeUndefined();
     }
   });

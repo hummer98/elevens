@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1] - 2026-05-10
+
+### Changed
+
+- **`elevens start` の refuse 時のメッセージを c11 一本化**: v0.4.0 では (a) c11 surface / (b) ELEVENS_BACKEND=cmux opt-in / (c) ELEVENS_BACKEND=c11 明示の 3 通りを案内していたが、c11-first の方針を user に明確に伝えるため (a) のみを案内するシンプルなメッセージに変更。`Stage 11 Agentics の c11 をインストールして surface 内で実行してください` 1 文 + URL のみ
+- **判断基準**: `ELEVENS_BACKEND=cmux` の escape hatch は仕様としては残置 (env での明示 opt-in は引き続き機能する) が、エラーメッセージで「逃げ道」を提示すると user が migration を先延ばしにする。仕様を知る advanced user は CHANGELOG / docs を読んで env を設定できる。それ以外の user は迷わず c11 surface に向かう
+- TDD: refuse message の assertion を `not.toContain("ELEVENS_BACKEND=cmux")` 等に強化
+
 ## [0.4.0] - 2026-05-10
 
 **c11 必須化** — Phase 3 の最終ステップ。auto-detect で c11 multiplexer 上にいると判断できなければ `elevens start` を refuse + exit 1。これは **breaking change** で、cmux multiplexer 運用ユーザーは ELEVENS_BACKEND=cmux 明示が必要になる。
