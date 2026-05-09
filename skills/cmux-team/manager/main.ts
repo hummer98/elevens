@@ -2023,6 +2023,12 @@ const DETECT_ASK_SCRIPT = [
   '  "$(printf %s "$TRANSCRIPT_PATH" | jq -Rs .)" \\',
   '  | cmux-team send --from-stdin 2>/dev/null || true',
   '',
+  '# T448: c11 mailbox observatory に並行通知（opportunistic）。',
+  '# c11 が PATH に無い / cmux backend / c11 daemon 停止中、いずれの失敗も',
+  '# `|| true` で suppress して hook 全体の exit 0 を保つ。daemon 側 done marker',
+  '# 経路と c11 mailbox 経路を完全に dual-write にすることが目的（A029 §4 設計）。',
+  'printf %s "$PAYLOAD" | c11 claude-hook stop 2>/dev/null || true',
+  '',
   'exit 0',
   '',
 ].join("\n");
@@ -2379,12 +2385,13 @@ export function generateMasterSettings(projectRoot: string, surface: string): st
     hooks: {
       // T175: SessionStart hook で daemon に masterPid を渡し spawnMasterPidWatcher を起動する。
       // Conductor の SessionStart hook と完全に同じ command パターン (main.ts:1478-1489)。
+      // T448: c11 mailbox observatory にも並行通知（INPUT を一度だけ吸って両方に流す）。
       SessionStart: [
         {
           matcher: "",
           hooks: [{
             type: "command",
-            command: "bash -c 'cmux-team send SESSION_STARTED --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" 2>/dev/null || true'",
+            command: "bash -c 'INPUT=\"$(cat)\"; printf %s \"$INPUT\" | cmux-team send SESSION_STARTED --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" 2>/dev/null || true; printf %s \"$INPUT\" | c11 claude-hook session-start 2>/dev/null || true'",
             timeout: 5000,
           }],
         },
@@ -2402,12 +2409,13 @@ export function generateMasterSettings(projectRoot: string, surface: string): st
       // T266: Notification hook を daemon に集約・DB 記録する。
       // Claude Code native の通知（permission / idle 等）を全て Manager に転送し、
       // hook_signals テーブルに enrichment 付きで INSERT する。
+      // T448: c11 mailbox observatory にも並行通知（INPUT を一度だけ吸って両方に流す）。
       Notification: [
         {
           matcher: "",
           hooks: [{
             type: "command",
-            command: "bash -c 'cmux-team send NOTIFICATION --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --surface-uuid \"${CMUX_SURFACE_UUID:-}\" --workspace-uuid \"${CMUX_WORKSPACE_UUID:-}\" --role master 2>/dev/null || true'",
+            command: "bash -c 'INPUT=\"$(cat)\"; printf %s \"$INPUT\" | cmux-team send NOTIFICATION --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --surface-uuid \"${CMUX_SURFACE_UUID:-}\" --workspace-uuid \"${CMUX_WORKSPACE_UUID:-}\" --role master 2>/dev/null || true; printf %s \"$INPUT\" | c11 claude-hook notification 2>/dev/null || true'",
             timeout: 5000,
           }],
         },
@@ -2518,18 +2526,20 @@ export function generateAgentSettings(
           hooks: [{
             type: "command",
             // T203: hook stdin の JSON（session_id, source, ...）をそのまま cmux-team に渡す。
-            command: `bash -c 'cmux-team send SESSION_STARTED --from-stdin --surface "${surface}" --pid "$PPID" 2>/dev/null || true'`,
+            // T448: c11 mailbox observatory にも並行通知（INPUT を一度だけ吸って両方に流す）。
+            command: `bash -c 'INPUT="$(cat)"; printf %s "$INPUT" | cmux-team send SESSION_STARTED --from-stdin --surface "${surface}" --pid "$PPID" 2>/dev/null || true; printf %s "$INPUT" | c11 claude-hook session-start 2>/dev/null || true'`,
             timeout: 5000,
           }],
         },
       ],
       // T266: Notification hook を daemon に集約・DB 記録する。
+      // T448: c11 mailbox observatory にも並行通知（INPUT を一度だけ吸って両方に流す）。
       Notification: [
         {
           matcher: "",
           hooks: [{
             type: "command",
-            command: `bash -c 'cmux-team send NOTIFICATION --from-stdin --surface "${surface}" --pid "$PPID" --surface-uuid "\${CMUX_SURFACE_UUID:-}" --workspace-uuid "\${CMUX_WORKSPACE_UUID:-}" --role agent 2>/dev/null || true'`,
+            command: `bash -c 'INPUT="$(cat)"; printf %s "$INPUT" | cmux-team send NOTIFICATION --from-stdin --surface "${surface}" --pid "$PPID" --surface-uuid "\${CMUX_SURFACE_UUID:-}" --workspace-uuid "\${CMUX_WORKSPACE_UUID:-}" --role agent 2>/dev/null || true; printf %s "$INPUT" | c11 claude-hook notification 2>/dev/null || true'`,
             timeout: 5000,
           }],
         },
@@ -2652,18 +2662,20 @@ export function generateConductorSettings(projectRoot: string, surface: string):
           hooks: [{
             type: "command",
             // T203: hook stdin の JSON（session_id, source, ...）をそのまま cmux-team に渡す。
-            command: "bash -c 'cmux-team send SESSION_STARTED --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" 2>/dev/null || true'",
+            // T448: c11 mailbox observatory にも並行通知（INPUT を一度だけ吸って両方に流す）。
+            command: "bash -c 'INPUT=\"$(cat)\"; printf %s \"$INPUT\" | cmux-team send SESSION_STARTED --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" 2>/dev/null || true; printf %s \"$INPUT\" | c11 claude-hook session-start 2>/dev/null || true'",
             timeout: 5000,
           }],
         },
       ],
       // T266: Notification hook を daemon に集約・DB 記録する。
+      // T448: c11 mailbox observatory にも並行通知（INPUT を一度だけ吸って両方に流す）。
       Notification: [
         {
           matcher: "",
           hooks: [{
             type: "command",
-            command: "bash -c 'cmux-team send NOTIFICATION --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --surface-uuid \"${CMUX_SURFACE_UUID:-}\" --workspace-uuid \"${CMUX_WORKSPACE_UUID:-}\" --role conductor 2>/dev/null || true'",
+            command: "bash -c 'INPUT=\"$(cat)\"; printf %s \"$INPUT\" | cmux-team send NOTIFICATION --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --surface-uuid \"${CMUX_SURFACE_UUID:-}\" --workspace-uuid \"${CMUX_WORKSPACE_UUID:-}\" --role conductor 2>/dev/null || true; printf %s \"$INPUT\" | c11 claude-hook notification 2>/dev/null || true'",
             timeout: 5000,
           }],
         },

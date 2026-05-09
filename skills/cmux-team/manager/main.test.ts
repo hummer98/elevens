@@ -3210,4 +3210,127 @@ describe("buildMasterClaudeArgs (T408)", () => {
   });
 });
 
+// --- T448: c11 claude-hook opportunistic forwarding ---
+// Stop / SessionStart / Notification の各 hook 経路で、
+// 既存の cmux-team daemon 転送を温存しつつ c11 mailbox observatory にも並行通知する。
+// c11 不在環境（cmux backend / c11 daemon 停止中）でも `|| true` で suppress されるため
+// hook そのものは exit 0 を保ち Claude Code をブロックしない。
+
+describe("c11 claude-hook opportunistic forwarding (T448)", () => {
+  test("DETECT_ASK_SCRIPT は c11 claude-hook stop に payload を転送する", async () => {
+    await mkdir(join(testDir, ".team/prompts"), { recursive: true });
+    const scriptPath = ensureAskDetectorScript(testDir);
+    const content = await readFile(scriptPath, "utf-8");
+    // c11 へ並行転送する行が存在する
+    expect(content).toContain("c11 claude-hook stop");
+    // opportunistic: 失敗を suppress
+    expect(content).toContain("|| true");
+    // regression: 既存の SESSION_STOP forwarder 経路は壊れていない
+    expect(content).toContain("SESSION_STOP");
+    expect(content).toContain("cmux-team send --from-stdin");
+  });
+
+  test("DETECT_ASK_SCRIPT は stdin を一度だけ読み、PAYLOAD 変数経由で両方に流す (整合)", async () => {
+    await mkdir(join(testDir, ".team/prompts"), { recursive: true });
+    const scriptPath = ensureAskDetectorScript(testDir);
+    const content = await readFile(scriptPath, "utf-8");
+    // PAYLOAD="$(cat)" で stdin を 1 回だけ吸う（既存パターン）
+    expect(content).toMatch(/PAYLOAD="\$\(cat\)"/);
+    // PAYLOAD のみ参照され `cat` が複数回呼ばれていない（整合性チェック）
+    const catCount = (content.match(/\$\(cat\)/g) ?? []).length;
+    expect(catCount).toBe(1);
+    // c11 への流し方は printf "%s" "$PAYLOAD" | c11 ... の形
+    expect(content).toMatch(/printf\s+%s\s+"\$PAYLOAD"\s*\|\s*c11\s+claude-hook\s+stop/);
+  });
+
+  test("DETECT_ASK_SCRIPT は cmux-team forwarder を c11 forwarder より先に呼ぶ (順序維持)", async () => {
+    await mkdir(join(testDir, ".team/prompts"), { recursive: true });
+    const scriptPath = ensureAskDetectorScript(testDir);
+    const content = await readFile(scriptPath, "utf-8");
+    const cmuxIdx = content.indexOf("cmux-team send --from-stdin");
+    const c11Idx = content.indexOf("c11 claude-hook stop");
+    expect(cmuxIdx).toBeGreaterThan(-1);
+    expect(c11Idx).toBeGreaterThan(-1);
+    // c11 への転送は SESSION_STOP の cmux-team 転送の後ろに位置させる（既存挙動を pre-empt しない）
+    expect(c11Idx).toBeGreaterThan(cmuxIdx);
+  });
+
+  test("Conductor SessionStart hook は c11 claude-hook session-start に並行転送する", async () => {
+    await mkdir(join(testDir, ".team/prompts"), { recursive: true });
+    const settingsPath = generateConductorSettings(testDir, "surface:200");
+    const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
+    const cmd: string = settings.hooks.SessionStart[0].hooks[0].command;
+    // 既存: cmux-team send SESSION_STARTED は残存
+    expect(cmd).toContain("cmux-team send SESSION_STARTED");
+    expect(cmd).toContain("--from-stdin");
+    // 追加: c11 claude-hook session-start
+    expect(cmd).toContain("c11 claude-hook session-start");
+    expect(cmd).toContain("|| true");
+  });
+
+  test("Agent SessionStart hook は c11 claude-hook session-start に並行転送する", async () => {
+    await mkdir(join(testDir, ".team/prompts"), { recursive: true });
+    const settingsPath = generateAgentSettings(testDir, "surface:100");
+    const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
+    const cmd: string = settings.hooks.SessionStart[0].hooks[0].command;
+    expect(cmd).toContain("cmux-team send SESSION_STARTED");
+    expect(cmd).toContain("--from-stdin");
+    expect(cmd).toContain("c11 claude-hook session-start");
+    expect(cmd).toContain("|| true");
+  });
+
+  test("Master SessionStart hook も c11 claude-hook session-start に並行転送する", async () => {
+    await mkdir(join(testDir, ".team/prompts"), { recursive: true });
+    const settingsPath = generateMasterSettings(testDir, "surface:300");
+    const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
+    const cmd: string = settings.hooks.SessionStart[0].hooks[0].command;
+    expect(cmd).toContain("cmux-team send SESSION_STARTED");
+    expect(cmd).toContain("c11 claude-hook session-start");
+    expect(cmd).toContain("|| true");
+  });
+
+  test("Conductor Notification hook は c11 claude-hook notification に並行転送する", async () => {
+    await mkdir(join(testDir, ".team/prompts"), { recursive: true });
+    const settingsPath = generateConductorSettings(testDir, "surface:200");
+    const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
+    const cmd: string = settings.hooks.Notification[0].hooks[0].command;
+    // 既存: cmux-team send NOTIFICATION は残存
+    expect(cmd).toContain("cmux-team send NOTIFICATION");
+    expect(cmd).toContain("--from-stdin");
+    expect(cmd).toContain("--role conductor");
+    // 追加: c11 claude-hook notification
+    expect(cmd).toContain("c11 claude-hook notification");
+    expect(cmd).toContain("|| true");
+  });
+
+  test("Agent Notification hook は c11 claude-hook notification に並行転送する", async () => {
+    await mkdir(join(testDir, ".team/prompts"), { recursive: true });
+    const settingsPath = generateAgentSettings(testDir, "surface:100");
+    const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
+    const cmd: string = settings.hooks.Notification[0].hooks[0].command;
+    expect(cmd).toContain("cmux-team send NOTIFICATION");
+    expect(cmd).toContain("--role agent");
+    expect(cmd).toContain("c11 claude-hook notification");
+    expect(cmd).toContain("|| true");
+  });
+
+  test("c11 forwarder 行が増えても hook は exit 0 で終わる (DETECT_ASK_SCRIPT)", async () => {
+    await mkdir(join(testDir, ".team/prompts"), { recursive: true });
+    const scriptPath = ensureAskDetectorScript(testDir);
+    // 実 stdin に空 JSON を流して bash に実行させ、exit code が 0 であることを確認
+    const r = await new Promise<{ code: number; stderr: string }>((resolve) => {
+      const proc = spawn("bash", [scriptPath], {
+        env: { ...process.env, CMUX_SURFACE: "surface:0", PATH: "/usr/bin:/bin" },
+      });
+      let stderr = "";
+      proc.stderr.on("data", (d) => { stderr += d.toString(); });
+      proc.on("close", (code) => resolve({ code: code ?? 0, stderr }));
+      proc.stdin.write("{}");
+      proc.stdin.end();
+    });
+    // PATH に c11 / cmux-team / jq が無くても script は exit 0 で終わる（opportunistic）
+    expect(r.code).toBe(0);
+  });
+});
+
 
