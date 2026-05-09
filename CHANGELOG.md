@@ -1,6 +1,26 @@
 # Changelog
 
-## [0.1.1] - 2026-05-09
+## [0.2.0] - 2026-05-10
+
+Phase 2（mailbox.\* 経路の dual-write 観測）が一通り完了。c11 surface metadata を Conductor lifecycle で観察し、既存の `done` marker / pid watcher と並列に trace DB / events stream に記録する経路を確立した。詳細は `docs/seed.md` の Phase 計画と `.team/artifacts/A028〜A031` を参照。
+
+### Added
+
+- **`elevens mailbox` CLI** (`set/get/clear/watch/supported`): backend を意識せず c11 surface metadata を読み書きできる薄いラッパー。target 未指定時は `$CMUX_SURFACE_ID` / `$CMUX_SURFACE` を fallback。`--type string|number|bool|json` でコーシャン。cmux backend では opportunistic no-op (exit 0)
+- **daemon に `spawnConductorMailboxWatcher` を統合**: Conductor lifecycle で c11 surface metadata 変化を観測し、`hook_signals` に `type='MAILBOX_CHANGED'` / `source='metadata'` で記録、`events.jsonl` に `mailbox_changed` event を append。既存 `done` marker / pid watcher / FSM には不干渉の shadow 観測
+- **agent prompt template に mailbox lifecycle 申告 instruction を追加** (`common-header.md` ja/en): 開始時 `mailbox.role`+`mailbox.status=running`、完了直前 `mailbox.status=done` を既存 done marker と dual-write
+- **Stop / SessionStart / Notification hook で c11 `claude-hook` を opportunistic 並行転送**: stdin payload を `INPUT="$(cat)"` で 1 度だけ吸い、既存の `cmux-team send` 経路と c11 への転送を `2>/dev/null || true` で並列発火。c11 daemon が独自に session lifecycle を track できる経路を確立
+- **`mailbox.*` formal schema** (`docs/spec/13-mailbox-schema.md` + `mailbox-schema.ts`): canonical key 8 種 (role/status/task/task_run_id/progress/started_at/completed_at/error)、literal union 型 (MailboxRole 11 値 / MailboxStatus 5 値)、`validateMailboxPayload` / normalizer。`setMailbox(opts.validate: "strict"|"warn"|"off")` で書き込み前 validation を opt-in 可能（default warn）
+- **`tree` で c11 backend のときのみ `--no-layout` を自動付与**: floor plan ASCII art の前置で出力肥大化 + `TREE_TIMEOUT_MS` 詰まりを回避
+
+### Fixed
+
+- **`watchMailbox` の永続 desync bug**: `getMailbox` の transient 失敗を null に折り畳んで watcher が phantom `removed` event を emit + `prev` を空に上書きし、以降のイベントを取り逃がす不具合を修正。fetch 経路を `ok` / `unsupported` / `error` の discriminated union に再設計し、error 時は prev を保持して次 tick へ skip。実 c11 daemon に対する e2e smoke で発見
+
+### Changed
+
+- `c11-features.ts` 内部に `__setFetchMailboxImpl` test seam を追加（既存呼び出し元には影響なし）
+- `glossary.md` § 10 に `mailbox.*` エントリを追加
 
 ### Fixed
 
