@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.2] - 2026-05-10
+
+### Removed (BREAKING for those who relied on it — actually 0.3.0 で導入したばかりの仕様撤回)
+
+- **`bin: cmux-team` alias を撤去**。v0.3.0 で「templates の cmux-team binary 呼び出しを後方互換するため」と称して `cmux-team` symlink を elevens に向ける設計を入れたが、`@hummer98/cmux-team` を別途 install しているユーザーで衝突が発覚。`cmux-team` という命令空間を hijack する設計は誤りで、cmux-team は cmux-team として、elevens は elevens として **独立に共存**するべき
+  - **判断基準の更新 (issue #1 ADR-001 / Phase 3 prep の e5a8727 撤回)**: brand 統一は文字列レベルで完了済 (v0.3.0 / v0.3.1)。templates / agent prompt / commands は既に `elevens xxx` を直接呼ぶように rewrite 済 → bin alias は不要
+  - **共存方針**: `@hummer98/cmux-team` (legacy) と `@hummer98/elevens` (本パッケージ) は npm global に並列 install 可能。`cmux-team` バイナリは cmux-team 4.28.x 系がそのまま、`elevens` は本パッケージのみ
+  - **既に v0.3.0/v0.3.1 を `--force` で install して `cmux-team` bin が elevens に上書きされてしまったユーザーへの復旧**: `npm install -g --force @hummer98/cmux-team@<latest>` を 1 回実行すれば legacy cmux-team の bin に戻る
+
 ## [0.3.1] - 2026-05-10
 
 v0.3.0 で残っていた user-visible 文字列の brand 統一補完。bin alias で機能互換は変わらず。

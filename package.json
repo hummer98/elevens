@@ -1,11 +1,10 @@
 {
   "name": "@hummer98/elevens",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "c11-native multi-agent orchestration package (successor to cmux-team). Spawn, monitor, and coordinate parallel Claude Code sub-agents on Stage 11 Agentics' c11 terminal multiplexer.",
   "type": "module",
   "bin": {
-    "elevens": "bin/elevens",
-    "cmux-team": "bin/elevens"
+    "elevens": "bin/elevens"
   },
   "scripts": {
     "dev": "bash bin/elevens start",

@@ -13,7 +13,12 @@ const execFile = promisify(execFileCb);
  * `ELEVENS_BACKEND=c11` で c11、`ELEVENS_BACKEND=cmux`（または未設定）で cmux。
  * 任意の文字列も受け付ける（絶対パスやカスタムビルド差し替え用）。
  *
- * Phase 1 PoC (docs/seed.md): default は当面 cmux。Phase 3 で c11 に切替。
+ * **NOTE on auto-detect**: c11 surface は `CMUX_BUNDLE_ID=com.stage11.c11` を
+ * export している (一次情報) ので将来的に自動判別できる余地はあるが、
+ * SUBSTRATE_BINARY が module load 時に `const` で確定する設計と既存テスト群
+ * (CI 上は cmux default を前提) の整合上、現状は **`ELEVENS_BACKEND` 明示が
+ * 必須**。auto-detect 化は v0.4.0+ で test infrastructure 再設計と一緒に行う
+ * (issue #1 ADR の補足参照)。
  */
 export const SUBSTRATE_BINARY: string = process.env.ELEVENS_BACKEND?.trim() || "cmux";
 

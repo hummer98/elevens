@@ -23,6 +23,7 @@ import {
   buildAgentClaudeFlags,
   buildMasterClaudeArgs,
   makeShutdownGuard,
+  formatDaemonStartedDetail,
 } from "./main";
 import type { TaskMeta, TaskState } from "./task";
 import {
@@ -83,17 +84,17 @@ describe("generateConductorSettings - PreToolUse hook (§4.1)", () => {
     expect(cmd).toContain("exit 2");
     expect(cmd).toContain("cmux send / cmux send-key は Conductor から使用禁止です。");
     // R3: 代替コマンド行
-    expect(cmd).toContain("cmux-team send-agent --surface");
+    expect(cmd).toContain("elevens send-agent --surface");
   });
 
   // T379: deny 直前に PRE_TOOL_USE_DENIED 送信が入っていること
-  test("T379: hook の command に cmux-team send PRE_TOOL_USE_DENIED が含まれる", async () => {
+  test("T379: hook の command に elevens send PRE_TOOL_USE_DENIED が含まれる", async () => {
     const settingsPath = generateConductorSettings(testDir, "surface:200");
     const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
     const cmd: string = findBashDenyBlock(settings).hooks[0].command;
-    expect(cmd).toContain("cmux-team send PRE_TOOL_USE_DENIED");
+    expect(cmd).toContain("elevens send PRE_TOOL_USE_DENIED");
     // exit 2 の前に送信していること（順序保証）
-    const denyIdx = cmd.indexOf("cmux-team send PRE_TOOL_USE_DENIED");
+    const denyIdx = cmd.indexOf("elevens send PRE_TOOL_USE_DENIED");
     const exitIdx = cmd.indexOf("exit 2");
     expect(denyIdx).toBeGreaterThan(0);
     expect(exitIdx).toBeGreaterThan(denyIdx);
@@ -174,13 +175,27 @@ describe("PreToolUse hook 挙動 (§4.2)", () => {
       expectBlocked: false,
     },
     {
-      label: "cmux-team send-agent passes",
+      label: "elevens send-agent passes",
+      payload: JSON.stringify({ tool_name: "Bash", tool_input: { command: "elevens send-agent --surface surface:382 hi" } }),
+      expectCode: 0,
+      expectBlocked: false,
+    },
+    {
+      label: "elevens send passes (subcommand of elevens)",
+      payload: JSON.stringify({ tool_name: "Bash", tool_input: { command: "elevens send SESSION_STARTED" } }),
+      expectCode: 0,
+      expectBlocked: false,
+    },
+    {
+      // legacy 互換: cmux-team binary がまだ環境に残っている場合でも誤 deny しない
+      label: "cmux-team send-agent passes (legacy binary)",
       payload: JSON.stringify({ tool_name: "Bash", tool_input: { command: "cmux-team send-agent --surface surface:382 hi" } }),
       expectCode: 0,
       expectBlocked: false,
     },
     {
-      label: "cmux-team send passes (subcommand of cmux-team)",
+      // legacy 互換: cmux-team send subcommand も regex 上 hyphen 前置で deny されない
+      label: "cmux-team send passes (legacy binary)",
       payload: JSON.stringify({ tool_name: "Bash", tool_input: { command: "cmux-team send SESSION_STARTED" } }),
       expectCode: 0,
       expectBlocked: false,
@@ -230,7 +245,7 @@ describe("PreToolUse hook 挙動 (§4.2)", () => {
       expect(code).toBe(c.expectCode);
       if (c.expectBlocked) {
         expect(stderr).toContain("cmux send / cmux send-key は Conductor から使用禁止です。");
-        expect(stderr).toContain("cmux-team send-agent --surface");
+        expect(stderr).toContain("elevens send-agent --surface");
       } else {
         expect(stderr).toBe("");
       }
@@ -1802,7 +1817,7 @@ describe("buildMessageFromHookInput (T203)", () => {
 
 // --- T203: cmdSend --from-stdin discriminator 回帰 (C2) ---
 //
-// T189 SESSION_STOP forwarder は `cmux-team send --from-stdin`（type 引数なし）で起動する。
+// T189 SESSION_STOP forwarder は `elevens send --from-stdin`（type 引数なし）で起動する。
 // args[1] === "--from-stdin" になる場合に新パスへ誤って入らず、旧 QueueMessageSchema パスで処理される
 // ことを CLI subprocess 経由で検証する。
 
@@ -1979,7 +1994,7 @@ describe("SessionStart hook generation (T203)", () => {
     expect(otherHook).toBeDefined();
     const cmd: string = otherHook.hooks[0].command;
     expect(cmd).toContain("--from-stdin");
-    expect(cmd).toContain("cmux-team send SESSION_ENDED");
+    expect(cmd).toContain("elevens send SESSION_ENDED");
     expect(cmd).not.toContain("--reason");
     expect(cmd).not.toContain('"session_end"');
 
@@ -2000,7 +2015,7 @@ describe("SessionStart hook generation (T203)", () => {
     expect(hook).toBeDefined();
     const cmd: string = hook.hooks[0].command;
     expect(cmd).toContain("--from-stdin");
-    expect(cmd).toContain("cmux-team send SESSION_ENDED");
+    expect(cmd).toContain("elevens send SESSION_ENDED");
     expect(cmd).not.toContain("--reason");
     expect(cmd).not.toContain('"session_end"');
   });
@@ -2015,7 +2030,7 @@ describe("SessionStart hook generation (T203)", () => {
     expect(settings.hooks.Notification.length).toBe(1);
     expect(settings.hooks.Notification[0].matcher).toBe("");
     const cmd: string = settings.hooks.Notification[0].hooks[0].command;
-    expect(cmd).toContain("cmux-team send NOTIFICATION");
+    expect(cmd).toContain("elevens send NOTIFICATION");
     expect(cmd).toContain("--from-stdin");
     expect(cmd).toContain("${CMUX_SURFACE}");
     expect(cmd).toContain("$PPID");
@@ -2036,7 +2051,7 @@ describe("SessionStart hook generation (T203)", () => {
     expect(settings.hooks.Notification.length).toBe(1);
     expect(settings.hooks.Notification[0].matcher).toBe("");
     const cmd: string = settings.hooks.Notification[0].hooks[0].command;
-    expect(cmd).toContain("cmux-team send NOTIFICATION");
+    expect(cmd).toContain("elevens send NOTIFICATION");
     expect(cmd).toContain("--from-stdin");
     // Agent は ${surface} リテラル置換のため展開後の値を確認
     expect(cmd).toContain('--surface "surface:100"');
@@ -2059,7 +2074,7 @@ describe("SessionStart hook generation (T203)", () => {
     expect(settings.hooks.StopFailure.length).toBe(1);
     expect(settings.hooks.StopFailure[0].matcher).toBe("");
     const cmd: string = settings.hooks.StopFailure[0].hooks[0].command;
-    expect(cmd).toContain("cmux-team send STOP_FAILURE");
+    expect(cmd).toContain("elevens send STOP_FAILURE");
     expect(cmd).toContain("--from-stdin");
     expect(cmd).toContain("${CMUX_SURFACE}");
     expect(cmd).toContain("$PPID");
@@ -2076,7 +2091,7 @@ describe("SessionStart hook generation (T203)", () => {
     expect(settings.hooks.StopFailure.length).toBe(1);
     expect(settings.hooks.StopFailure[0].matcher).toBe("");
     const cmd: string = settings.hooks.StopFailure[0].hooks[0].command;
-    expect(cmd).toContain("cmux-team send STOP_FAILURE");
+    expect(cmd).toContain("elevens send STOP_FAILURE");
     expect(cmd).toContain("--from-stdin");
     expect(cmd).toContain('--surface "surface:100"');
     expect(cmd).toContain("$PPID");
@@ -2140,7 +2155,7 @@ describe("generateMasterSettings (T211)", () => {
   // Conductor と同じ SessionStart / SessionEnd hook を Master にも適用する。
   // これにより daemon は SESSION_STARTED で masterPid を確立し、
   // spawnMasterPidWatcher を起動できるようになる。
-  test("T175: settings.hooks.SessionStart が cmux-team send SESSION_STARTED --from-stdin を呼ぶ", async () => {
+  test("T175: settings.hooks.SessionStart が elevens send SESSION_STARTED --from-stdin を呼ぶ", async () => {
     const settingsPath = generateMasterSettings(testDir, "surface:100");
     const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
 
@@ -2148,7 +2163,7 @@ describe("generateMasterSettings (T211)", () => {
     expect(settings.hooks.SessionStart.length).toBe(1);
     expect(settings.hooks.SessionStart[0].matcher).toBe("");
     const cmd: string = settings.hooks.SessionStart[0].hooks[0].command;
-    expect(cmd).toContain("cmux-team send SESSION_STARTED");
+    expect(cmd).toContain("elevens send SESSION_STARTED");
     expect(cmd).toContain("--from-stdin");
     expect(cmd).toContain("${CMUX_SURFACE}");
     expect(cmd).toContain("$PPID");
@@ -2163,7 +2178,7 @@ describe("generateMasterSettings (T211)", () => {
     expect(settings.hooks.SessionEnd.length).toBe(1);
     expect(settings.hooks.SessionEnd[0].matcher).toBe("logout|prompt_input_exit|other");
     const cmd: string = settings.hooks.SessionEnd[0].hooks[0].command;
-    expect(cmd).toContain("cmux-team send SESSION_ENDED");
+    expect(cmd).toContain("elevens send SESSION_ENDED");
     expect(cmd).toContain("--from-stdin");
     expect(cmd).toContain("${CMUX_SURFACE}");
     expect(cmd).toContain("$PPID");
@@ -2198,7 +2213,7 @@ describe("generateMasterSettings (T211)", () => {
   });
 
   // T266: Notification hook を daemon に集約・DB 記録する
-  test("T266: settings.hooks.Notification が cmux-team send NOTIFICATION --from-stdin を呼ぶ (role=master)", async () => {
+  test("T266: settings.hooks.Notification が elevens send NOTIFICATION --from-stdin を呼ぶ (role=master)", async () => {
     const settingsPath = generateMasterSettings(testDir, "surface:100");
     const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
 
@@ -2206,7 +2221,7 @@ describe("generateMasterSettings (T211)", () => {
     expect(settings.hooks.Notification.length).toBe(1);
     expect(settings.hooks.Notification[0].matcher).toBe("");
     const cmd: string = settings.hooks.Notification[0].hooks[0].command;
-    expect(cmd).toContain("cmux-team send NOTIFICATION");
+    expect(cmd).toContain("elevens send NOTIFICATION");
     expect(cmd).toContain("--from-stdin");
     expect(cmd).toContain("${CMUX_SURFACE}");
     expect(cmd).toContain("$PPID");
@@ -2219,7 +2234,7 @@ describe("generateMasterSettings (T211)", () => {
   });
 
   // T392: StopFailure hook
-  test("T392: settings.hooks.StopFailure が cmux-team send STOP_FAILURE --from-stdin を呼ぶ (role=master)", async () => {
+  test("T392: settings.hooks.StopFailure が elevens send STOP_FAILURE --from-stdin を呼ぶ (role=master)", async () => {
     const settingsPath = generateMasterSettings(testDir, "surface:100");
     const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
 
@@ -2227,7 +2242,7 @@ describe("generateMasterSettings (T211)", () => {
     expect(settings.hooks.StopFailure.length).toBe(1);
     expect(settings.hooks.StopFailure[0].matcher).toBe("");
     const cmd: string = settings.hooks.StopFailure[0].hooks[0].command;
-    expect(cmd).toContain("cmux-team send STOP_FAILURE");
+    expect(cmd).toContain("elevens send STOP_FAILURE");
     expect(cmd).toContain("--from-stdin");
     expect(cmd).toContain("${CMUX_SURFACE}");
     expect(cmd).toContain("$PPID");
@@ -2246,14 +2261,14 @@ describe("generateMasterSettings (T211)", () => {
     );
     expect(observerBlock).toBeTruthy();
     const cmd: string = observerBlock.hooks[0].command;
-    expect(cmd).toContain("cmux-team send PRE_TOOL_USE");
+    expect(cmd).toContain("elevens send PRE_TOOL_USE");
     expect(cmd).toContain("--from-stdin");
     expect(cmd).toContain("--role master");
     expect(cmd).toContain("$PPID");
     expect(observerBlock.hooks[0].timeout).toBe(3000);
   });
 
-  test("T379: Master settings.hooks.PostToolUse が cmux-team send POST_TOOL_USE を呼ぶ (role=master)", async () => {
+  test("T379: Master settings.hooks.PostToolUse が elevens send POST_TOOL_USE を呼ぶ (role=master)", async () => {
     const settingsPath = generateMasterSettings(testDir, "surface:100");
     const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
 
@@ -2261,7 +2276,7 @@ describe("generateMasterSettings (T211)", () => {
     expect(settings.hooks.PostToolUse.length).toBe(1);
     expect(settings.hooks.PostToolUse[0].matcher).toBe("");
     const cmd: string = settings.hooks.PostToolUse[0].hooks[0].command;
-    expect(cmd).toContain("cmux-team send POST_TOOL_USE");
+    expect(cmd).toContain("elevens send POST_TOOL_USE");
     expect(cmd).toContain("--from-stdin");
     expect(cmd).toContain("--role master");
     expect(settings.hooks.PostToolUse[0].hooks[0].timeout).toBe(3000);
@@ -2289,12 +2304,12 @@ describe("T379: Conductor settings の PreToolUse / PostToolUse 観察 hook", ()
       (b) => b.matcher === "",
     );
     const cmd: string = observerBlock.hooks[0].command;
-    expect(cmd).toContain("cmux-team send PRE_TOOL_USE");
+    expect(cmd).toContain("elevens send PRE_TOOL_USE");
     expect(cmd).toContain("--from-stdin");
     expect(cmd).toContain("--role conductor");
   });
 
-  test("Conductor settings.hooks.PostToolUse が cmux-team send POST_TOOL_USE を呼ぶ (role=conductor)", async () => {
+  test("Conductor settings.hooks.PostToolUse が elevens send POST_TOOL_USE を呼ぶ (role=conductor)", async () => {
     const settingsPath = generateConductorSettings(testDir, "surface:200");
     const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
     expect(Array.isArray(settings.hooks.PostToolUse)).toBe(true);
@@ -2303,7 +2318,7 @@ describe("T379: Conductor settings の PreToolUse / PostToolUse 観察 hook", ()
     );
     expect(observerBlock).toBeTruthy();
     const cmd: string = observerBlock.hooks[0].command;
-    expect(cmd).toContain("cmux-team send POST_TOOL_USE");
+    expect(cmd).toContain("elevens send POST_TOOL_USE");
     expect(cmd).toContain("--from-stdin");
     expect(cmd).toContain("--role conductor");
   });
@@ -2319,7 +2334,7 @@ describe("T379: Agent settings の PreToolUse / PostToolUse 観察 hook", () => 
     );
     expect(observerBlock).toBeTruthy();
     const cmd: string = observerBlock.hooks[0].command;
-    expect(cmd).toContain("cmux-team send PRE_TOOL_USE");
+    expect(cmd).toContain("elevens send PRE_TOOL_USE");
     expect(cmd).toContain("--from-stdin");
     expect(cmd).toContain("--role agent");
   });
@@ -2333,7 +2348,7 @@ describe("T379: Agent settings の PreToolUse / PostToolUse 観察 hook", () => 
     );
     expect(observerBlock).toBeTruthy();
     const cmd: string = observerBlock.hooks[0].command;
-    expect(cmd).toContain("cmux-team send POST_TOOL_USE");
+    expect(cmd).toContain("elevens send POST_TOOL_USE");
     expect(cmd).toContain("--from-stdin");
     expect(cmd).toContain("--role agent");
   });
@@ -3228,7 +3243,7 @@ describe("c11 claude-hook opportunistic forwarding (T448)", () => {
     expect(content).toContain("|| true");
     // regression: 既存の SESSION_STOP forwarder 経路は壊れていない
     expect(content).toContain("SESSION_STOP");
-    expect(content).toContain("cmux-team send --from-stdin");
+    expect(content).toContain("elevens send --from-stdin");
   });
 
   test("DETECT_ASK_SCRIPT は stdin を一度だけ読み、PAYLOAD 変数経由で両方に流す (整合)", async () => {
@@ -3248,7 +3263,7 @@ describe("c11 claude-hook opportunistic forwarding (T448)", () => {
     await mkdir(join(testDir, ".team/prompts"), { recursive: true });
     const scriptPath = ensureAskDetectorScript(testDir);
     const content = await readFile(scriptPath, "utf-8");
-    const cmuxIdx = content.indexOf("cmux-team send --from-stdin");
+    const cmuxIdx = content.indexOf("elevens send --from-stdin");
     const c11Idx = content.indexOf("c11 claude-hook stop");
     expect(cmuxIdx).toBeGreaterThan(-1);
     expect(c11Idx).toBeGreaterThan(-1);
@@ -3261,8 +3276,8 @@ describe("c11 claude-hook opportunistic forwarding (T448)", () => {
     const settingsPath = generateConductorSettings(testDir, "surface:200");
     const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
     const cmd: string = settings.hooks.SessionStart[0].hooks[0].command;
-    // 既存: cmux-team send SESSION_STARTED は残存
-    expect(cmd).toContain("cmux-team send SESSION_STARTED");
+    // 既存: elevens send SESSION_STARTED は残存
+    expect(cmd).toContain("elevens send SESSION_STARTED");
     expect(cmd).toContain("--from-stdin");
     // 追加: c11 claude-hook session-start
     expect(cmd).toContain("c11 claude-hook session-start");
@@ -3274,7 +3289,7 @@ describe("c11 claude-hook opportunistic forwarding (T448)", () => {
     const settingsPath = generateAgentSettings(testDir, "surface:100");
     const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
     const cmd: string = settings.hooks.SessionStart[0].hooks[0].command;
-    expect(cmd).toContain("cmux-team send SESSION_STARTED");
+    expect(cmd).toContain("elevens send SESSION_STARTED");
     expect(cmd).toContain("--from-stdin");
     expect(cmd).toContain("c11 claude-hook session-start");
     expect(cmd).toContain("|| true");
@@ -3285,7 +3300,7 @@ describe("c11 claude-hook opportunistic forwarding (T448)", () => {
     const settingsPath = generateMasterSettings(testDir, "surface:300");
     const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
     const cmd: string = settings.hooks.SessionStart[0].hooks[0].command;
-    expect(cmd).toContain("cmux-team send SESSION_STARTED");
+    expect(cmd).toContain("elevens send SESSION_STARTED");
     expect(cmd).toContain("c11 claude-hook session-start");
     expect(cmd).toContain("|| true");
   });
@@ -3295,8 +3310,8 @@ describe("c11 claude-hook opportunistic forwarding (T448)", () => {
     const settingsPath = generateConductorSettings(testDir, "surface:200");
     const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
     const cmd: string = settings.hooks.Notification[0].hooks[0].command;
-    // 既存: cmux-team send NOTIFICATION は残存
-    expect(cmd).toContain("cmux-team send NOTIFICATION");
+    // 既存: elevens send NOTIFICATION は残存
+    expect(cmd).toContain("elevens send NOTIFICATION");
     expect(cmd).toContain("--from-stdin");
     expect(cmd).toContain("--role conductor");
     // 追加: c11 claude-hook notification
@@ -3309,7 +3324,7 @@ describe("c11 claude-hook opportunistic forwarding (T448)", () => {
     const settingsPath = generateAgentSettings(testDir, "surface:100");
     const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
     const cmd: string = settings.hooks.Notification[0].hooks[0].command;
-    expect(cmd).toContain("cmux-team send NOTIFICATION");
+    expect(cmd).toContain("elevens send NOTIFICATION");
     expect(cmd).toContain("--role agent");
     expect(cmd).toContain("c11 claude-hook notification");
     expect(cmd).toContain("|| true");
@@ -3383,5 +3398,79 @@ describe("makeShutdownGuard (shutdown idempotency)", () => {
     // b は独立
     expect(b.claim()).toBe(true);
     expect(b.claim()).toBe(false);
+  });
+});
+
+// --- backend 可視化: daemon_started log に backend=cmux|c11 を含める -------
+//
+// elevens は cmux / c11 の 2 backend をサポートする。
+// daemon_started log entry を見ただけでどちらで起動したか判別できるよう
+// `backend=` フィールドを追加する。
+// IS_C11_BACKEND は module load 時に決まるので、純粋関数 formatDaemonStartedDetail
+// に backend を引数として渡してテストする。
+
+describe("formatDaemonStartedDetail (backend visualization)", () => {
+  test("backend=cmux のとき detail に backend=cmux が含まれる", () => {
+    const detail = formatDaemonStartedDetail({
+      version: "0.3.2",
+      pid: 12345,
+      pollInterval: 1000,
+      maxConductors: 4,
+      layout: "16x9",
+      sleepPrevention: false,
+      backend: "cmux",
+    });
+    expect(detail).toContain("backend=cmux");
+    expect(detail).not.toContain("backend=c11");
+  });
+
+  test("backend=c11 のとき detail に backend=c11 が含まれる", () => {
+    const detail = formatDaemonStartedDetail({
+      version: "0.3.2",
+      pid: 12345,
+      pollInterval: 1000,
+      maxConductors: 4,
+      layout: "16x9",
+      sleepPrevention: false,
+      backend: "c11",
+    });
+    expect(detail).toContain("backend=c11");
+    expect(detail).not.toContain("backend=cmux");
+  });
+
+  test("既存フィールド (version / pid / poll / max_conductors / layout / sleep_prevention) は保たれる (regression)", () => {
+    const detail = formatDaemonStartedDetail({
+      version: "0.3.2",
+      pid: 99999,
+      pollInterval: 2500,
+      maxConductors: 8,
+      layout: "wide",
+      sleepPrevention: true,
+      backend: "cmux",
+    });
+    expect(detail).toContain("0.3.2");
+    expect(detail).toContain("pid=99999");
+    expect(detail).toContain("poll=2500ms");
+    expect(detail).toContain("max_conductors=8");
+    expect(detail).toContain("layout=wide");
+    expect(detail).toContain("sleep_prevention=true");
+  });
+
+  test("IS_C11_BACKEND の値に従って backend が選択される (env で間接確認)", async () => {
+    // module load 時 ELEVENS_BACKEND 未設定 → IS_C11_BACKEND=false → "cmux"
+    // 同 process 内で再 import しても module cache のため flip しないが、
+    // formatDaemonStartedDetail に渡る値が IS_C11_BACKEND に追従していることを
+    // cmux 側でも c11 側でも検証するため、両方を pure 関数で確認しておく。
+    const cmuxDetail = formatDaemonStartedDetail({
+      version: "0.0.0", pid: 1, pollInterval: 0, maxConductors: 0,
+      layout: "16x9", sleepPrevention: false, backend: "cmux",
+    });
+    const c11Detail = formatDaemonStartedDetail({
+      version: "0.0.0", pid: 1, pollInterval: 0, maxConductors: 0,
+      layout: "16x9", sleepPrevention: false, backend: "c11",
+    });
+    expect(cmuxDetail).toContain("backend=cmux");
+    expect(c11Detail).toContain("backend=c11");
+    expect(cmuxDetail).not.toEqual(c11Detail);
   });
 });

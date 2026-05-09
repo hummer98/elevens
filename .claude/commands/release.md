@@ -150,14 +150,34 @@ if [ ${GH_EXIT} -ne 0 ]; then
 fi
 ```
 
-### 10. npm レジストリからインストール検証
+### 10. npm レジストリからインストール検証 (ローカル更新)
 
 ```bash
+# global install (新 version の symlink で旧 version を上書き)
 npm install -g @hummer98/elevens@${NEW_VERSION}
-elevens --version 2>/dev/null || elevens help 2>&1 | head -3
+
+# nodenv / nvm 系を使っている場合、新 bin の shim 生成を強制
+command -v nodenv >/dev/null 2>&1 && nodenv rehash
+# nvm の場合は通常 rehash 不要 (PATH 直結) だが念のため確認:
+# command -v nvm >/dev/null 2>&1 && nvm reinstall-packages "$(node -v)" 2>/dev/null || true
+
+# 動作確認 (version が NEW_VERSION と一致するか)
+which elevens
+INSTALLED_VERSION=$(elevens --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "?")
+if [ "$INSTALLED_VERSION" = "${NEW_VERSION}" ]; then
+  echo "✓ elevens ${NEW_VERSION} がローカルに反映されました"
+else
+  echo "⚠️  expected ${NEW_VERSION} but got ${INSTALLED_VERSION}"
+  echo "    rehash 漏れの場合は 'nodenv rehash' or 'hash -r' を実行"
+fi
 ```
 
-`npm install -g .` は使わない（symlink 連鎖再起動を避けるため）。
+**注意点 (本番運用ノート、A031 / v0.3.2 経験から)**:
+
+- `npm install -g .` は使わない（symlink 連鎖再起動を避けるため）
+- **`@hummer98/cmux-team` (legacy) と共存させる場合**: elevens は `bin: { elevens }` のみで `cmux-team` alias を提供しないため bin 衝突は起きない (v0.3.2+)。`@hummer98/cmux-team` の `cmux-team` バイナリはそのまま legacy 4.28.x が動く
+- **nodenv 使用時**: `npm install -g` 後に新規 bin (例: `elevens`) は `nodenv rehash` を実行しないと shim が作られず `command not found` になる。既存 bin の symlink 上書きは shim 作り直し不要
+- **v0.3.0 / v0.3.1 を `--force` で install して `cmux-team` bin が elevens に上書きされてしまった場合の復旧**: `npm install -g --force @hummer98/cmux-team@<latest>` を 1 回実行で legacy cmux-team の bin に戻る。**v0.3.2+ では発生しない**
 
 ### 11. 完了報告
 

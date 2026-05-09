@@ -206,6 +206,34 @@ export function formatUptimeFromStartedAt(startedAtIso: string, now: number = Da
 }
 
 /**
+ * `daemon_started` log の detail 文字列を組み立てる純粋関数。
+ *
+ * elevens は cmux / c11 の 2 つの substrate backend をサポートするため、
+ * log を見ただけでどちらで起動したかが分かるよう `backend=cmux|c11` を含める。
+ * IS_C11_BACKEND は cmux.ts が module load 時に確定するので、呼び出し側で
+ * 解決した値を渡してもらう設計（テスト容易性のため pure 関数に切り出す）。
+ */
+export function formatDaemonStartedDetail(opts: {
+  version: string;
+  pid: number;
+  pollInterval: number;
+  maxConductors: number;
+  layout: string;
+  sleepPrevention: boolean;
+  backend: "cmux" | "c11";
+}): string {
+  return [
+    opts.version,
+    `pid=${opts.pid}`,
+    `poll=${opts.pollInterval}ms`,
+    `max_conductors=${opts.maxConductors}`,
+    `layout=${opts.layout}`,
+    `sleep_prevention=${opts.sleepPrevention}`,
+    `backend=${opts.backend}`,
+  ].join(" ");
+}
+
+/**
  * A031 follow-up: shutdown idempotency guard。
  * 複数経路（SIGINT / SIGTERM / onQuit）から shutdown が呼ばれても
  * `daemon_stopped` log と副作用が二重発火しないようにするための小さな factory。
@@ -906,7 +934,17 @@ async function cmdStart(): Promise<void> {
   state.startedAt = new Date().toISOString();
   await log(
     "daemon_started",
-    `${state.version} pid=${process.pid} poll=${state.pollInterval}ms max_conductors=${state.maxConductors} layout=${state.layout} sleep_prevention=${sleepPrevention}`
+    formatDaemonStartedDetail({
+      version: state.version,
+      pid: process.pid,
+      pollInterval: state.pollInterval,
+      maxConductors: state.maxConductors,
+      layout: state.layout,
+      sleepPrevention,
+      // backend 可視化: cmux / c11 どちらで動いているか log だけで判別可能にする。
+      // IS_C11_BACKEND は cmux.ts で module load 時に process.env.ELEVENS_BACKEND を見て確定する。
+      backend: cmux.IS_C11_BACKEND ? "c11" : "cmux",
+    }),
   );
   await log(
     "auto_update_config",
@@ -1015,7 +1053,7 @@ async function cmdStart(): Promise<void> {
         onMessage: async (msg) => {
           await handleMessage(state, msg);
           // T205: handleMessage 後に team.json を同期 flush する。
-          // これにより「`cmux-team send X` が 200 OK を返した時点で team.json は最新」
+          // これにより「`elevens send X` が 200 OK を返した時点で team.json は最新」
           // の不変条件が成立し、spawn-agent → await-agent のレースが解消する。
           await updateTeamJson(state);
         },
@@ -2002,7 +2040,7 @@ async function registerSelf(
 /**
  * PreToolUse hook 用の bash スクリプト。
  * Bash tool の command が `cmux send` / `cmux send-key` を叩こうとしていたら exit 2 で拒否する。
- * 代替手段として `cmux-team send-agent` を stderr で案内する（2 行構成、Design Review R3）。
+ * 代替手段として `elevens send-agent` を stderr で案内する（2 行構成、Design Review R3）。
  *
  * 正規表現の設計:
  *   - `(^|[^-[:alnum:]_])cmux[[:space:]]+(send|send-key)([[:space:]]|$)`
@@ -2014,11 +2052,11 @@ const PRE_TOOL_USE_HOOK_SCRIPT = [
   'cmd="$(printf "%s" "$input" | grep -oE "\\"command\\"[[:space:]]*:[[:space:]]*\\"[^\\"]*\\"" | head -1 | sed -E "s/^\\"command\\"[[:space:]]*:[[:space:]]*\\"//; s/\\"$//")"',
   'if printf "%s" "$cmd" | grep -qE "(^|[^-[:alnum:]_])cmux[[:space:]]+(send|send-key)([[:space:]]|$)"; then',
   '  echo "cmux send / cmux send-key は Conductor から使用禁止です。" >&2',
-  '  echo "代替: cmux-team send-agent --surface <agent-surface> <message>  (自分が spawn した Agent のみ送信可)" >&2',
+  '  echo "代替: elevens send-agent --surface <agent-surface> <message>  (自分が spawn した Agent のみ送信可)" >&2',
   // T379: deny を daemon に通知（hook block 率の集計に使う）。
   // Claude Code は PreToolUse hook の exit 2 を別 hook 経由で再通知しないため、ここで明示送信する。
   // 失敗時はそのまま deny を続行（|| true で suppress）。
-  '  cmux-team send PRE_TOOL_USE_DENIED --message "cmux send/send-key denied" --surface "${CMUX_SURFACE:-}" --pid "$PPID" 2>/dev/null || true',
+  '  elevens send PRE_TOOL_USE_DENIED --message "cmux send/send-key denied" --surface "${CMUX_SURFACE:-}" --pid "$PPID" 2>/dev/null || true',
   '  exit 2',
   'fi',
   'exit 0',
@@ -2030,7 +2068,7 @@ const PRE_TOOL_USE_HOOK_SCRIPT = [
  *
  * 役割は「forwarder」のみ:
  *   - payload から transcript_path を抽出し、surface/pid/type を足して
- *     SESSION_STOP メッセージに整形、cmux-team send --from-stdin に流す
+ *     SESSION_STOP メッセージに整形、elevens send --from-stdin に流す
  *   - 分類（ASK/IDLE）は Manager (daemon) 側の classifyStopPayload が担う
  *
  * jq は preflight (checkJq) で必須扱いのため fallback 分岐は持たない。
@@ -2053,7 +2091,7 @@ const DETECT_ASK_SCRIPT = [
   '  "$PPID" \\',
   '  "$(printf %s "$TS" | jq -Rs .)" \\',
   '  "$(printf %s "$TRANSCRIPT_PATH" | jq -Rs .)" \\',
-  '  | cmux-team send --from-stdin 2>/dev/null || true',
+  '  | elevens send --from-stdin 2>/dev/null || true',
   '',
   '# T448: c11 mailbox observatory に並行通知（opportunistic）。',
   '# c11 が PATH に無い / cmux backend / c11 daemon 停止中、いずれの失敗も',
@@ -2212,7 +2250,7 @@ export function buildMessageFromHookInput(
 
   if (type === "PRE_TOOL_USE_DENIED") {
     // T379: Conductor の PRE_TOOL_USE_HOOK_SCRIPT が `cmux send`/`cmux send-key` を deny したときに
-    //       hook 自身が `cmux-team send PRE_TOOL_USE_DENIED ...` で daemon に通知する。
+    //       hook 自身が `elevens send PRE_TOOL_USE_DENIED ...` で daemon に通知する。
     //       payload は持たず、reason 文字列だけを必要に応じて添付する。
     const emptyToUndef = (s: string | undefined): string | undefined =>
       s === undefined || s === "" ? undefined : s;
@@ -2423,7 +2461,7 @@ export function generateMasterSettings(projectRoot: string, surface: string): st
           matcher: "",
           hooks: [{
             type: "command",
-            command: "bash -c 'INPUT=\"$(cat)\"; printf %s \"$INPUT\" | cmux-team send SESSION_STARTED --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" 2>/dev/null || true; printf %s \"$INPUT\" | c11 claude-hook session-start 2>/dev/null || true'",
+            command: "bash -c 'INPUT=\"$(cat)\"; printf %s \"$INPUT\" | elevens send SESSION_STARTED --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" 2>/dev/null || true; printf %s \"$INPUT\" | c11 claude-hook session-start 2>/dev/null || true'",
             timeout: 5000,
           }],
         },
@@ -2447,7 +2485,7 @@ export function generateMasterSettings(projectRoot: string, surface: string): st
           matcher: "",
           hooks: [{
             type: "command",
-            command: "bash -c 'INPUT=\"$(cat)\"; printf %s \"$INPUT\" | cmux-team send NOTIFICATION --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --surface-uuid \"${CMUX_SURFACE_UUID:-}\" --workspace-uuid \"${CMUX_WORKSPACE_UUID:-}\" --role master 2>/dev/null || true; printf %s \"$INPUT\" | c11 claude-hook notification 2>/dev/null || true'",
+            command: "bash -c 'INPUT=\"$(cat)\"; printf %s \"$INPUT\" | elevens send NOTIFICATION --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --surface-uuid \"${CMUX_SURFACE_UUID:-}\" --workspace-uuid \"${CMUX_WORKSPACE_UUID:-}\" --role master 2>/dev/null || true; printf %s \"$INPUT\" | c11 claude-hook notification 2>/dev/null || true'",
             timeout: 5000,
           }],
         },
@@ -2461,7 +2499,7 @@ export function generateMasterSettings(projectRoot: string, surface: string): st
           matcher: "",
           hooks: [{
             type: "command",
-            command: "bash -c 'cmux-team send PRE_TOOL_USE --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --role master 2>/dev/null || true'",
+            command: "bash -c 'elevens send PRE_TOOL_USE --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --role master 2>/dev/null || true'",
             timeout: 3000,
           }],
         },
@@ -2471,7 +2509,7 @@ export function generateMasterSettings(projectRoot: string, surface: string): st
           matcher: "",
           hooks: [{
             type: "command",
-            command: "bash -c 'cmux-team send POST_TOOL_USE --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --role master 2>/dev/null || true'",
+            command: "bash -c 'elevens send POST_TOOL_USE --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --role master 2>/dev/null || true'",
             timeout: 3000,
           }],
         },
@@ -2483,7 +2521,7 @@ export function generateMasterSettings(projectRoot: string, surface: string): st
           matcher: "",
           hooks: [{
             type: "command",
-            command: "bash -c 'cmux-team send STOP_FAILURE --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --role master 2>/dev/null || true'",
+            command: "bash -c 'elevens send STOP_FAILURE --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --role master 2>/dev/null || true'",
             timeout: 5000,
           }],
         },
@@ -2505,7 +2543,7 @@ export function generateMasterSettings(projectRoot: string, surface: string): st
           matcher: "logout|prompt_input_exit|other",
           hooks: [{
             type: "command",
-            command: "bash -c 'cmux-team send SESSION_ENDED --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" 2>/dev/null || true'",
+            command: "bash -c 'elevens send SESSION_ENDED --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" 2>/dev/null || true'",
             timeout: 5000,
           }],
         },
@@ -2559,7 +2597,7 @@ export function generateAgentSettings(
             type: "command",
             // T203: hook stdin の JSON（session_id, source, ...）をそのまま cmux-team に渡す。
             // T448: c11 mailbox observatory にも並行通知（INPUT を一度だけ吸って両方に流す）。
-            command: `bash -c 'INPUT="$(cat)"; printf %s "$INPUT" | cmux-team send SESSION_STARTED --from-stdin --surface "${surface}" --pid "$PPID" 2>/dev/null || true; printf %s "$INPUT" | c11 claude-hook session-start 2>/dev/null || true'`,
+            command: `bash -c 'INPUT="$(cat)"; printf %s "$INPUT" | elevens send SESSION_STARTED --from-stdin --surface "${surface}" --pid "$PPID" 2>/dev/null || true; printf %s "$INPUT" | c11 claude-hook session-start 2>/dev/null || true'`,
             timeout: 5000,
           }],
         },
@@ -2571,7 +2609,7 @@ export function generateAgentSettings(
           matcher: "",
           hooks: [{
             type: "command",
-            command: `bash -c 'INPUT="$(cat)"; printf %s "$INPUT" | cmux-team send NOTIFICATION --from-stdin --surface "${surface}" --pid "$PPID" --surface-uuid "\${CMUX_SURFACE_UUID:-}" --workspace-uuid "\${CMUX_WORKSPACE_UUID:-}" --role agent 2>/dev/null || true; printf %s "$INPUT" | c11 claude-hook notification 2>/dev/null || true'`,
+            command: `bash -c 'INPUT="$(cat)"; printf %s "$INPUT" | elevens send NOTIFICATION --from-stdin --surface "${surface}" --pid "$PPID" --surface-uuid "\${CMUX_SURFACE_UUID:-}" --workspace-uuid "\${CMUX_WORKSPACE_UUID:-}" --role agent 2>/dev/null || true; printf %s "$INPUT" | c11 claude-hook notification 2>/dev/null || true'`,
             timeout: 5000,
           }],
         },
@@ -2582,7 +2620,7 @@ export function generateAgentSettings(
           matcher: "",
           hooks: [{
             type: "command",
-            command: `bash -c 'cmux-team send PRE_TOOL_USE --from-stdin --surface "${surface}" --pid "$PPID" --role agent 2>/dev/null || true'`,
+            command: `bash -c 'elevens send PRE_TOOL_USE --from-stdin --surface "${surface}" --pid "$PPID" --role agent 2>/dev/null || true'`,
             timeout: 3000,
           }],
         },
@@ -2592,7 +2630,7 @@ export function generateAgentSettings(
           matcher: "",
           hooks: [{
             type: "command",
-            command: `bash -c 'cmux-team send POST_TOOL_USE --from-stdin --surface "${surface}" --pid "$PPID" --role agent 2>/dev/null || true'`,
+            command: `bash -c 'elevens send POST_TOOL_USE --from-stdin --surface "${surface}" --pid "$PPID" --role agent 2>/dev/null || true'`,
             timeout: 3000,
           }],
         },
@@ -2603,7 +2641,7 @@ export function generateAgentSettings(
           matcher: "",
           hooks: [{
             type: "command",
-            command: `bash -c 'cmux-team send STOP_FAILURE --from-stdin --surface "${surface}" --pid "$PPID" --role agent 2>/dev/null || true'`,
+            command: `bash -c 'elevens send STOP_FAILURE --from-stdin --surface "${surface}" --pid "$PPID" --role agent 2>/dev/null || true'`,
             timeout: 5000,
           }],
         },
@@ -2624,7 +2662,7 @@ export function generateAgentSettings(
           matcher: "logout|prompt_input_exit|other",
           hooks: [{
             type: "command",
-            command: `bash -c 'cmux-team send SESSION_ENDED --from-stdin --surface "${surface}" --pid "$PPID" 2>/dev/null || true'`,
+            command: `bash -c 'elevens send SESSION_ENDED --from-stdin --surface "${surface}" --pid "$PPID" 2>/dev/null || true'`,
             timeout: 5000,
           }],
         },
@@ -2671,7 +2709,7 @@ export function generateConductorSettings(projectRoot: string, surface: string):
           matcher: "",
           hooks: [{
             type: "command",
-            command: "bash -c 'cmux-team send PRE_TOOL_USE --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --role conductor 2>/dev/null || true'",
+            command: "bash -c 'elevens send PRE_TOOL_USE --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --role conductor 2>/dev/null || true'",
             timeout: 3000,
           }],
         },
@@ -2682,7 +2720,7 @@ export function generateConductorSettings(projectRoot: string, surface: string):
           matcher: "",
           hooks: [{
             type: "command",
-            command: "bash -c 'cmux-team send POST_TOOL_USE --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --role conductor 2>/dev/null || true'",
+            command: "bash -c 'elevens send POST_TOOL_USE --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --role conductor 2>/dev/null || true'",
             timeout: 3000,
           }],
         },
@@ -2695,7 +2733,7 @@ export function generateConductorSettings(projectRoot: string, surface: string):
             type: "command",
             // T203: hook stdin の JSON（session_id, source, ...）をそのまま cmux-team に渡す。
             // T448: c11 mailbox observatory にも並行通知（INPUT を一度だけ吸って両方に流す）。
-            command: "bash -c 'INPUT=\"$(cat)\"; printf %s \"$INPUT\" | cmux-team send SESSION_STARTED --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" 2>/dev/null || true; printf %s \"$INPUT\" | c11 claude-hook session-start 2>/dev/null || true'",
+            command: "bash -c 'INPUT=\"$(cat)\"; printf %s \"$INPUT\" | elevens send SESSION_STARTED --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" 2>/dev/null || true; printf %s \"$INPUT\" | c11 claude-hook session-start 2>/dev/null || true'",
             timeout: 5000,
           }],
         },
@@ -2707,7 +2745,7 @@ export function generateConductorSettings(projectRoot: string, surface: string):
           matcher: "",
           hooks: [{
             type: "command",
-            command: "bash -c 'INPUT=\"$(cat)\"; printf %s \"$INPUT\" | cmux-team send NOTIFICATION --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --surface-uuid \"${CMUX_SURFACE_UUID:-}\" --workspace-uuid \"${CMUX_WORKSPACE_UUID:-}\" --role conductor 2>/dev/null || true; printf %s \"$INPUT\" | c11 claude-hook notification 2>/dev/null || true'",
+            command: "bash -c 'INPUT=\"$(cat)\"; printf %s \"$INPUT\" | elevens send NOTIFICATION --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --surface-uuid \"${CMUX_SURFACE_UUID:-}\" --workspace-uuid \"${CMUX_WORKSPACE_UUID:-}\" --role conductor 2>/dev/null || true; printf %s \"$INPUT\" | c11 claude-hook notification 2>/dev/null || true'",
             timeout: 5000,
           }],
         },
@@ -2718,7 +2756,7 @@ export function generateConductorSettings(projectRoot: string, surface: string):
           matcher: "",
           hooks: [{
             type: "command",
-            command: "bash -c 'cmux-team send STOP_FAILURE --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --role conductor 2>/dev/null || true'",
+            command: "bash -c 'elevens send STOP_FAILURE --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --role conductor 2>/dev/null || true'",
             timeout: 5000,
           }],
         },
@@ -2738,7 +2776,7 @@ export function generateConductorSettings(projectRoot: string, surface: string):
           matcher: "clear",
           hooks: [{
             type: "command",
-            command: "bash -c 'cmux-team send SESSION_CLEAR --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" 2>/dev/null || true'",
+            command: "bash -c 'elevens send SESSION_CLEAR --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" 2>/dev/null || true'",
             timeout: 5000,
           }],
         },
@@ -2748,7 +2786,7 @@ export function generateConductorSettings(projectRoot: string, surface: string):
           matcher: "logout|prompt_input_exit|other",
           hooks: [{
             type: "command",
-            command: "bash -c 'cmux-team send SESSION_ENDED --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" 2>/dev/null || true'",
+            command: "bash -c 'elevens send SESSION_ENDED --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" 2>/dev/null || true'",
             timeout: 5000,
           }],
         },
