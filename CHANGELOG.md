@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.1.0] - 2026-05-09
+
+elevens の初回リリース。cmux-team の self-fork として、Stage 11 Agentics の [c11](https://github.com/Stage-11-Agentics/c11) を substrate に切り替えるプロジェクトとしてスタート。
+
+### Notes
+
+- **このリリースは cmux-team v4.28.2 をリネームしたスナップショット。** c11 backend adapter はまだ実装されておらず、現状は cmux 上で動作する。c11 への移行は Phase 1 で実施予定（`docs/seed.md` 参照）
+- production 用途では引き続き cmux-team を使ってください
+- 完全な move 動機・c11 採用理由・CLI 互換性分析・phase 計画は [`docs/seed.md`](docs/seed.md) を参照
+
+### Changed
+
+- パッケージ名: `@hummer98/cmux-team` → `@hummer98/elevens`
+- バイナリ名: `cmux-team` → `elevens`
+- リポジトリ: `hummer98/cmux-team` → `hummer98/elevens`
+- バージョンスキーム: v4.x.x → v0.x.x（fresh start。cmux-team としての過去履歴は以下に継承）
+
+### Heritage
+
+以下、cmux-team としての変更履歴を継承します（最新コミット `4aa2f8a` 時点）。
+
+---
+
 ## [4.28.2] - 2026-05-09
 
 ### Fixed
