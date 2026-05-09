@@ -29,6 +29,7 @@ import { mkdir, writeFile, readFile, readdir, rm, cp } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import { t } from "./i18n";
+import { SUBSTRATE_BINARY } from "./cmux";
 
 const execFile = promisify(execFileCb);
 
@@ -61,25 +62,25 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function cmuxExec(...args: string[]): Promise<string> {
-  const { stdout } = await execFile("cmux", args, { timeout: 15_000 });
+  const { stdout } = await execFile(SUBSTRATE_BINARY, args, { timeout: 15_000 });
   return stdout.trim();
 }
 
 /** cmux send (--workspace 必須) */
 async function cmuxSend(surface: string, text: string): Promise<void> {
-  await execFile("cmux", [
+  await execFile(SUBSTRATE_BINARY, [
     "send", "--workspace", e2eWorkspace, "--surface", surface, text,
   ]);
 }
 
 async function cmuxSendKey(surface: string, key: string): Promise<void> {
-  await execFile("cmux", [
+  await execFile(SUBSTRATE_BINARY, [
     "send-key", "--workspace", e2eWorkspace, "--surface", surface, key,
   ]);
 }
 
 async function cmuxReadScreen(surface: string, lines: number = 15): Promise<string> {
-  const { stdout } = await execFile("cmux", [
+  const { stdout } = await execFile(SUBSTRATE_BINARY, [
     "read-screen", "--workspace", e2eWorkspace, "--surface", surface,
     "--lines", String(lines),
   ], { timeout: 10_000 });

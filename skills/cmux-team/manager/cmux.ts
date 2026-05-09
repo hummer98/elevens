@@ -8,6 +8,15 @@ import { formatExecError } from "./exec-error";
 
 const execFile = promisify(execFileCb);
 
+/**
+ * Substrate binary 名（cmux 互換 multiplexer）。
+ * `ELEVENS_BACKEND=c11` で c11、`ELEVENS_BACKEND=cmux`（または未設定）で cmux。
+ * 任意の文字列も受け付ける（絶対パスやカスタムビルド差し替え用）。
+ *
+ * Phase 1 PoC (docs/seed.md): default は当面 cmux。Phase 3 で c11 に切替。
+ */
+export const SUBSTRATE_BINARY: string = process.env.ELEVENS_BACKEND?.trim() || "cmux";
+
 type RunCmuxOpts = { timeout?: number };
 
 /**
@@ -19,7 +28,7 @@ type RunCmuxOpts = { timeout?: number };
  */
 async function runCmux(args: string[], opts?: RunCmuxOpts): Promise<{ stdout: string; stderr: string }> {
   try {
-    const { stdout, stderr } = await execFile("cmux", args, opts);
+    const { stdout, stderr } = await execFile(SUBSTRATE_BINARY, args, opts);
     return { stdout: stdout.toString(), stderr: stderr.toString() };
   } catch (e: any) {
     if (e?.__cmuxWrapped) throw e;
