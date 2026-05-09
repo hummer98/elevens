@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.1] - 2026-05-09
+
+### Fixed
+
+- **GitHub Actions OIDC trusted publishing を機能させた**。npmjs.com の Trusted Publisher 設定でリポジトリ名がずれていたため、`release.yml` の `npm publish --provenance --access public` が `ENEEDAUTH` で失敗していた。設定修正後の検証目的で v0.1.1 として再 publish。v0.1.0 はローカルからの token-based publish 由来で provenance 署名がない
+
 ## [0.1.0] - 2026-05-09
 
 elevens の初回リリース。cmux-team の self-fork として、Stage 11 Agentics の [c11](https://github.com/Stage-11-Agentics/c11) を substrate に切り替えるプロジェクトとしてスタート。
