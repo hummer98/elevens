@@ -1,20 +1,37 @@
 # Changelog
 
-## [Unreleased] (target: 0.2.1)
+## [0.3.0] - 2026-05-10
 
-Phase 3 prep（cmux backend deprecation の前準備）と、Phase 2 e2e smoke (`A031`) で検出された minor 指摘の一括対応。version は別途 release コマンドで bump 予定。
+Phase 3 (cmux deprecation) の本体作業: bin alias / brand 統一 / install hygiene / non-tty fail-soft / Phase 2 e2e smoke (A031) 由来の minor 修正一括。default backend 反転 (cmux → c11) は次 minor 以降で別途判断。詳細は issue #1 (ADR-001 〜 ADR-012)。
 
 ### Added
 
-- **cmux backend を選択している daemon 起動時に `DEPRECATION_NOTICE` を warn level で 1 度だけ log**: `manager.log` に `cmux backend is deprecated and will become non-default in v0.3.0. Set ELEVENS_BACKEND=c11 to migrate.` を出す。c11 backend では何もしない。**強制ではなく** exit せず作業を阻害しない。`ELEVENS_NO_DEPRECATION_WARN=1` で suppress 可能（`maybeLogDeprecationNotice` / `cmux.ts`）
-- **`elevens mailbox supported --json` flag**: `{"supported": true|false}` を 1 行 JSON で出力。exit code は据え置き（true→0、false→1）。default は従来の `yes`/`no` text 出力で互換性維持
-- **README.md / README.ja.md に `ELEVENS_BACKEND` の説明セクション追加**: c11 推奨・cmux deprecation・`ELEVENS_NO_DEPRECATION_WARN` を 1 表 + コードブロックで明示
-- **`docs/seed.md` の Phase 2 ステータスを `✅ 完了 (v0.2.0)` に更新**: 完了サマリとして A028〜A031 への相互リンクを追記
+- **`bin/cmux-team` alias** を `package.json.bin` に追加: 既存 templates / hook scripts / agent prompt が `cmux-team xxx` 形式でハードコードしている箇所を bin alias で 100% 後方互換にする。`elevens` と `cmux-team` は同一バイナリの 2 シンボリックリンクとして install される
+- **non-tty parent での TUI fail-soft**: `process.stdout.isTTY` 不在時に rezi/tui dashboard の起動を skip + console-redirect も install しないことで `engine_create failed: code=-6` の `[error]` 混入を物理的に塞ぐ。HTTP dashboard server は TTY に非依存で常時起動 (subagent / CI / nohup での運用が clean に)
+- **`elevens mailbox supported --json` flag**: `{"supported": true|false}` の 1 行 JSON 出力。default 挙動 (yes/no text) は維持、exit code 据え置き
+- **`maybeLogDeprecationNotice()` を cmdStart 起動経路で発火**: cmux backend 選択時に `DEPRECATION_NOTICE` を warn level で manager.log に 1 度だけ書く。`ELEVENS_NO_DEPRECATION_WARN=1` で suppress 可、c11 backend では no-op
+- **README / README.ja.md に `ELEVENS_BACKEND` 説明セクション**: c11 推奨と移行ガイダンス
+- **`elevens mailbox watch` CLI** (v0.2.x で先行実装): mailbox.* metadata の差分通知を CLI で観察可能 (debug / 運用ツール)
 
 ### Fixed
 
-- **`daemon_stopped` log の二重発火を解消**: SIGINT / SIGTERM / onQuit 経路から shutdown が複数回呼ばれて `daemon_stopped` が 2 行記録されていた race を修正。`makeShutdownGuard()` ファクトリで idempotent flag を導入し、先着のみが副作用と log を実行する。同等の guard pattern を SIGINT + SIGTERM 二重着火など全シナリオに適用
-- **`rate_limit.json` の atomic rename ENOENT race を解消**: shutdown 経路 / 並行 persist で `.rate-limit.json.tmp -> .rate-limit.json` の rename が ENOENT を出していた問題を修正。tmp ファイル名に `pid + random suffix` を付与して衝突を回避し、rename ENOENT は silent skip（先行 rename が既に確定済みのため副作用上の問題なし）。`task.ts:saveTaskState` / `metrics-snapshot.ts:atomicWriteJson` と同じ shape
+- **`bin/postinstall.js` の cross-package 副作用を削除**: 元実装は elevens を install しただけで `claude plugin add hummer98/cmux-team` が走り、別パッケージの plugin が user 認知外で登録される問題があった。さらに `~/.claude/statusline.sh` を毎回上書きする global file pollution も廃止。今後は README で `claude plugin marketplace add hummer98/elevens` → `claude plugin install elevens@hummer98-elevens` の正しい経路を案内
+- **`watchMailbox` の永続 desync bug** (v0.2.x で fix 済): A031 e2e smoke で発覚した `getMailbox` transient error 折り畳み問題を discriminated union (ok / unsupported / error) で解消、TDD で 2 ケース追加
+
+### Changed
+
+- **user 可視文字列の "cmux-team" → "elevens" 統一** (約 350 箇所): help text (i18n.ts) / preflight error / agent prompt template / slash command help / SKILL.md frontmatter `name`。判断基準: 「user に表示される文字列か / persist される設定文字列か」で二分し、前者のみ brand 統一。後者 (settings.json に書かれる hook command 等) は alias 互換頼みで触らず test churn を回避
+- **SKILL.md frontmatter `name` rename**: `cmux-team-*` → 短い名 (`team` / `analyze` / `gh` / `guide` / `agent-role`)。Plugin install 後 `elevens:team` 等の自然な skill ID になる。skill ディレクトリ名 (`skills/cmux-team/` 等) は seed.md Phase 3 まで継承の方針 (TypeScript import path 影響大のため)
+- **`mailbox.* formal schema`** (v0.2.x): canonical key 8 種 + literal union 型 + `validateMailboxPayload` を `mailbox-schema.ts` に export。`setMailbox(opts.validate)` で書き込み前 validation を opt-in 可能 (default warn)
+
+### 設計上の判断 (issue #1 ADR を参照)
+
+ADR-001〜ADR-012 (substrate adapter / dual-write / type 隔離 / claude-hook 併用 / deprecation 戦略 / shutdown guard / rate_limit tmp / watchMailbox seam / schema validation / JSON-RPC defer) は issue #1 に formalize 済み。
+
+### TDD / regression
+
+新規テスト: dashboard-tty-skip (3) / i18n (7) / mailbox-cli supported --json (1) / cmux deprecation (2) / makeShutdownGuard (4) / rate-limit tmp (1) / c11-features watchMailbox bug fix (2)。合計 16 ケース新設。
+regression: 16 ファイル / 674 pass / 5 skip / 0 fail / 1995 expect。
 
 ## [0.2.0] - 2026-05-10
 
