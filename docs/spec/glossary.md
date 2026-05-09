@@ -170,6 +170,7 @@ glossary には要約と一次リンクのみを置く方針を取る。
 | done marker | Conductor 完了通知用ファイル（`.team/tasks/TNNN-slug/runs/<taskRunId>/done`）。Manager は fs.watch + PID ベース生存確認（`spawnPidWatcher`）で完了検出する（pull 型）。 | [`00-project-overview.md#core-concept`](00-project-overview.md#core-concept), [`../../CLAUDE.md#manager-プロトコル概要`](../../CLAUDE.md#manager-プロトコル概要) | Conductor / await-agent |
 | journal | `task-state.json` 内に記録される状態遷移の監査ログ（`task_aborted` / `task_completed` / `parent_aborted: <id>` 等）。 | [`07-state-machine.md#24-cascade-ルール-t241`](07-state-machine.md#24-cascade-ルール-t241), [`../../CLAUDE.md#エラーリカバリ`](../../CLAUDE.md#エラーリカバリ) | cascade |
 | CONDUCTOR_DONE | Conductor から daemon に送る完了メッセージ。`success: true` で正常 close、`unresolved: true` で `aborted` + cascade（preserveWorktree）。 | [`07-state-machine.md#3-conductor--task-の同時遷移`](07-state-machine.md#3-conductor--task-の同時遷移), [`05-install-and-infrastructure.md#メッセージング`](05-install-and-infrastructure.md#メッセージング) | DONE / Task FSM |
+| mailbox.\* | surface metadata 上の `mailbox.*` 名前空間。agent / conductor / master が自身の lifecycle と意思（role / status / progress / error 等）を外部化する経路。canonical key は formal schema を持ち、未知 key は warning で許容（schema 進化のため）。c11 backend が無い環境では opportunistic no-op。 | [`13-mailbox-schema.md`](13-mailbox-schema.md) | done marker / `elevens mailbox` CLI |
 
 **関連 spec**: [`05-install-and-infrastructure.md`](05-install-and-infrastructure.md) / [`07-state-machine.md`](07-state-machine.md) / [`10-events-stream.md`](10-events-stream.md) / [`../../CLAUDE.md`](../../CLAUDE.md)
 

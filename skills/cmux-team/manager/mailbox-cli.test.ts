@@ -110,6 +110,47 @@ describe("引数バリデーション", () => {
   });
 });
 
+describe("validate 経路 smoke (mailbox-schema integration)", () => {
+  test("canonical key で型違反値があっても warn mode (default) で exit 0（書き込み続行）", async () => {
+    delete process.env.ELEVENS_BACKEND;
+    __resetCapabilitiesCache();
+    const stdout = new StringSink();
+    const stderr = new StringSink();
+    // mailbox.progress に 2.0（範囲外）を渡しても CLI は exit 0 で抜ける（warn のみ）
+    const code = await runMailboxCli({
+      args: [
+        "set",
+        "--surface",
+        "surface:1",
+        "--json",
+        '{"mailbox.progress":2.0}',
+      ],
+      stdout: stdout as any,
+      stderr: stderr as any,
+    });
+    expect(code).toBe(0);
+  });
+
+  test("未知 mailbox.* key も warn mode で exit 0（書き込み続行）", async () => {
+    delete process.env.ELEVENS_BACKEND;
+    __resetCapabilitiesCache();
+    const stdout = new StringSink();
+    const stderr = new StringSink();
+    const code = await runMailboxCli({
+      args: [
+        "set",
+        "--surface",
+        "surface:1",
+        "--json",
+        '{"mailbox.unknown_field":"hello"}',
+      ],
+      stdout: stdout as any,
+      stderr: stderr as any,
+    });
+    expect(code).toBe(0);
+  });
+});
+
 describe("cmux backend での no-op set/get/clear", () => {
   test("set/get/clear が exit 0、副作用なし", async () => {
     delete process.env.ELEVENS_BACKEND;

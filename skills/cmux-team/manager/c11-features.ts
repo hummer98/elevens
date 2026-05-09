@@ -10,6 +10,8 @@
 import { execFile as execFileCb } from "child_process";
 import { promisify } from "util";
 import { SUBSTRATE_BINARY, IS_C11_BACKEND } from "./cmux";
+import { validateMailboxPayload } from "./mailbox-schema";
+import { warn as logWarn } from "./logger";
 
 const execFile = promisify(execFileCb);
 
@@ -77,12 +79,37 @@ export type MailboxValue = string | number | boolean | object;
  * @param target 書き込み先 surface / pane の ref
  * @param payload mailbox.* キーを含む JSON object（merge mode で書き込まれる）
  * @param opts.source precedence layer（default: declare、agent 自書き用）
+ * @param opts.validate mailbox-schema による validation 動作:
+ *   - `"strict"`: error 発生時に throw（書き込みしない）
+ *   - `"warn"` (default): error / warning を log に流して書き込みは続行
+ *   - `"off"`: 検証しない（既存呼び出し元の opportunistic 動作と完全一致）
+ *   詳細仕様は `docs/spec/13-mailbox-schema.md` を参照。
  */
 export async function setMailbox(
   target: MailboxTarget,
   payload: Record<string, MailboxValue>,
-  opts?: { source?: "explicit" | "declare" | "osc" | "heuristic" }
+  opts?: {
+    source?: "explicit" | "declare" | "osc" | "heuristic";
+    validate?: "strict" | "warn" | "off";
+  }
 ): Promise<void> {
+  const mode = opts?.validate ?? "warn";
+  if (mode !== "off") {
+    const result = validateMailboxPayload(payload);
+    if (mode === "strict") {
+      if (!result.ok) {
+        throw new Error(`setMailbox: schema validation failed: ${result.errors.join("; ")}`);
+      }
+    } else {
+      // warn mode: error も warning も log に流す（書き込みは続行）
+      if (!result.ok) {
+        await logWarn("MAILBOX_SCHEMA_ERROR", result.errors.join("; ")).catch(() => {});
+      }
+      if (result.warnings && result.warnings.length > 0) {
+        await logWarn("MAILBOX_SCHEMA_WARN", result.warnings.join("; ")).catch(() => {});
+      }
+    }
+  }
   if (!(await isMailboxSupported())) return;
   const args: string[] = ["set-metadata"];
   args.push(`--${target.kind}`, target.ref);
@@ -93,16 +120,25 @@ export async function setMailbox(
 }
 
 /**
- * surface または pane の metadata を取得。
- * cmux backend では null。c11 では `{key: value, ...}` を返す（取得失敗時も null）。
+ * watchMailbox 内部用の discriminated 取得結果。
+ * - `ok`: c11 から正常に取得できた（metadata は空 dict もあり得る）
+ * - `unsupported`: cmux backend / capability 不足で取得できない（永続的）
+ * - `error`: c11 invocation / parse の transient 失敗。**prev は触らずに次 tick へ**
  *
- * @param opts.withSources true なら sidecar `metadata_sources` も同梱した raw response を返す
+ * Phase 2 e2e smoke (A031 §2 follow-up) で発覚: 旧実装は error を `null` に
+ * 折り畳んで `data = {}` と同視し、prev を空に上書きしていた → 一度の transient
+ * 失敗で watcher が永続 desync する bug があった。本 union で error を分離する。
  */
-export async function getMailbox(
+type FetchMailboxResult =
+  | { kind: "ok"; data: Record<string, MailboxValue>; raw?: Record<string, MailboxValue> }
+  | { kind: "unsupported" }
+  | { kind: "error"; error: Error };
+
+async function fetchMailboxData(
   target: MailboxTarget,
   opts?: { withSources?: boolean }
-): Promise<Record<string, MailboxValue> | null> {
-  if (!(await isMailboxSupported())) return null;
+): Promise<FetchMailboxResult> {
+  if (!(await isMailboxSupported())) return { kind: "unsupported" };
   // c11 では --json は global flag。subcommand より前に置く必要がある（subcommand の後に置くと text 出力になる）
   const args: string[] = ["--json", "get-metadata"];
   args.push(`--${target.kind}`, target.ref);
@@ -111,11 +147,45 @@ export async function getMailbox(
     const { stdout } = await execFile(SUBSTRATE_BINARY, args, { timeout: META_TIMEOUT_MS });
     const parsed = JSON.parse(stdout.toString());
     const result = parsed?.result ?? parsed;
-    if (opts?.withSources) return result as Record<string, MailboxValue>;
-    return (result?.metadata ?? null) as Record<string, MailboxValue> | null;
-  } catch {
-    return null;
+    const raw = result as Record<string, MailboxValue>;
+    const data = (result?.metadata ?? {}) as Record<string, MailboxValue>;
+    return { kind: "ok", data, raw };
+  } catch (e: any) {
+    return { kind: "error", error: e instanceof Error ? e : new Error(String(e)) };
   }
+}
+
+/** テスト seam: watchMailbox / getMailbox が使う取得関数を差し替える。null で reset。 */
+type FetchMailboxImpl = (
+  target: MailboxTarget,
+  opts?: { withSources?: boolean }
+) => Promise<FetchMailboxResult>;
+let fetchImpl: FetchMailboxImpl | null = null;
+export function __setFetchMailboxImpl(impl: FetchMailboxImpl | null): void {
+  fetchImpl = impl;
+}
+async function callFetch(
+  target: MailboxTarget,
+  opts?: { withSources?: boolean }
+): Promise<FetchMailboxResult> {
+  return fetchImpl ? fetchImpl(target, opts) : fetchMailboxData(target, opts);
+}
+
+/**
+ * surface または pane の metadata を取得。
+ * cmux backend / 取得失敗ともに null（既存契約。詳細な失敗種別が必要なときは
+ * watchMailbox 内部の `callFetch` 経路を直接使う）。
+ *
+ * @param opts.withSources true なら sidecar `metadata_sources` も同梱した raw response を返す
+ */
+export async function getMailbox(
+  target: MailboxTarget,
+  opts?: { withSources?: boolean }
+): Promise<Record<string, MailboxValue> | null> {
+  const r = await callFetch(target, opts);
+  if (r.kind !== "ok") return null;
+  if (opts?.withSources) return r.raw ?? null;
+  return r.data;
 }
 
 /**
@@ -140,9 +210,8 @@ export async function watchMailbox(
   onChange: (changes: MailboxChange[]) => void | Promise<void>,
   opts?: { intervalMs?: number; signal?: AbortSignal }
 ): Promise<{ stop: () => void }> {
-  if (!(await isMailboxSupported())) {
-    return { stop: () => {} };
-  }
+  // unsupported は最初の tick の `callFetch` 結果で検出して自然停止する
+  // （早期 exit を入れると test seam 経路が通らないため）
   const interval = Math.max(250, opts?.intervalMs ?? 1500);
   let stopped = false;
   let prev: Record<string, MailboxValue> = {};
@@ -154,7 +223,21 @@ export async function watchMailbox(
 
   const tick = async (): Promise<void> => {
     if (stopped) return;
-    const data = (await getMailbox(target)) ?? {};
+    const r = await callFetch(target);
+    if (r.kind === "error") {
+      // A031 §2 e2e smoke で発覚した永続 desync を回避: error 時は prev を触らず
+      // diff 計算もスキップ。次 tick で正常取得できれば自然に diff が再開する。
+      await logWarn("MAILBOX_FETCH_ERROR", `target=${target.kind}:${target.ref} ${r.error.message}`).catch(() => {});
+      if (!stopped) setTimeout(() => void tick(), interval);
+      return;
+    }
+    if (r.kind === "unsupported") {
+      // 起動時には support されていたが途中で capability が消えるケースは想定外。
+      // 安全側に倒して watcher を停止する。
+      stopped = true;
+      return;
+    }
+    const data = r.data;
     const changes: MailboxChange[] = [];
     // mailbox.* prefix のみ対象（surface 標準 metadata である title/lifecycle_state を除外）
     for (const [k, v] of Object.entries(data)) {
