@@ -132,7 +132,13 @@ export async function runMailboxCli(input: RunMailboxCliInput): Promise<number> 
     switch (sub) {
       case "supported": {
         const ok = await isMailboxSupported();
-        stdout.write(ok ? "yes\n" : "no\n");
+        // A031 follow-up: --json flag を honor。互換性のため text 出力を default に維持。
+        // exit code は据え置き（true→0、false→1）。
+        if (flags.has("json")) {
+          stdout.write(JSON.stringify({ supported: ok }) + "\n");
+        } else {
+          stdout.write(ok ? "yes\n" : "no\n");
+        }
         return ok ? 0 : 1;
       }
 

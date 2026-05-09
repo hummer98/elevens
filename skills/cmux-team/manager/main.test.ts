@@ -22,6 +22,7 @@ import {
   buildConductorClaudeArgs,
   buildAgentClaudeFlags,
   buildMasterClaudeArgs,
+  makeShutdownGuard,
 } from "./main";
 import type { TaskMeta, TaskState } from "./task";
 import {
@@ -3333,4 +3334,54 @@ describe("c11 claude-hook opportunistic forwarding (T448)", () => {
   });
 });
 
+// --- A031 follow-up: shutdown idempotency ---------------------------------
+//
+// 二重 daemon_stopped log 問題（SIGINT + SIGTERM が両方着火する経路や、
+// onQuit → SIGINT のように shutdown が複数回呼ばれるケース）を防ぐための
+// makeShutdownGuard を抽出した。closure は cmdStart の shutdown でのみ
+// 使うが、テスト容易性のために単体で claim 動作を検証する。
 
+describe("makeShutdownGuard (shutdown idempotency)", () => {
+  test("最初の claim() のみ true、以後は false を返す", () => {
+    const guard = makeShutdownGuard();
+    expect(guard.claim()).toBe(true);
+    expect(guard.claim()).toBe(false);
+    expect(guard.claim()).toBe(false);
+  });
+
+  test("複数回シリアル shutdown シミュレーションで daemon_stopped 相当の副作用が 1 回だけ走る", async () => {
+    const guard = makeShutdownGuard();
+    let calls = 0;
+    const shutdown = async () => {
+      if (!guard.claim()) return;
+      calls++;
+    };
+    await shutdown();
+    await shutdown();
+    await shutdown();
+    expect(calls).toBe(1);
+  });
+
+  test("並行 await でも 1 回だけ実行される（race-safe in single-threaded JS）", async () => {
+    const guard = makeShutdownGuard();
+    let calls = 0;
+    const shutdown = async () => {
+      if (!guard.claim()) return;
+      // claim の直後 yield しても claimed=true 済みなので二重発火しない
+      await new Promise((r) => setImmediate(r));
+      calls++;
+    };
+    await Promise.all([shutdown(), shutdown(), shutdown()]);
+    expect(calls).toBe(1);
+  });
+
+  test("instance ごとに独立（global 汚染しない）", () => {
+    const a = makeShutdownGuard();
+    const b = makeShutdownGuard();
+    expect(a.claim()).toBe(true);
+    expect(a.claim()).toBe(false);
+    // b は独立
+    expect(b.claim()).toBe(true);
+    expect(b.claim()).toBe(false);
+  });
+});

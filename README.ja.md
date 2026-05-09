@@ -74,6 +74,29 @@ daemon は `update-notifier` で新バージョンを**検出**し、TUI バナ�
 - `cmux-team self-update` サブコマンドを削除しました。
 - 移行: `autoUpdate` を `notify`（または `off`）に変更し、バナーが表示されたら `npm install -g @hummer98/cmux-team@latest` を実行してください。
 
+### Substrate backend (`ELEVENS_BACKEND`)
+
+elevens はターミナルマルチプレクサ（"substrate"）の上で動作します。現在 2 つの backend が選択できます:
+
+| Backend | 切り替え方 | ステータス |
+|---------|----------|----------|
+| `c11` ([Stage-11-Agentics/c11](https://github.com/Stage-11-Agentics/c11)) | `export ELEVENS_BACKEND=c11` | **推奨設定。** v0.3.0 でデフォルトに昇格します（Phase 3、詳細は [`docs/seed.md`](docs/seed.md)）。 |
+| `cmux` ([manaflow-ai/cmux](https://github.com/manaflow-ai/cmux)) | 未設定 または `export ELEVENS_BACKEND=cmux` | レガシー互換。v0.2.x まではデフォルトですが**deprecated** — daemon 起動時に `DEPRECATION_NOTICE` の警告を 1 度だけ出します。 |
+
+cmux backend は当面そのまま動作しますが、v0.3.0 でデフォルトの座を譲ります。今のうちに移行するには:
+
+```bash
+export ELEVENS_BACKEND=c11   # shell rc または direnv .envrc に書くのが楽
+```
+
+意図的に cmux を使い続ける runbook で警告を抑止したい場合:
+
+```bash
+export ELEVENS_NO_DEPRECATION_WARN=1
+```
+
+カスタムビルド・絶対パスも受け付けます（例: `ELEVENS_BACKEND=/opt/c11-dev/bin/c11`）。c11-only フラグ（`--no-layout` 等）の付与判定は basename ベース。
+
 ### 設定ファイル（`.team/config.json`）
 
 `cmux-team start` がプロジェクトごとに自動生成します。全キーは任意で、手動編集も可能（次回 start 時に再読込されます）。共通の優先順位: **CLI フラグ > 環境変数 > `.team/config.json` > 組み込みデフォルト**。

@@ -129,3 +129,62 @@ describe("listSiblingSurfaces (T207)", () => {
     expect(siblings).toEqual([]);
   });
 });
+
+// --- Phase 3 prep: maybeLogDeprecationNotice (A031 follow-up) -------------
+import { maybeLogDeprecationNotice, __resetDeprecationNoticeForTest } from "./cmux";
+
+describe("maybeLogDeprecationNotice (Phase 3 prep)", () => {
+  let origNoWarn: string | undefined;
+  let origRoot: string | undefined;
+
+  beforeEach(() => {
+    __resetDeprecationNoticeForTest();
+    origNoWarn = process.env.ELEVENS_NO_DEPRECATION_WARN;
+    origRoot = process.env.PROJECT_ROOT;
+    delete process.env.ELEVENS_NO_DEPRECATION_WARN;
+    process.env.PROJECT_ROOT = testDir;
+  });
+
+  afterEach(() => {
+    __resetDeprecationNoticeForTest();
+    if (origNoWarn === undefined) delete process.env.ELEVENS_NO_DEPRECATION_WARN;
+    else process.env.ELEVENS_NO_DEPRECATION_WARN = origNoWarn;
+    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origRoot;
+  });
+
+  async function readManagerLog(): Promise<string> {
+    try {
+      const { readFile } = await import("fs/promises");
+      return await readFile(join(testDir, ".team/logs/manager.log"), "utf-8");
+    } catch {
+      return "";
+    }
+  }
+
+  test("cmux backend では DEPRECATION_NOTICE が manager.log に 1 度だけ warn される", async () => {
+    // SUBSTRATE_BINARY は module 読み込み時に process.env.ELEVENS_BACKEND を見て確定する。
+    // テスト harness では default = cmux backend として走る前提（top-level beforeEach で
+    // ELEVENS_BACKEND を delete している）。
+    await mkdir(join(testDir, ".team/logs"), { recursive: true });
+    await maybeLogDeprecationNotice();
+    let log = await readManagerLog();
+    expect(log).toContain("DEPRECATION_NOTICE");
+    expect(log).toContain("cmux backend is deprecated");
+    expect(log).toContain("ELEVENS_BACKEND=c11");
+
+    // 2 回呼んでも追加されないこと（idempotent）
+    await maybeLogDeprecationNotice();
+    log = await readManagerLog();
+    const matches = log.match(/DEPRECATION_NOTICE/g) ?? [];
+    expect(matches.length).toBe(1);
+  });
+
+  test("ELEVENS_NO_DEPRECATION_WARN=1 で suppress される（log に出ない）", async () => {
+    await mkdir(join(testDir, ".team/logs"), { recursive: true });
+    process.env.ELEVENS_NO_DEPRECATION_WARN = "1";
+    await maybeLogDeprecationNotice();
+    const log = await readManagerLog();
+    expect(log).not.toContain("DEPRECATION_NOTICE");
+  });
+});

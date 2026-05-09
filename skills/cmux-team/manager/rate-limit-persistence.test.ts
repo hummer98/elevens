@@ -94,6 +94,23 @@ describe("persistRateLimit / loadRateLimit", () => {
     const loaded = await loadRateLimit(testDir);
     expect(loaded?.unified5hUtilization).toBe(0.6);
   });
+
+  // A031: shutdown 経路で `.rate-limit.json.tmp` が race で消えていても
+  // persistRateLimit は throw せず正常に書き込みを完了する。
+  test("並行 persist でも ENOENT race を起こさず最終内容が確定する", async () => {
+    // 5 並列で persist を呼んで、いずれも throw しないこと、
+    // 最後の loadRateLimit が正常に値を返すことを検証する。
+    const N = 5;
+    const promises: Promise<void>[] = [];
+    for (let i = 0; i < N; i++) {
+      promises.push(persistRateLimit(testDir, makeInfo({ unified5hUtilization: i / 10 })));
+    }
+    await Promise.all(promises);
+    const loaded = await loadRateLimit(testDir);
+    expect(loaded).not.toBeNull();
+    // 副次的に tmp が残っていないこと（atomic 保証）
+    expect(existsSync(join(testDir, ".team/rate-limit.json.tmp"))).toBe(false);
+  });
 });
 
 describe("isStale5h", () => {

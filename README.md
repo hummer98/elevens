@@ -74,6 +74,29 @@ Related:
 - The `cmux-team self-update` subcommand is removed.
 - Migration: set `autoUpdate` to `notify` (or `off`), then run `npm install -g @hummer98/cmux-team@latest` when the banner appears.
 
+### Substrate backend (`ELEVENS_BACKEND`)
+
+elevens runs on top of a terminal multiplexer ("substrate"). Two backends are currently supported:
+
+| Backend | How to select | Status |
+|---------|---------------|--------|
+| `c11` ([Stage-11-Agentics/c11](https://github.com/Stage-11-Agentics/c11)) | `export ELEVENS_BACKEND=c11` | **Recommended.** Becomes the default in v0.3.0 (Phase 3, see [`docs/seed.md`](docs/seed.md)). |
+| `cmux` ([manaflow-ai/cmux](https://github.com/manaflow-ai/cmux)) | unset, or `export ELEVENS_BACKEND=cmux` | Legacy compat. Default through v0.2.x; **deprecated** — daemon emits a one-shot `DEPRECATION_NOTICE` warning on start. |
+
+The cmux backend keeps working for now but will lose default status in v0.3.0. To migrate today:
+
+```bash
+export ELEVENS_BACKEND=c11   # or set in your shell rc / direnv .envrc
+```
+
+Suppress the deprecation warning (e.g. on a runbook that intentionally pins cmux):
+
+```bash
+export ELEVENS_NO_DEPRECATION_WARN=1
+```
+
+Custom builds and absolute paths are also accepted (`ELEVENS_BACKEND=/opt/c11-dev/bin/c11`). The basename decides whether c11-only flags (`--no-layout` etc.) are passed through.
+
 ### Configuration (`.team/config.json`)
 
 Created per-project by `cmux-team start`. All keys are optional — the file can be edited by hand and is re-read on next start. General precedence: **CLI flag > env var > `.team/config.json` > built-in default**.

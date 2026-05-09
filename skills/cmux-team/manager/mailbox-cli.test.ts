@@ -55,6 +55,24 @@ describe("supported (cmux backend → 1, c11 backend は smoke test 側)", () =>
     expect(code).toBe(1);
     expect(stdout.data.trim()).toBe("no");
   });
+
+  test("--json flag で JSON 出力 + exit code 据え置き (cmux backend → false / exit 1)", async () => {
+    delete process.env.ELEVENS_BACKEND;
+    __resetCapabilitiesCache();
+    const stdout = new StringSink();
+    const stderr = new StringSink();
+    const code = await runMailboxCli({
+      args: ["supported", "--json"],
+      stdout: stdout as any,
+      stderr: stderr as any,
+    });
+    expect(code).toBe(1);
+    // 厳密に 1 行 JSON
+    const parsed = JSON.parse(stdout.data.trim());
+    expect(parsed).toEqual({ supported: false });
+    // text "no" は出さない
+    expect(stdout.data).not.toContain("no\n");
+  });
 });
 
 describe("引数バリデーション", () => {

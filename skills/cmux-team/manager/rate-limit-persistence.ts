@@ -20,15 +20,31 @@ export function rateLimitPath(projectRoot: string): string {
 /**
  * RateLimitInfo を atomic に書き出す。
  * proxy からは fire-and-forget で呼ばれるため、失敗時の扱いは呼び出し側に委ねる。
+ *
+ * A031 follow-up: 並行 persist で `.rate-limit.json.tmp -> .rate-limit.json` の
+ * rename が ENOENT を起こす race があった（先行呼び出しが tmp を rename 済み →
+ * 後続が同名 tmp を rename しようとするが既に存在しない）。
+ * pid + random suffix で tmp を衝突しないようにし、rename の ENOENT は
+ * silent skip（先行で既に確定済みのため副作用上の問題はない）。
+ *
+ * `task.ts:saveTaskState` / `metrics-snapshot.ts:atomicWriteJson` と同じ shape。
  */
 export async function persistRateLimit(
   projectRoot: string,
   info: RateLimitInfo,
 ): Promise<void> {
   const filePath = rateLimitPath(projectRoot);
-  const tmpPath = filePath + ".tmp";
-  await writeFile(tmpPath, JSON.stringify(info, null, 2) + "\n");
-  await rename(tmpPath, filePath);
+  // 並行呼び出しでも tmp 名が衝突しないよう pid + random suffix を入れる
+  const r = Math.random().toString(36).slice(2, 10);
+  const tmpPath = `${filePath}.${process.pid}.${r}.tmp`;
+  try {
+    await writeFile(tmpPath, JSON.stringify(info, null, 2) + "\n");
+    await rename(tmpPath, filePath);
+  } catch (e: any) {
+    // 先行 rename が既に同一 tmp を消費していれば ENOENT。silent skip。
+    if (e?.code === "ENOENT") return;
+    throw e;
+  }
 }
 
 /**

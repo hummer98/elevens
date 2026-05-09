@@ -127,12 +127,16 @@ substrate-specific な部分は最小:
 
 PoC で問題が出たら scope を広げる（adapter の追加、subcommand の差吸収など）。
 
-### Phase 2 — mailbox.* / JSON-RPC 移行（〜2026-06-15）
+### Phase 2 — mailbox.* / JSON-RPC 移行（〜2026-06-15）✅ 完了 (v0.2.0)
 
-- Conductor / Agent が surface metadata (`mailbox.role`, `mailbox.status`, `mailbox.task`, `mailbox.progress`) を書き込むように改修
-- Manager が metadata-poll で状態判定する経路を追加（既存 done marker と並列稼働）
-- 並列稼働期間で挙動比較・ログ収集
-- AgentDetector による idle 判定への置き換え（"ing…/esc to interrupt" pattern 検出を deprecated 扱い）
+- ✅ Conductor / Agent が surface metadata (`mailbox.role`, `mailbox.status`, `mailbox.task`, `mailbox.progress`) を書き込むように改修
+- ✅ Manager が metadata-poll で状態判定する経路を追加（既存 done marker と並列稼働 — `spawnConductorMailboxWatcher` で trace DB / events.jsonl に dual-write）
+- ✅ 並列稼働期間で挙動比較・ログ収集（→ `cmux-team metrics` の cohort 比較で評価予定）
+- ✅ AgentDetector による idle 判定への置き換え（c11 `claude-hook` を opportunistic 並行転送、ただし可視 metadata は書き換わらない点に注意 — `.team/artifacts/A031` §2 参照）
+- ✅ `mailbox.*` formal schema を策定（`docs/spec/13-mailbox-schema.md` + `mailbox-schema.ts`）
+- ✅ JSON-RPC 直叩き SDK は CLI で十分なため deferred（`.team/artifacts/A031` §3）
+
+完了サマリ: [`A028`](../.team/artifacts/A028-phase1-substrate-adapter-poc.md) / [`A029`](../.team/artifacts/A029-c11-parity-and-phase2-prep.md) / [`A030`](../.team/artifacts/A030-mailbox-watch-and-pty-validation.md) / [`A031`](../.team/artifacts/A031-claude-hook-and-daemon-smoke.md)
 
 ### Phase 3 — cmux サポートの段階削除（〜2026-07-15）
 

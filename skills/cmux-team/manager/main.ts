@@ -205,6 +205,27 @@ export function formatUptimeFromStartedAt(startedAtIso: string, now: number = Da
   return Math.max(0, Math.floor((now - new Date(startedAtIso).getTime()) / 1000));
 }
 
+/**
+ * A031 follow-up: shutdown idempotency guard。
+ * 複数経路（SIGINT / SIGTERM / onQuit）から shutdown が呼ばれても
+ * `daemon_stopped` log と副作用が二重発火しないようにするための小さな factory。
+ *
+ * - `claim()` を最初に呼んだ caller のみ true を返し、以後は false を返す
+ * - state を closure で保持するため、process 単位で 1 回 setup する用途
+ *
+ * 単体テスト容易性のために抽出してある。実際の使用は cmdStart 内 shutdown closure。
+ */
+export function makeShutdownGuard(): { claim: () => boolean } {
+  let claimed = false;
+  return {
+    claim(): boolean {
+      if (claimed) return false;
+      claimed = true;
+      return true;
+    },
+  };
+}
+
 // --- Task 440: write gate（cwd と異なる project root への書き込み防止） ---
 
 /**
@@ -718,6 +739,11 @@ async function cmdStart(): Promise<void> {
   // 呼ぶため対象外。reload sequence で子の pidfile を誤削除しない PID-aware 設計。
   installCrashHandler(pidFilePath);
 
+  // Phase 3 prep (docs/seed.md): cmux backend を選択していると 1 度だけ
+  // deprecation 通知を warn する。c11 backend では何もしない。
+  // ELEVENS_NO_DEPRECATION_WARN=1 で suppress 可能。
+  await cmux.maybeLogDeprecationNotice();
+
   // --- direnv allow fail-fast チェック ---
   // .envrc が未 allow のまま daemon を起動すると CLAUDE_CODE_OAUTH_TOKEN 等が
   // ロードされず Conductor / Agent が意図しない認証経路で立ち上がるため、
@@ -1061,7 +1087,13 @@ async function cmdStart(): Promise<void> {
 
   // シグナルハンドリング（TUI 起動前に設定）
   // quit 時は proxy を停止しない（既存 Master/Conductor の接続を維持するため）
+  //
+  // A031 follow-up: shutdown は SIGINT / SIGTERM / onQuit から複数呼ばれる経路
+  // があり、`daemon_stopped` が 2 回 log されることがあった。idempotent guard で
+  // 二重発火を抑止する。先着のみが副作用を実行し、後続は早期 return する。
+  const shutdownGuard = makeShutdownGuard();
   const shutdown = async () => {
+    if (!shutdownGuard.claim()) return;
     // T234: state.running = false + 全 pidWatcher 停止をまとめて実行
     stopDaemon(state);
     state.fileWatcherAbort?.abort();

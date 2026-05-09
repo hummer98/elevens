@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased] (target: 0.2.1)
+
+Phase 3 prep（cmux backend deprecation の前準備）と、Phase 2 e2e smoke (`A031`) で検出された minor 指摘の一括対応。version は別途 release コマンドで bump 予定。
+
+### Added
+
+- **cmux backend を選択している daemon 起動時に `DEPRECATION_NOTICE` を warn level で 1 度だけ log**: `manager.log` に `cmux backend is deprecated and will become non-default in v0.3.0. Set ELEVENS_BACKEND=c11 to migrate.` を出す。c11 backend では何もしない。**強制ではなく** exit せず作業を阻害しない。`ELEVENS_NO_DEPRECATION_WARN=1` で suppress 可能（`maybeLogDeprecationNotice` / `cmux.ts`）
+- **`elevens mailbox supported --json` flag**: `{"supported": true|false}` を 1 行 JSON で出力。exit code は据え置き（true→0、false→1）。default は従来の `yes`/`no` text 出力で互換性維持
+- **README.md / README.ja.md に `ELEVENS_BACKEND` の説明セクション追加**: c11 推奨・cmux deprecation・`ELEVENS_NO_DEPRECATION_WARN` を 1 表 + コードブロックで明示
+- **`docs/seed.md` の Phase 2 ステータスを `✅ 完了 (v0.2.0)` に更新**: 完了サマリとして A028〜A031 への相互リンクを追記
+
+### Fixed
+
+- **`daemon_stopped` log の二重発火を解消**: SIGINT / SIGTERM / onQuit 経路から shutdown が複数回呼ばれて `daemon_stopped` が 2 行記録されていた race を修正。`makeShutdownGuard()` ファクトリで idempotent flag を導入し、先着のみが副作用と log を実行する。同等の guard pattern を SIGINT + SIGTERM 二重着火など全シナリオに適用
+- **`rate_limit.json` の atomic rename ENOENT race を解消**: shutdown 経路 / 並行 persist で `.rate-limit.json.tmp -> .rate-limit.json` の rename が ENOENT を出していた問題を修正。tmp ファイル名に `pid + random suffix` を付与して衝突を回避し、rename ENOENT は silent skip（先行 rename が既に確定済みのため副作用上の問題なし）。`task.ts:saveTaskState` / `metrics-snapshot.ts:atomicWriteJson` と同じ shape
+
 ## [0.2.0] - 2026-05-10
 
 Phase 2（mailbox.\* 経路の dual-write 観測）が一通り完了。c11 surface metadata を Conductor lifecycle で観察し、既存の `done` marker / pid watcher と並列に trace DB / events stream に記録する経路を確立した。詳細は `docs/seed.md` の Phase 計画と `.team/artifacts/A028〜A031` を参照。

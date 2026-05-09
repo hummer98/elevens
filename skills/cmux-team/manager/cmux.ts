@@ -25,6 +25,38 @@ export const SUBSTRATE_BINARY: string = process.env.ELEVENS_BACKEND?.trim() || "
 const SUBSTRATE_BASENAME = SUBSTRATE_BINARY.split("/").pop() ?? SUBSTRATE_BINARY;
 export const IS_C11_BACKEND: boolean = SUBSTRATE_BASENAME === "c11";
 
+/**
+ * Phase 3 prep (docs/seed.md): cmux backend が選択されているとき
+ * daemon 起動時に **1 度だけ** deprecation 通知を `manager.log` に warn する。
+ *
+ * - **強制ではない**（exit せず、ユーザーの作業を阻害しない）
+ * - `ELEVENS_NO_DEPRECATION_WARN=1` で suppress 可能
+ * - c11 backend では何もしない
+ * - 同一プロセス内で複数回呼んでも 1 回しか log しない（idempotent flag）
+ *
+ * cmdStart の起動経路（acquireOrExit 直後あたり）で呼ばれる前提。
+ */
+let deprecationNoticeEmitted = false;
+
+/** テスト用: emitted flag を初期化する（process 単位のキャッシュをリセット） */
+export function __resetDeprecationNoticeForTest(): void {
+  deprecationNoticeEmitted = false;
+}
+
+export async function maybeLogDeprecationNotice(): Promise<void> {
+  if (deprecationNoticeEmitted) return;
+  if (process.env.ELEVENS_NO_DEPRECATION_WARN === "1") return;
+  if (IS_C11_BACKEND) return;
+  // 一度フラグを立ててから log（log 失敗時の二重発火も避ける）
+  deprecationNoticeEmitted = true;
+  // logger を遅延 import（循環依存回避 + cmux.ts の既存 logger 依存と整合）
+  const { warn } = await import("./logger");
+  await warn(
+    "DEPRECATION_NOTICE",
+    "cmux backend is deprecated and will become non-default in v0.3.0. Set ELEVENS_BACKEND=c11 to migrate. See docs/seed.md Phase 3.",
+  );
+}
+
 type RunCmuxOpts = { timeout?: number };
 
 /**
