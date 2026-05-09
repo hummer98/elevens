@@ -12,6 +12,7 @@ import {
   setMailbox,
   getMailbox,
   clearMailbox,
+  watchMailbox,
   isMailboxSupported,
   type MailboxTarget,
   type MailboxValue,
@@ -88,6 +89,7 @@ Usage:
   elevens mailbox set [--surface S | --pane P] (--key K --value V [--type T] | --json '{...}') [--source SRC]
   elevens mailbox get [--surface S | --pane P] [--key K]... [--sources] [--json]
   elevens mailbox clear [--surface S | --pane P] --key K
+  elevens mailbox watch [--surface S | --pane P] [--interval-ms N]
   elevens mailbox supported
 
 Flags:
@@ -194,6 +196,38 @@ export async function runMailboxCli(input: RunMailboxCliInput): Promise<number> 
           return 2;
         }
         await clearMailbox(target, key);
+        return 0;
+      }
+
+      case "watch": {
+        const target = resolveTarget(flags);
+        const intervalMs = Number(flags.get("interval-ms") ?? "1500");
+        if (!(await isMailboxSupported())) {
+          stderr.write("mailbox watch: backend が mailbox 非対応のため即 exit\n");
+          return 0;
+        }
+        const ctrl = new AbortController();
+        const cleanup = (): void => ctrl.abort();
+        process.on("SIGINT", cleanup);
+        process.on("SIGTERM", cleanup);
+        const handle = await watchMailbox(
+          target,
+          (changes) => {
+            for (const c of changes) {
+              const ts = new Date().toISOString();
+              const value = "value" in c ? JSON.stringify(c.value) : "";
+              const prev = "previous" in c && c.previous !== undefined ? ` prev=${JSON.stringify(c.previous)}` : "";
+              stdout.write(`${ts} ${c.kind} ${c.key} ${value}${prev}\n`);
+            }
+          },
+          { intervalMs, signal: ctrl.signal }
+        );
+        // signal.aborted は addEventListener 経由で stop を呼ぶので、ここでは abort を待つだけ
+        await new Promise<void>((resolve) => {
+          if (ctrl.signal.aborted) resolve();
+          else ctrl.signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        handle.stop();
         return 0;
       }
 

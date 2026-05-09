@@ -126,3 +126,61 @@ export async function clearMailbox(target: MailboxTarget, key: string): Promise<
   const args: string[] = ["clear-metadata", `--${target.kind}`, target.ref, "--key", key];
   await execFile(SUBSTRATE_BINARY, args, { timeout: META_TIMEOUT_MS });
 }
+
+/**
+ * `mailbox.*` キーが追加・変更・削除されたら onChange を呼び出す poll loop。
+ *
+ * - cmux backend / 未対応 c11 では即 resolve（poll loop は走らない）
+ * - 戻り値の `stop()` で停止
+ * - 同じキー・同じ値の連続検出は通知しない（差分のみ）
+ * - `intervalMs` の default は 1500ms。あまり短くすると CLI spawn コストが嵩むので 1〜2 秒推奨
+ */
+export async function watchMailbox(
+  target: MailboxTarget,
+  onChange: (changes: MailboxChange[]) => void | Promise<void>,
+  opts?: { intervalMs?: number; signal?: AbortSignal }
+): Promise<{ stop: () => void }> {
+  if (!(await isMailboxSupported())) {
+    return { stop: () => {} };
+  }
+  const interval = Math.max(250, opts?.intervalMs ?? 1500);
+  let stopped = false;
+  let prev: Record<string, MailboxValue> = {};
+  let firstTick = true;
+  const stop = (): void => {
+    stopped = true;
+  };
+  opts?.signal?.addEventListener("abort", stop);
+
+  const tick = async (): Promise<void> => {
+    if (stopped) return;
+    const data = (await getMailbox(target)) ?? {};
+    const changes: MailboxChange[] = [];
+    // mailbox.* prefix のみ対象（surface 標準 metadata である title/lifecycle_state を除外）
+    for (const [k, v] of Object.entries(data)) {
+      if (!k.startsWith("mailbox.")) continue;
+      if (!firstTick && JSON.stringify(prev[k]) !== JSON.stringify(v)) {
+        changes.push({ kind: prev[k] === undefined ? "added" : "changed", key: k, value: v, previous: prev[k] });
+      } else if (firstTick) {
+        changes.push({ kind: "added", key: k, value: v });
+      }
+    }
+    for (const k of Object.keys(prev)) {
+      if (!k.startsWith("mailbox.")) continue;
+      if (!(k in data)) {
+        changes.push({ kind: "removed", key: k, previous: prev[k] });
+      }
+    }
+    if (changes.length > 0) await onChange(changes);
+    prev = data;
+    firstTick = false;
+    if (!stopped) setTimeout(() => void tick(), interval);
+  };
+  void tick();
+  return { stop };
+}
+
+export type MailboxChange =
+  | { kind: "added"; key: string; value: MailboxValue }
+  | { kind: "changed"; key: string; value: MailboxValue; previous: MailboxValue }
+  | { kind: "removed"; key: string; previous: MailboxValue };
