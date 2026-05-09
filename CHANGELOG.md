@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.3.1] - 2026-05-10
+
+v0.3.0 で残っていた user-visible 文字列の brand 統一補完。bin alias で機能互換は変わらず。
+
+### Changed
+
+- **README.md / README.ja.md** の command 例を `cmux-team xxx` → `elevens xxx` に統一 (約 60 行)。npm パッケージ名も `@hummer98/elevens` に更新。歴史的経緯 (cmux-team 後継 / v4.28 リネームスナップショット) と URL は context として保持
+- **TUI ヘッダ** (`dashboard.tsx`): `─ cmux-team <subtitle>` → `─ elevens <subtitle>`、TTY 不在 hint、`cmux-team-issue-` 一時ファイル prefix も brand 化
+- **Web dashboard chrome** (`dashboard-web/index.html`, `app.js`): `<title>` / `<h1>` / 先頭 comment を `elevens` に
+- **SKILL.md** 5 ファイル (`cmux-team`, `cmux-agent-role`, `cmux-team-analyze`, `cmux-team-gh`, `cmux-team-guide`): 本文・コマンド例の brand 統一。skill heading の self-reference (`# cmux-team-analyze:` 等) はディレクトリ名と整合のため保持。frontmatter の trigger 自然言語は両用語維持で既存ユーザーの動作を壊さない
+- `dashboard-server.test.ts`: TUI title 更新に伴う fixture assertion 追従
+
+### 触らなかった箇所と判断基準
+
+- ENV var (`CMUX_TEAM_*` / `CMUX_*`): 互換維持
+- ファイルパス (`.team/`, `cmux.sock`): 互換維持
+- skill ディレクトリ名 (`skills/cmux-team/` 等): TypeScript import 影響大、Phase 3 まで継承
+- `[CMUX-TEAM-AGENT]` marker: cmux-agent-role skill trigger
+- main.ts hook installer の `cmux-team send …`: settings.json persist 互換
+- keychain identifier `cmux-team-token`: 既存 token holder 互換
+- `https://github.com/hummer98/cmux-team` URL: 旧 repo は実在
+- 内部 comment / pidfile process 検出 substring
+
+### TDD / regression
+
+8 ファイル / 351 pass / 0 fail / 947 expect。
+
 ## [0.3.0] - 2026-05-10
 
 Phase 3 (cmux deprecation) の本体作業: bin alias / brand 統一 / install hygiene / non-tty fail-soft / Phase 2 e2e smoke (A031) 由来の minor 修正一括。default backend 反転 (cmux → c11) は次 minor 以降で別途判断。詳細は issue #1 (ADR-001 〜 ADR-012)。

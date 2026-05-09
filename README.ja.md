@@ -13,7 +13,7 @@ c11 を基盤とした multi-agent orchestration パッケージ — [cmux-team]
 
 https://github.com/user-attachments/assets/1d402a69-f48c-4a43-b52d-9c80f0f90ea1
 
-## なぜ cmux-team?
+## なぜ elevens?
 
 Claude Code の組み込みサブエージェントは便利ですが、**中で何をしているか見えません**。結果だけが返ってきて、途中経過はブラックボックスです。
 
@@ -22,9 +22,9 @@ Claude Code の組み込みサブエージェントは便利ですが、**中で
 - **異常検知が遅れる**: 何か間違っていても、作業が終わるまでわかりません。途中で介入できず、無駄なコンピューティングと時間が失われます
 - **改善サイクルが回せない**: 途中の挙動が見えないと、なぜ結果が良かった・悪かったかがわからず、プロンプトやタスク設計を改善するための情報が得られません
 
-cmux-team は **AI 観察箱** です。自動化ブラックボックスではありません。ターミナルペインは飾りではなく、それ自体がプロダクトです。Conductor ペインを 10 秒斜め読みするだけで、最終結果まで気づけなかった問題をその場で検出できます。
+elevens は **AI 観察箱** です。自動化ブラックボックスではありません。ターミナルペインは飾りではなく、それ自体がプロダクトです。Conductor ペインを 10 秒斜め読みするだけで、最終結果まで気づけなかった問題をその場で検出できます。
 
-シェルから離れずに別プロジェクトの runtime 状態を覗くなら `cmux-team status --project-root /path/to/other`（read 系はデフォルト許可。cross-project の write 系は `--project-root-confirm` または `CMUX_TEAM_PROJECT_ROOT_CONFIRM=1` で skip 可能）。
+シェルから離れずに別プロジェクトの runtime 状態を覗くなら `elevens status --project-root /path/to/other`（read 系はデフォルト許可。cross-project の write 系は `--project-root-confirm` または `CMUX_TEAM_PROJECT_ROOT_CONFIRM=1` で skip 可能）。
 
 設計原則：認知負荷を下げるのは「プロセスを隠す」ことではなく、**「プロセスを見やすくする」** ことで。
 
@@ -46,12 +46,12 @@ cmux-team は **AI 観察箱** です。自動化ブラックボックスでは�
 ## インストール
 
 ```bash
-npm install -g @hummer98/cmux-team
+npm install -g @hummer98/elevens
 ```
 
 ### auto-update について
 
-daemon は `update-notifier` で新バージョンを**検出**し、TUI バナーに表示するだけです。install は常に手動で、ユーザー自身が `npm i -g @hummer98/cmux-team@<latest>` を実行します（複数 Node 環境での予期しない上書きを避けるため）。
+daemon は `update-notifier` で新バージョンを**検出**し、TUI バナーに表示するだけです。install は常に手動で、ユーザー自身が `npm i -g @hummer98/elevens@<latest>` を実行します（複数 Node 環境での予期しない上書きを避けるため）。
 
 2モード（デフォルト: `off`）:
 
@@ -71,8 +71,8 @@ daemon は `update-notifier` で新バージョンを**検出**し、TUI バナ�
 
 **破壊的変更（v4.5.0、T294）:**
 - `task` モード（update タスクの自動起票）を削除しました。`CMUX_TEAM_AUTO_UPDATE=task|1|true` および `.team/config.json: autoUpdate: "task" | true | false` は起動時に exit 1 で reject されます。
-- `cmux-team self-update` サブコマンドを削除しました。
-- 移行: `autoUpdate` を `notify`（または `off`）に変更し、バナーが表示されたら `npm install -g @hummer98/cmux-team@latest` を実行してください。
+- `elevens self-update` サブコマンドを削除しました。
+- 移行: `autoUpdate` を `notify`（または `off`）に変更し、バナーが表示されたら `npm install -g @hummer98/elevens@latest` を実行してください。
 
 ### Substrate backend (`ELEVENS_BACKEND`)
 
@@ -99,7 +99,7 @@ export ELEVENS_NO_DEPRECATION_WARN=1
 
 ### 設定ファイル（`.team/config.json`）
 
-`cmux-team start` がプロジェクトごとに自動生成します。全キーは任意で、手動編集も可能（次回 start 時に再読込されます）。共通の優先順位: **CLI フラグ > 環境変数 > `.team/config.json` > 組み込みデフォルト**。
+`elevens start` がプロジェクトごとに自動生成します。全キーは任意で、手動編集も可能（次回 start 時に再読込されます）。共通の優先順位: **CLI フラグ > 環境変数 > `.team/config.json` > 組み込みデフォルト**。
 
 | キー | 型 | デフォルト | 用途 |
 |-----|---|----------|------|
@@ -131,7 +131,7 @@ export ELEVENS_NO_DEPRECATION_WARN=1
 cmux を起動し、その中で Claude Code を起動します。
 
 ```
-$ cmux-team start
+$ elevens start
   → daemon が起動し、ダッシュボードを表示
   → Manager / Master ペインが作成され、Conductor も起動される
   → Master ペインに切り替えてタスクを伝える
@@ -147,7 +147,7 @@ Claude: （manager.log・cmux tree を確認して報告）
         Conductor-1: 実装中（Agent 2/3 完了）
 
 あなた: あと worktree を整理して
-Claude: → cmux-team create-task --title "..." --status ready
+Claude: → elevens create-task --title "..." --status ready
        → daemon が別の idle Conductor に割り当てて並列実行
 ```
 
@@ -155,75 +155,75 @@ Claude: → cmux-team create-task --title "..." --status ready
 
 #### CLI コマンド（ターミナルで実行）
 
-完全なリストは `cmux-team --help` を参照。主要なコマンド:
+完全なリストは `elevens --help` を参照。主要なコマンド:
 
 **ライフサイクル**
 | コマンド | やること |
 |---------|---------|
-| `cmux-team start` | daemon 起動 + Master + Conductor spawn（レイアウト消失時は自己修復） |
-| `cmux-team status` | チーム状態表示 |
-| `cmux-team --version` | バージョン表示 |
+| `elevens start` | daemon 起動 + Master + Conductor spawn（レイアウト消失時は自己修復） |
+| `elevens status` | チーム状態表示 |
+| `elevens --version` | バージョン表示 |
 
-> 注記: `cmux-team stop` は v4.3.0 で廃止されました。cmux セッション終了時に daemon が自動停止します（pidfile が release される）。手動停止したい場合は `kill <pid>`（PID は `.team/daemon.pid`）。
+> 注記: `elevens stop` は v4.3.0 で廃止されました。cmux セッション終了時に daemon が自動停止します（pidfile が release される）。手動停止したい場合は `kill <pid>`（PID は `.team/daemon.pid`）。
 
 **タスク管理**
 | コマンド | やること |
 |---------|---------|
-| `cmux-team create-task --title <t> [--status ready] [--body <b>] [--depends-on <ids>] [--base-branch <branch>] [--run-after-all] [--exclusive]` | タスク作成（`--base-branch`: worktree の起点・マージ先ブランチ、デフォルト: main。`--exclusive`: drain 後に単独実行、`--run-after-all` を含む） |
-| `cmux-team update-task --task-id <id> --status <s>` | タスク状態更新 |
-| `cmux-team close-task --task-id <id> --deliverable-kind <files|merged|pr|none> [kind 別フラグ] [--journal <text>]` | タスク close |
-| `cmux-team abort-task --task-id <id>` | 実行中タスクを中止 |
-| `cmux-team restart-task --task-id <id>` | assigned タスクの Conductor を再起動 |
-| `cmux-team delete-task --task-id <id>` | draft / ready タスクを削除 |
-| `cmux-team await-task --task-id <id> [--timeout <sec>]` | タスク完了待ち |
+| `elevens create-task --title <t> [--status ready] [--body <b>] [--depends-on <ids>] [--base-branch <branch>] [--run-after-all] [--exclusive]` | タスク作成（`--base-branch`: worktree の起点・マージ先ブランチ、デフォルト: main。`--exclusive`: drain 後に単独実行、`--run-after-all` を含む） |
+| `elevens update-task --task-id <id> --status <s>` | タスク状態更新 |
+| `elevens close-task --task-id <id> --deliverable-kind <files|merged|pr|none> [kind 別フラグ] [--journal <text>]` | タスク close |
+| `elevens abort-task --task-id <id>` | 実行中タスクを中止 |
+| `elevens restart-task --task-id <id>` | assigned タスクの Conductor を再起動 |
+| `elevens delete-task --task-id <id>` | draft / ready タスクを削除 |
+| `elevens await-task --task-id <id> [--timeout <sec>]` | タスク完了待ち |
 
 > **ベースブランチ (`--base-branch`)**: デフォルトでは各タスクの worktree は `mainBranch`（解決順: 環境変数 `CMUX_TEAM_MAIN_BRANCH` → `config.mainBranch` → `origin/HEAD`）から切られ、Conductor はそれをマージ先として扱います。`--base-branch develop` を渡すと代わりに `develop` から切って `develop` に戻します — hotfix や main 以外の feature ブランチに対する作業向け。起点の解決順位: 明示指定 `--base-branch` → local `<mainBranch>`（origin より ahead）→ `origin/<mainBranch>` → local `<mainBranch>` → `HEAD`（詳細は `docs/spec/05-install-and-infrastructure.md`）。
 
 **Agent / Conductor**
 | コマンド | やること |
 |---------|---------|
-| `cmux-team spawn-conductor [--resume <session-id>] [--task-prompt <path>]` | 現在の surface で Conductor を起動・登録（proxy 自動解決）。CONDUCTOR_REGISTERED で自己登録。T421: `--resume` も統合（旧 `cmux-team conductor` / `cmux-team resume` を置換） |
-| `cmux-team spawn-agent --conductor-surface <s> --role <r> --prompt <p>` | Agent タブを起動 |
-| `cmux-team agents` | 稼働中エージェント一覧 |
-| `cmux-team close-agent --surface <s>` | Agent を正常終了 |
-| `cmux-team kill-agent --surface <s>` | Agent を強制停止（crash 扱い） |
-| `cmux-team send-agent --surface <s> <message>` | Agent / Conductor にメッセージ送信 |
-| `cmux-team spawn-master` | Master 起動（proxy 自動解決） |
+| `elevens spawn-conductor [--resume <session-id>] [--task-prompt <path>]` | 現在の surface で Conductor を起動・登録（proxy 自動解決）。CONDUCTOR_REGISTERED で自己登録。T421: `--resume` も統合（旧 `elevens conductor` / `elevens resume` を置換） |
+| `elevens spawn-agent --conductor-surface <s> --role <r> --prompt <p>` | Agent タブを起動 |
+| `elevens agents` | 稼働中エージェント一覧 |
+| `elevens close-agent --surface <s>` | Agent を正常終了 |
+| `elevens kill-agent --surface <s>` | Agent を強制停止（crash 扱い） |
+| `elevens send-agent --surface <s> <message>` | Agent / Conductor にメッセージ送信 |
+| `elevens spawn-master` | Master 起動（proxy 自動解決） |
 
 **トークンプール**
 | コマンド | やること |
 |---------|---------|
-| `cmux-team token add` | manual API key を対話式で登録（トークンを貼り付け） |
-| `cmux-team token add --subscription <handle> [--plan max-x20] [--tags any]` | Claude Max / subscription トークンを登録（keychain snapshot を取らず Claude Code 管理の OAuth に委ねる） |
-| `cmux-team token list` | 登録済みトークンと 5h/7d 使用率を表示 |
-| `cmux-team token remove --handle <h>` | トークンを削除 |
-| `cmux-team token rotate --handle <h>` | credential を再取得して auth hash を更新 |
-| `cmux-team token set-plan --handle <h> --plan <p>` | plan / ratio を手動設定 |
-| `cmux-team token promote --handle <h>` | auto-discover トークンを selectable に昇格 |
-| `cmux-team token migrate-subscription` | subscription row 用の cmux-team-token keychain エントリを一括削除（冪等） |
-| `cmux-team pool status` | pool capacity ダッシュボードを表示 |
+| `elevens token add` | manual API key を対話式で登録（トークンを貼り付け） |
+| `elevens token add --subscription <handle> [--plan max-x20] [--tags any]` | Claude Max / subscription トークンを登録（keychain snapshot を取らず Claude Code 管理の OAuth に委ねる） |
+| `elevens token list` | 登録済みトークンと 5h/7d 使用率を表示 |
+| `elevens token remove --handle <h>` | トークンを削除 |
+| `elevens token rotate --handle <h>` | credential を再取得して auth hash を更新 |
+| `elevens token set-plan --handle <h> --plan <p>` | plan / ratio を手動設定 |
+| `elevens token promote --handle <h>` | auto-discover トークンを selectable に昇格 |
+| `elevens token migrate-subscription` | subscription row 用の cmux-team-token keychain エントリを一括削除（冪等） |
+| `elevens pool status` | pool capacity ダッシュボードを表示 |
 
 #### manual と subscription の違い
 
-- **`manual`** — 永続的な API key。cmux-team が macOS keychain（service `cmux-team-token`）にトークンを保存し、spawn したエージェントへ `CLAUDE_CODE_OAUTH_TOKEN` を inject する。
-- **`--subscription`** — Claude Max などの subscription。Claude Code 本体が `~/.claude/.credentials.json` で OAuth を管理し、必要に応じてトークンを refresh する。cmux-team は keychain snapshot を持たず、agent にトークンを inject しない — 認証は Claude Code に委ね、proxy 経由でリクエストを観測して使用率を追跡するのみ。subscription 由来の handle はすべてこちらを使う。
+- **`manual`** — 永続的な API key。elevens が macOS keychain（service `cmux-team-token`）にトークンを保存し、spawn したエージェントへ `CLAUDE_CODE_OAUTH_TOKEN` を inject する。
+- **`--subscription`** — Claude Max などの subscription。Claude Code 本体が `~/.claude/.credentials.json` で OAuth を管理し、必要に応じてトークンを refresh する。elevens は keychain snapshot を持たず、agent にトークンを inject しない — 認証は Claude Code に委ね、proxy 経由でリクエストを観測して使用率を追跡するのみ。subscription 由来の handle はすべてこちらを使う。
 
 **診断・補助**
 | コマンド | やること |
 |---------|---------|
-| `cmux-team trace-task <task-id>` | タスクのセッション履歴を表示 |
-| `cmux-team trace-hooks` | hook シグナル履歴を表示 |
-| `cmux-team artifacts [add\|show\|open\|search]` | アーティファクト管理 |
-| `cmux-team metrics [--since <range>] [--group-by day]` | タスク lifecycle / tool call / token の集計サマリ（詳細は `docs/spec/11-metrics.md`） |
-| `cmux-team metrics snapshot\|compare\|health\|query` | daily snapshot / cohort 比較 / health check / DuckDB ad-hoc query |
-| `cmux-team events [--follow] [--types <names>] [--format json\|tsv]` | events stream（`.team/logs/events.jsonl`）を tail / filter |
+| `elevens trace-task <task-id>` | タスクのセッション履歴を表示 |
+| `elevens trace-hooks` | hook シグナル履歴を表示 |
+| `elevens artifacts [add\|show\|open\|search]` | アーティファクト管理 |
+| `elevens metrics [--since <range>] [--group-by day]` | タスク lifecycle / tool call / token の集計サマリ（詳細は `docs/spec/11-metrics.md`） |
+| `elevens metrics snapshot\|compare\|health\|query` | daily snapshot / cohort 比較 / health check / DuckDB ad-hoc query |
+| `elevens events [--follow] [--types <names>] [--format json\|tsv]` | events stream（`.team/logs/events.jsonl`）を tail / filter |
 
 #### スラッシュコマンド（Claude 内で実行）
 
 | コマンド | やること | いつ使う |
 |---------|---------|---------|
 | `/master` | Master ロール再読み込み | `/clear` 後 |
-| `/cmux-team:watch` | events stream を監視して PR merge / conflict resolve / pull を自動処理（opt-in） | 完了した PR の自動 merge と介入要 event のエスカレーションを Master に任せたい時 |
+| `/elevens:watch` | events stream を監視して PR merge / conflict resolve / pull を自動処理（opt-in） | 完了した PR の自動 merge と介入要 event のエスカレーションを Master に任せたい時 |
 | `/team-spec [概要]` | 要件をブレスト | 何を作るか決める時 |
 | `/team-task [操作]` | タスク管理 | タスクの作成・一覧・クローズ |
 | `/team-archive [範囲]` | 完了タスクのアーカイブ | タスク整理時 |
@@ -237,7 +237,7 @@ Claude: → cmux-team create-task --title "..." --status ready
 
 ```
 ┌─────────────────────────────────────────┐
-│  cmux-team daemon (TypeScript/bun)      │
+│  elevens daemon (TypeScript/bun)        │
 │  ┌───────────────────────────────────┐  │
 │  │  TUI Dashboard                    │  │
 │  │  Tasks: 2 open | Conductors: 1/3  │  │
@@ -256,19 +256,19 @@ Claude: → cmux-team create-task --title "..." --status ready
 
 Manager は Claude Code セッションではなく、**TypeScript の決定論的ループ**で動作します。
 
-- **HTTP メッセージキュー**（内蔵 proxy 経由、`cmux-team send <TYPE>`）— イベント駆動
+- **HTTP メッセージキュー**（内蔵 proxy 経由、`elevens send <TYPE>`）— イベント駆動
 - **ファイルベースのタスク状態**（`.team/tasks/` + `task-state.json`）
 - **zod** によるメッセージスキーマ検証
 - **ink** ベースの TUI ダッシュボード
 - **タスク依存解決** (`depends_on` フィールド)
 - **優先度ソート** (high > medium > low)
-- **Agent 完了は fs.watch**（Agent の Stop / SessionEnd hook が done マーカーを書き、Conductor が `cmux-team await-agent` で待機。busy polling 不要、T181）
+- **Agent 完了は fs.watch**（Agent の Stop / SessionEnd hook が done マーカーを書き、Conductor が `elevens await-agent` で待機。busy polling 不要、T181）
 
 ```bash
 # daemon 操作
-cmux-team start                                          # 起動 + Master spawn + ダッシュボード
-cmux-team send TASK_CREATED --task-id 035 --task-file .team/tasks/035-xxx/task.md
-cmux-team status                                         # ステータス表示
+elevens start                                            # 起動 + Master spawn + ダッシュボード
+elevens send TASK_CREATED --task-id 035 --task-file .team/tasks/035-xxx/task.md
+elevens status                                           # ステータス表示
 # daemon は cmux 終了で自動停止。手動停止は `kill <pid>` で（PID は `.team/daemon.pid`）
 ```
 
@@ -291,13 +291,13 @@ daemon は依存が解決されたタスクのみ Conductor に割り当てま�
 
 | 方向 | 手段 |
 |------|------|
-| Master → daemon | `cmux-team send <TYPE>` → proxy 経由の HTTP メッセージ |
+| Master → daemon | `elevens send <TYPE>` → proxy 経由の HTTP メッセージ |
 | daemon → Conductor | `cmux send`（`/clear` + 新プロンプト。Conductor ペインは常駐） |
 | daemon ← Conductor | done マーカーファイル（`.team/conductors/<id>/done`）+ SESSION_* hook メッセージ |
-| Conductor → Agent | `cmux-team send-agent` / `spawn-agent`（`cmux send` の直接呼び出しは hook でブロック） |
-| Conductor ← Agent | `cmux-team await-agent`（Agent done マーカーを fs.watch） |
+| Conductor → Agent | `elevens send-agent` / `spawn-agent`（`cmux send` の直接呼び出しは hook でブロック） |
+| Conductor ← Agent | `elevens await-agent`（Agent done マーカーを fs.watch） |
 | daemon → Master | なし（Master が `manager.log` / `task-state.json` を直接参照） |
-| daemon → 外部 reader | events stream（`.team/logs/events.jsonl`、JSONL append-only）— opt-in。`cmux-team events --follow` / Master `/cmux-team:watch` が購読 |
+| daemon → 外部 reader | events stream（`.team/logs/events.jsonl`、JSONL append-only）— opt-in。`elevens events --follow` / Master `/elevens:watch` が購読 |
 
 ### エージェントロール
 
@@ -312,7 +312,7 @@ daemon は依存が解決されたタスクのみ Conductor に割り当てま�
 
 ## プロジェクト内に作られるもの
 
-`cmux-team start` を実行すると、プロジェクトに `.team/` ディレクトリが作られます：
+`elevens start` を実行すると、プロジェクトに `.team/` ディレクトリが作られます：
 
 ```
 .team/
@@ -336,22 +336,22 @@ daemon は依存が解決されたタスクのみ Conductor に割り当てま�
 
 10 個の overlay 対応ロール（researcher / architect / planner / design-reviewer / implementer / inspector / dockeeper / task-manager / **master / conductor**）に対してプロジェクト固有の追加指示を `.team/agent-instructions/<role>.md` に置くと、対応するプロンプトに自動的に組み込まれます:
 
-- **Agent ロール (8)** — `cmux-team spawn-agent` 実行時に Agent prompt-file 内の `{{PROJECT_INSTRUCTIONS}}` を置換します。
-- **master / conductor (T342)** — daemon 起動時に `generateMasterPrompt` / `generateConductorRolePrompt` が `.team/prompts/master.md` / `.team/prompts/conductor-role.md` 生成時に展開する shared system prompt overlay として機能します。`cmux-team spawn-agent --role master` / `--role conductor` は exit 1（"reserved" エラー）となり、agent としては spawn できません。
+- **Agent ロール (8)** — `elevens spawn-agent` 実行時に Agent prompt-file 内の `{{PROJECT_INSTRUCTIONS}}` を置換します。
+- **master / conductor (T342)** — daemon 起動時に `generateMasterPrompt` / `generateConductorRolePrompt` が `.team/prompts/master.md` / `.team/prompts/conductor-role.md` 生成時に展開する shared system prompt overlay として機能します。`elevens spawn-agent --role master` / `--role conductor` は exit 1（"reserved" エラー）となり、agent としては spawn できません。
 
 ```bash
 # overlay を書き込む
-cmux-team set-agent-instructions --role implementer --from-file ./my-impl-notes.md
-cmux-team set-agent-instructions --role researcher --body "調査対象は 2025 年以降の論文に限る"
-cmux-team set-agent-instructions --role master --body "進捗は常に 3 行でまとめること"
-cmux-team set-agent-instructions --role conductor --from-file ./conductor-overlay.md
+elevens set-agent-instructions --role implementer --from-file ./my-impl-notes.md
+elevens set-agent-instructions --role researcher --body "調査対象は 2025 年以降の論文に限る"
+elevens set-agent-instructions --role master --body "進捗は常に 3 行でまとめること"
+elevens set-agent-instructions --role conductor --from-file ./conductor-overlay.md
 
 # 内容確認 / 一覧
-cmux-team get-agent-instructions --role implementer
-cmux-team list-agent-instructions
+elevens get-agent-instructions --role implementer
+elevens list-agent-instructions
 
 # 削除
-cmux-team delete-agent-instructions --role implementer
+elevens delete-agent-instructions --role implementer
 ```
 
 overlay の最大サイズは 100 KB。dashboard TUI の `Settings` タブ（`4` キー）で全 10 ロールの overlay 状況と config をプレビューできます。
@@ -398,12 +398,12 @@ overlay の最大サイズは 100 KB。dashboard TUI の `Settings` タブ（`4`
 
 ```bash
 # Manual API key（対話式、keychain に保存）
-cmux-team token add
+elevens token add
 
 # Claude Max subscription（keychain を使わず、認証は Claude Code 管理）
-cmux-team token add --subscription @tayo --plan max-x20 --tags any
+elevens token add --subscription @tayo --plan max-x20 --tags any
 
-cmux-team token list     # 5h/7d 使用率とともに全トークンを表示
+elevens token list     # 5h/7d 使用率とともに全トークンを表示
 ```
 
 **選択アルゴリズム**（Agent spawn ごと）:
@@ -419,7 +419,7 @@ TUI dashboard ヘッダーには **7 日 forecast スパークライン**（Day 
 pool 7d  ██▇▅▅▆█   next: @kddi 5h:65%
 ```
 
-per-surface decoration（`@handle <5h:X%/7d:Y%> cap:Z%`）は撤去し、ヘッダー集約に一本化しました。アカウント別の詳細は `cmux-team pool status` で確認してください。
+per-surface decoration（`@handle <5h:X%/7d:Y%> cap:Z%`）は撤去し、ヘッダー集約に一本化しました。アカウント別の詳細は `elevens pool status` で確認してください。
 
 詳細（tag フィルタ・exclude/include ポリシー・plan ratio）は `docs/spec/09-token-pool.md` を参照。
 
@@ -431,7 +431,7 @@ daemon 起動中、組み込みプロキシを通じて全 API リクエスト�
 
 ```bash
 # 特定タスクのセッション一覧（Conductor + Agent）
-cmux-team trace-task 035
+elevens trace-task 035
 ```
 
 トレースは `.team/traces/traces.db` に、リクエスト/レスポンス本文は `.team/logs/traces/bodies/` に保存されます。メタデータヘッダー（`x-cmux-task-id`, `x-cmux-conductor-surface`, `x-cmux-role`）が伝播されるため、API リクエストを起票元タスクと紐付けられます。
@@ -450,7 +450,7 @@ cmux-team trace-task 035
 
 ### Conductor が自分で作業してしまう
 
-Conductor テンプレートに「自分でコードを書かない」ルールがありますが、守られない場合があります。テンプレートを更新するか、`cmux-team start` を再実行してプロンプトを再生成してください。
+Conductor テンプレートに「自分でコードを書かない」ルールがありますが、守られない場合があります。テンプレートを更新するか、`elevens start` を再実行してプロンプトを再生成してください。
 
 ### Conductor のセッションログを見たい
 

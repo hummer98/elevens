@@ -7,9 +7,9 @@ description: >
   質問・解説リクエスト。操作の実行自体は team スキルが担当。
 ---
 
-# cmux-team ユーザーガイド
+# elevens ユーザーガイド
 
-## 1. cmux-team とは
+## 1. elevens とは
 
 cmux のターミナルマルチプレクサ機能を活用し、Claude Code の複数セッションを協調させて開発タスクを自律的に遂行するマルチエージェントオーケストレーションツール。
 
@@ -43,10 +43,10 @@ cmux のターミナルマルチプレクサ機能を活用し、Claude Code の
 
 ```bash
 # インストール
-npm install -g @hummer98/cmux-team
+npm install -g @hummer98/elevens
 
 # 起動（cmux 内で実行）
-cmux-team start
+elevens start
 # → daemon 起動 + Master spawn + 3 Conductor 配置
 # → 固定2x2レイアウトが構築される
 
@@ -74,22 +74,22 @@ cmux-team start
 
 ```bash
 # タスク作成（draft で作成、ready にすると Conductor に自動割り当て）
-cmux-team create-task --title "機能Xを追加" --status draft --body "説明文"
+elevens create-task --title "機能Xを追加" --status draft --body "説明文"
 
 # タスクを実行可能にする
-cmux-team update-task --task-id 42 --status ready
+elevens update-task --task-id 42 --status ready
 
 # タスククローズ（Conductor が自動実行、手動も可）
-cmux-team close-task --task-id 42 --journal "完了サマリー"
+elevens close-task --task-id 42 --journal "完了サマリー"
 
 # タスク中止
-cmux-team abort-task --task-id 42 --journal "理由"
+elevens abort-task --task-id 42 --journal "理由"
 
 # 実行中タスクの再実行（assigned を ready に戻す）
-cmux-team restart-task --task-id 42
+elevens restart-task --task-id 42
 
 # タスク削除（draft/ready のみ）
-cmux-team delete-task --task-id 42 --journal "理由"
+elevens delete-task --task-id 42 --journal "理由"
 ```
 
 **オプション:**
@@ -102,25 +102,25 @@ cmux-team delete-task --task-id 42 --journal "理由"
 
 | コマンド | 説明 |
 |---------|------|
-| `cmux-team start` | daemon 起動 + Master spawn + レイアウト構築（レイアウト消失時は自己修復。T286） |
-| `cmux-team status` | ステータス表示 |
-| `cmux-team create-task` | タスク作成（`--title`, `--status`, `--body`, `--priority`, `--depends-on`, `--base-branch`, `--run-after-all`） |
-| `cmux-team update-task` | タスク更新（`--task-id`, `--status`, `--title`, `--body`, `--depends-on`） |
-| `cmux-team close-task` | タスククローズ（`--task-id`, `--journal`, `--force`） |
-| `cmux-team abort-task` | タスク中止（`--task-id`, `--journal`） |
-| `cmux-team restart-task` | `assigned` / `aborted` タスクの Conductor セッションを再起動（status を `ready` に戻し worktree / sessionId 等の割り当て情報をクリア、T204 で `aborted` からの再開にも対応）（`--task-id`, `--journal`） |
-| `cmux-team delete-task` | タスク削除（`--task-id`, `--journal`） |
-| `cmux-team spawn-agent` | Agent 起動（`--conductor-surface`, `--role`, `--prompt` or `--prompt-file`） |
-| `cmux-team agents` | 稼働中エージェント一覧 |
-| `cmux-team kill-agent` | Agent 終了（`--surface`） |
-| `cmux-team trace` | API トレース検索（`--task`, `--search`, `--show`, `--conductor`, `--role`, `--limit`） |
-| `cmux-team trace-hooks` | hook シグナル履歴検索（`--type`, `--surface`, `--task-run`, `--limit`（デフォルト 50）, `--json`）。T217 |
-| `cmux-team artifacts` | アーティファクト管理（サブコマンド: `add`, `show`, `open`, `search`。オプション: `--validate`） |
-| `cmux-team metrics` | タスク lifecycle / tool call / token の集計サマリ（`--since <range>`, `--group-by day`, `--format csv`）。サブコマンド: `snapshot` / `compare` / `health` / `query`（DuckDB ad-hoc）。詳細は `docs/spec/11-metrics.md` |
-| `cmux-team events` | events stream（`.team/logs/events.jsonl`）を tail / filter（`--follow`, `--types <names>`, `--format json\|tsv`）。詳細は `docs/spec/10-events-stream.md` |
-| `cmux-team spawn-conductor [--resume <session-id>] [--task-prompt <path>] [--model <model>]` | Conductor 用 Claude Code を起動・登録（内部用）。`--resume` で既存セッション復元、`--task-prompt` で起動時にプロンプトを CLI 引数として atomic 注入（T421/D7） |
+| `elevens start` | daemon 起動 + Master spawn + レイアウト構築（レイアウト消失時は自己修復。T286） |
+| `elevens status` | ステータス表示 |
+| `elevens create-task` | タスク作成（`--title`, `--status`, `--body`, `--priority`, `--depends-on`, `--base-branch`, `--run-after-all`） |
+| `elevens update-task` | タスク更新（`--task-id`, `--status`, `--title`, `--body`, `--depends-on`） |
+| `elevens close-task` | タスククローズ（`--task-id`, `--journal`, `--force`） |
+| `elevens abort-task` | タスク中止（`--task-id`, `--journal`） |
+| `elevens restart-task` | `assigned` / `aborted` タスクの Conductor セッションを再起動（status を `ready` に戻し worktree / sessionId 等の割り当て情報をクリア、T204 で `aborted` からの再開にも対応）（`--task-id`, `--journal`） |
+| `elevens delete-task` | タスク削除（`--task-id`, `--journal`） |
+| `elevens spawn-agent` | Agent 起動（`--conductor-surface`, `--role`, `--prompt` or `--prompt-file`） |
+| `elevens agents` | 稼働中エージェント一覧 |
+| `elevens kill-agent` | Agent 終了（`--surface`） |
+| `elevens trace` | API トレース検索（`--task`, `--search`, `--show`, `--conductor`, `--role`, `--limit`） |
+| `elevens trace-hooks` | hook シグナル履歴検索（`--type`, `--surface`, `--task-run`, `--limit`（デフォルト 50）, `--json`）。T217 |
+| `elevens artifacts` | アーティファクト管理（サブコマンド: `add`, `show`, `open`, `search`。オプション: `--validate`） |
+| `elevens metrics` | タスク lifecycle / tool call / token の集計サマリ（`--since <range>`, `--group-by day`, `--format csv`）。サブコマンド: `snapshot` / `compare` / `health` / `query`（DuckDB ad-hoc）。詳細は `docs/spec/11-metrics.md` |
+| `elevens events` | events stream（`.team/logs/events.jsonl`）を tail / filter（`--follow`, `--types <names>`, `--format json\|tsv`）。詳細は `docs/spec/10-events-stream.md` |
+| `elevens spawn-conductor [--resume <session-id>] [--task-prompt <path>] [--model <model>]` | Conductor 用 Claude Code を起動・登録（内部用）。`--resume` で既存セッション復元、`--task-prompt` で起動時にプロンプトを CLI 引数として atomic 注入（T421/D7） |
 
-各コマンドの詳細は `cmux-team <command> --help` で確認可能。
+各コマンドの詳細は `elevens <command> --help` で確認可能。
 
 **他プロジェクトを覗く（T440）:** 全コマンドに `--project-root <path>` フラグを追加可能。読み系（`status` / `agents` / `events` / `metrics` / `trace-task` 等）は無条件で受理される。書き込み系（`start` / `create-task` / `update-task` / `close-task` / `spawn-*` / `send` 等）は cwd と異なる root への書き込みを confirmation gate で防ぐ。bypass は `--project-root-confirm` フラグまたは `CMUX_TEAM_PROJECT_ROOT_CONFIRM=1` env で可能（CI / 自動化向け）。詳細は `docs/spec/05-install-and-infrastructure.md` の「Project root 解決」を参照。
 
@@ -137,7 +137,7 @@ cmux-team delete-task --task-id 42 --journal "理由"
 
 ## 6. TUI ダッシュボード
 
-`cmux-team start` で自動起動するフルスクリーン TUI。
+`elevens start` で自動起動するフルスクリーン TUI。
 
 **表示内容:**
 - **ヘッダー:** ステータス、PID、稼働時間、プロキシポート、レート制限使用率、token pool 7d forecast、Web dashboard URL
@@ -183,11 +183,11 @@ cmux-team delete-task --task-id 42 --journal "理由"
 会話中の調査結果・設計判断・セッション要約を構造化して保存する機能。
 
 ```bash
-cmux-team artifacts              # 一覧
-cmux-team artifacts show A001    # 表示
-cmux-team artifacts open A001    # Markdown ビューアで開く
-cmux-team artifacts search "認証" # 全文検索
-cmux-team artifacts add file.md  # ファイルを追加
+elevens artifacts              # 一覧
+elevens artifacts show A001    # 表示
+elevens artifacts open A001    # Markdown ビューアで開く
+elevens artifacts search "認証" # 全文検索
+elevens artifacts add file.md  # ファイルを追加
 ```
 
 **タイプ:** research, decision, session, spec, report
@@ -203,8 +203,8 @@ cmux-team artifacts add file.md  # ファイルを追加
 |------|------|
 | Trust 確認が表示される | 初回起動時に自動承認されるが、タイミングにより手動 Enter が必要な場合あり |
 | API レート制限 | Claude Max 推奨。TUI にレート制限使用率が表示される。90% 超で新規割り当て一時停止 |
-| Conductor がクラッシュ | Manager が検出し abort。`cmux-team restart-task` で再実行 |
+| Conductor がクラッシュ | Manager が検出し abort。`elevens restart-task` で再実行 |
 | Agent がクラッシュ | Conductor が検出し再 spawn |
-| Manager がクラッシュ | `cmux-team start` で再起動。assigned タスクは自動 resume |
-| TUI が固まる | `q` で TUI 終了後に `cmux-team start` で再起動 |
-| タスクが assigned のまま | `cmux-team abort-task` で中止、`cmux-team restart-task` で再実行 |
+| Manager がクラッシュ | `elevens start` で再起動。assigned タスクは自動 resume |
+| TUI が固まる | `q` で TUI 終了後に `elevens start` で再起動 |
+| タスクが assigned のまま | `elevens abort-task` で中止、`elevens restart-task` で再実行 |

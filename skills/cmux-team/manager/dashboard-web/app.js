@@ -1,4 +1,4 @@
-/* T414: cmux-team Web ダッシュボード SPA — vanilla JS */
+/* T414: elevens Web ダッシュボード SPA — vanilla JS */
 "use strict";
 
 const PRESETS = {

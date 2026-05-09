@@ -292,7 +292,7 @@ describe("dashboard-server: Step 4 GET / HTML 配信", () => {
     handle = await startDashboardServer({
       projectRoot: project.root,
       htmlBundle: () =>
-        "<!doctype html><html><head><title>cmux-team dashboard</title></head><body>OK</body></html>",
+        "<!doctype html><html><head><title>elevens dashboard</title></head><body>OK</body></html>",
     });
     const res = await fetch(`${handle.url}/`);
     expect(res.status).toBe(200);
@@ -301,7 +301,7 @@ describe("dashboard-server: Step 4 GET / HTML 配信", () => {
     expect(csp).toContain("style-src 'self' 'unsafe-inline'");
     expect(csp).toContain("script-src 'self' 'unsafe-inline'");
     const body = await res.text();
-    expect(body).toContain("<title>cmux-team dashboard</title>");
+    expect(body).toContain("<title>elevens dashboard</title>");
   });
 
   test("htmlBundle 未提供時 GET / は 404", async () => {
@@ -314,7 +314,7 @@ describe("dashboard-server: Step 4 GET / HTML 配信", () => {
     const { getDashboardHtml, _resetDashboardHtmlCache } = await import("./dashboard-web-bundle");
     _resetDashboardHtmlCache();
     const html = getDashboardHtml();
-    expect(html).toContain("<title>cmux-team dashboard</title>");
+    expect(html).toContain("<title>elevens dashboard</title>");
     expect(html).not.toContain("/*__INLINE_CSS__*/");
     expect(html).not.toContain("/*__INLINE_UPLOT__*/");
     expect(html).not.toContain("/*__INLINE_APP__*/");

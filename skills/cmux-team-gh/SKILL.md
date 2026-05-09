@@ -13,16 +13,16 @@ description: >
 
 # cmux-team-gh: GitHub issue/PR キャッシュ経由の読み取り
 
-このスキルは `cmux-team` plugin に同梱される GitHub issue/PR キャッシュの
+このスキルは `elevens` plugin に同梱される GitHub issue/PR キャッシュの
 使い方リファレンスです。`gh issue` / `gh pr` の **読み取り系** は
-`cmux-team issue` / `cmux-team pr` に置き換えてください。
+`elevens issue` / `elevens pr` に置き換えてください。
 
 ## なぜ `gh` を直接使わないか
 
 - `gh` を叩くたびに GitHub API を呼ぶため、複数 issue を走査する用途
   （レビュー待ち一覧、最近 close された PR の確認等）で rate limit を
   消費しやすい。
-- `cmux-team gh sync` は ETag (`If-None-Match`) + `since=` による差分同期で、
+- `elevens gh sync` は ETag (`If-None-Match`) + `since=` による差分同期で、
   変更がなければ **304 Not Modified**（rate limit 消費 0）で返る。
 - 同一プロジェクト内で複数エージェントが同じ issue を参照する場合、
   キャッシュから読むため何度でも同じコストで読める。
@@ -43,15 +43,15 @@ description: >
 
 | 代わりに | 使うもの |
 |---|---|
-| `gh issue list --state open --limit 20` | `cmux-team issue list --state open --limit 20` |
-| `gh issue list --assignee @me` | `cmux-team issue list --assignee @me` |
-| `gh issue list --label bug` | `cmux-team issue list --label bug` |
-| `gh issue view 272` | `cmux-team issue show 272` |
-| `gh issue view 272 --json title,body,labels` | `cmux-team issue show 272 --json title,body,labels` |
-| `gh pr list --state open` | `cmux-team pr list --state open` |
-| `gh pr view 42` | `cmux-team pr show 42` |
-| `gh pr view 42 --json state,title,reviews` | `cmux-team pr show 42 --json state,title,reviews` |
-| `gh search issues keyword` | `cmux-team issue search keyword` |
+| `gh issue list --state open --limit 20` | `elevens issue list --state open --limit 20` |
+| `gh issue list --assignee @me` | `elevens issue list --assignee @me` |
+| `gh issue list --label bug` | `elevens issue list --label bug` |
+| `gh issue view 272` | `elevens issue show 272` |
+| `gh issue view 272 --json title,body,labels` | `elevens issue show 272 --json title,body,labels` |
+| `gh pr list --state open` | `elevens pr list --state open` |
+| `gh pr view 42` | `elevens pr show 42` |
+| `gh pr view 42 --json state,title,reviews` | `elevens pr show 42 --json state,title,reviews` |
+| `gh search issues keyword` | `elevens issue search keyword` |
 
 JSON 出力のキー名は `gh --json` 互換です（`author.login`,
 `assignees[].login`, `labels[].name`, `createdAt`, `mergedAt` など）。
@@ -59,19 +59,19 @@ JSON 出力のキー名は `gh --json` 互換です（`author.login`,
 
 ```bash
 # 例: open PR の author 一覧を取得
-cmux-team pr list --state open --json number,title,author.login
+elevens pr list --state open --json number,title,author.login
 ```
 
 ## キャッシュが古いと感じたら
 
-- **差分同期（ほぼ無料）**: `cmux-team gh sync`
+- **差分同期（ほぼ無料）**: `elevens gh sync`
   - 前回同期以降に更新された issue/PR のみ取得
   - 変更がなければ 304 Not Modified
-- **フル同期**: `cmux-team gh sync --full`
+- **フル同期**: `elevens gh sync --full`
   - 直近 500 件の issue/PR を最初から取得
   - 初回実行 / トークン変更 / **月 1 回の運用推奨**
   - 削除・transfer された issue を cleanup する唯一の手段
-- **状態確認**: `cmux-team gh status`
+- **状態確認**: `elevens gh status`
   - 最終 sync 時刻、rate limit 残量、viewer login、issue/PR 件数
   - 「最終 full sync から N 日経過」表示に注意
   - 30 日を超えたら `--full` 推奨
@@ -81,13 +81,13 @@ cmux-team pr list --state open --json number,title,author.login
 一発で同期 + 読み取りを行いたい場合は list/show に `--sync` を付けられます:
 
 ```bash
-cmux-team issue list --state open --sync    # 事前 incremental sync してから表示
-cmux-team issue show 272 --sync              # 対象 issue を同期してから表示
+elevens issue list --state open --sync    # 事前 incremental sync してから表示
+elevens issue show 272 --sync              # 対象 issue を同期してから表示
 ```
 
 ## TUI Issues タブ
 
-`cmux-team start` で起動する Manager ダッシュボードには「Issues」タブが
+`elevens start` で起動する Manager ダッシュボードには「Issues」タブが
 あります（キーバインド `5` または `I`）。
 
 - `R` — incremental sync を走らせる
@@ -105,7 +105,7 @@ cmux-team issue show 272 --sync              # 対象 issue を同期してか�
 - `gh pr merge` — マージ
 - `gh pr review` — レビュー送信
 
-書き込みを行った後は `cmux-team gh sync` でキャッシュを更新してください。
+書き込みを行った後は `elevens gh sync` でキャッシュを更新してください。
 
 ## 無効化される状況
 
@@ -118,8 +118,8 @@ cmux-team issue show 272 --sync              # 対象 issue を同期してか�
 
 ### rate limit 到達時（exit 4）
 
-`cmux-team gh sync` が exit 4 を返した場合、しばらく待って（`reset_at`
-表示を参照）再度実行してください。`cmux-team issue list --stale-ok` で
+`elevens gh sync` が exit 4 を返した場合、しばらく待って（`reset_at`
+表示を参照）再度実行してください。`elevens issue list --stale-ok` で
 警告を抑止して古いキャッシュから読み続けることも可能です。
 
 ## Exit codes
@@ -139,5 +139,5 @@ cmux-team issue show 272 --sync              # 対象 issue を同期してか�
 - トークンハッシュ不一致 / 異なる repo を検出したら自動 purge
 
 プロジェクト毎に独立したキャッシュを持つため、複数リポジトリを横断して
-参照する用途には使えません（各リポジトリで個別に `cmux-team start` /
-`cmux-team gh sync` を走らせてください）。
+参照する用途には使えません（各リポジトリで個別に `elevens start` /
+`elevens gh sync` を走らせてください）。

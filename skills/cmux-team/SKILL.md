@@ -7,7 +7,7 @@ description: >
   Provides: agent spawning, monitoring, result collection, synchronization protocols.
 ---
 
-# cmux-team: マルチエージェントオーケストレーション
+# elevens: マルチエージェントオーケストレーション
 
 4層アーキテクチャ（Master → Manager → Conductor → Agent）による
 自律的マルチエージェント開発オーケストレーションスキル。
@@ -26,7 +26,7 @@ description: >
     │            │              │                       ├─ git worktree 内で作業
     │            │              │                       ├─ Agent 起動・監視（タブとして作成）
     │            │              │                       ├─ 結果統合
-    │            │              │                       ├─ タスクを close（cmux-team close-task）
+    │            │              │                       ├─ タスクを close（elevens close-task）
     │            │              │                       └─ done マーカー作成→idle に戻る
     │            │              │
     │            │              ├─ タスク検出→idle Conductor にタスク割り当て
@@ -46,7 +46,7 @@ description: >
 |----|------|------|
 | **Master** | ユーザー対話。タスク作成。真のソース直接参照で進捗報告。 | 作業しない。ポーリングしない。 |
 | **Manager** | daemon として常駐。[TASK_CREATED] 通知で起床→タスク検出→idle Conductor にタスク割り当て→done マーカーで完了検出→ログ記録→Conductor リセット→アイドル化。 | アイドル時停止、イベント駆動。 |
-| **Conductor** | 常駐。タスクを割り当てられると自律実行。git worktree 隔離。Agent spawn（タブ）→結果統合→タスクを close（`cmux-team close-task`）→done マーカー作成→idle に戻る。 | 常駐。タスク完了後も停止しない。 |
+| **Conductor** | 常駐。タスクを割り当てられると自律実行。git worktree 隔離。Agent spawn（タブ）→結果統合→タスクを close（`elevens close-task`）→done マーカー作成→idle に戻る。 | 常駐。タスク完了後も停止しない。 |
 | **Agent** | 実作業（実装・テスト・リサーチ等）。 | 完了したら停止。上位が見に来る。 |
 
 ### 通信方式
@@ -57,8 +57,8 @@ description: >
 | Manager → Conductor | `cmux send`（`/clear` + 新プロンプト送信） |
 | Manager ← Conductor | done マーカーファイル（`.team/output/conductor-N/done`）の存在確認（pull 型） |
 | Conductor → Agent | `cmux send`（プロンプト送信） |
-| Conductor ← Agent | `cmux-team await-agent`（done マーカーの fs.watch）+ PID watcher |
-| Manager → Master | `.team/logs/manager.log` + `cmux-team status`（team.json + ログ） |
+| Conductor ← Agent | `elevens await-agent`（done マーカーの fs.watch）+ PID watcher |
+| Manager → Master | `.team/logs/manager.log` + `elevens status`（team.json + ログ） |
 
 ## 1. コマンド一覧
 
@@ -78,27 +78,27 @@ description: >
 
 | コマンド | 説明 |
 |---------|------|
-| `cmux-team start` | daemon 起動 + Master spawn + レイアウト構築（レイアウト消失時は自己修復。T286） |
-| `cmux-team status` | ステータス表示（team.json + ログ末尾） |
-| `cmux-team send TASK_CREATED` | タスク作成通知（`--task-id`, `--task-file` 必須） |
-| `cmux-team send TODO` | TODO 通知（`--content` 必須） |
-| `cmux-team send SHUTDOWN` | シャットダウン通知（内部用。明示停止は `kill <pid>`） |
-| `cmux-team spawn-agent` | Agent spawn（`--conductor-surface`, `--role`, `--prompt` or `--prompt-file`） |
-| `cmux-team agents` | 稼働中エージェント一覧 |
-| `cmux-team kill-agent` | Agent 終了（`--surface` 必須、`--conductor-surface` 任意） |
-| `cmux-team create-task` | タスク作成（`--title` 必須、`--priority`, `--status`, `--body`, `--depends-on`, `--base-branch`, `--run-after-all`, `--exclusive` 任意） |
-| `cmux-team update-task` | タスク状態更新（`--task-id`, `--status` 必須） |
-| `cmux-team close-task` | タスククローズ（`--task-id` 必須、`--journal` 任意） |
-| `cmux-team await-task` | タスク完了待ち（`--task-id` 必須、`--timeout` 任意） |
-| `cmux-team trace` | API トレース検索（`--task`, `--search`, `--show`） |
-| `cmux-team get-agent-instructions` | Agent ロールの overlay を表示（`--role` 必須） |
-| `cmux-team set-agent-instructions` | overlay を書き込み（`--role` 必須、`--body` / `--from-file` / `--from-stdin`） |
-| `cmux-team delete-agent-instructions` | overlay を削除（`--role` 必須、存在しなければ exit 0） |
-| `cmux-team list-agent-instructions` | 全ロールの overlay 状況を一覧表示 |
+| `elevens start` | daemon 起動 + Master spawn + レイアウト構築（レイアウト消失時は自己修復。T286） |
+| `elevens status` | ステータス表示（team.json + ログ末尾） |
+| `elevens send TASK_CREATED` | タスク作成通知（`--task-id`, `--task-file` 必須） |
+| `elevens send TODO` | TODO 通知（`--content` 必須） |
+| `elevens send SHUTDOWN` | シャットダウン通知（内部用。明示停止は `kill <pid>`） |
+| `elevens spawn-agent` | Agent spawn（`--conductor-surface`, `--role`, `--prompt` or `--prompt-file`） |
+| `elevens agents` | 稼働中エージェント一覧 |
+| `elevens kill-agent` | Agent 終了（`--surface` 必須、`--conductor-surface` 任意） |
+| `elevens create-task` | タスク作成（`--title` 必須、`--priority`, `--status`, `--body`, `--depends-on`, `--base-branch`, `--run-after-all`, `--exclusive` 任意） |
+| `elevens update-task` | タスク状態更新（`--task-id`, `--status` 必須） |
+| `elevens close-task` | タスククローズ（`--task-id` 必須、`--journal` 任意） |
+| `elevens await-task` | タスク完了待ち（`--task-id` 必須、`--timeout` 任意） |
+| `elevens trace` | API トレース検索（`--task`, `--search`, `--show`） |
+| `elevens get-agent-instructions` | Agent ロールの overlay を表示（`--role` 必須） |
+| `elevens set-agent-instructions` | overlay を書き込み（`--role` 必須、`--body` / `--from-file` / `--from-stdin`） |
+| `elevens delete-agent-instructions` | overlay を削除（`--role` 必須、存在しなければ exit 0） |
+| `elevens list-agent-instructions` | 全ロールの overlay 状況を一覧表示 |
 
 ## 1.1. プロジェクト固有の追加指示（agent instructions overlay）
 
-プロジェクト固有の Agent への追加指示を `.team/agent-instructions/<role>.md` に置くと、`cmux-team spawn-agent` 実行時に prompt-file 中の `{{PROJECT_INSTRUCTIONS}}` プレースホルダがその内容で置換される。
+プロジェクト固有の Agent への追加指示を `.team/agent-instructions/<role>.md` に置くと、`elevens spawn-agent` 実行時に prompt-file 中の `{{PROJECT_INSTRUCTIONS}}` プレースホルダがその内容で置換される。
 
 ### 対象ロール
 
@@ -110,23 +110,23 @@ description: >
 
 ```bash
 # overlay を書き込む
-cmux-team set-agent-instructions --role implementer --from-file ./my-impl-notes.md
-cmux-team set-agent-instructions --role researcher --body "調査対象は 2025 年以降の論文に限る"
-cat ./notes.md | cmux-team set-agent-instructions --role planner --from-stdin
+elevens set-agent-instructions --role implementer --from-file ./my-impl-notes.md
+elevens set-agent-instructions --role researcher --body "調査対象は 2025 年以降の論文に限る"
+cat ./notes.md | elevens set-agent-instructions --role planner --from-stdin
 
 # 内容確認
-cmux-team get-agent-instructions --role implementer
-cmux-team list-agent-instructions
+elevens get-agent-instructions --role implementer
+elevens list-agent-instructions
 
 # 削除
-cmux-team delete-agent-instructions --role implementer
+elevens delete-agent-instructions --role implementer
 ```
 
 overlay ファイルは最大 100 KB。それを超えると set 時に exit 1。
 
 ### 適用タイミング
 
-`cmux-team spawn-agent --prompt-file <path>` 実行時、prompt-file 内の `{{PROJECT_INSTRUCTIONS}}` プレースホルダが overlay 本文に展開される。Conductor が Agent 起動用の prompt-file を heredoc で書き出す際は、**必ず `{{PROJECT_INSTRUCTIONS}}` を単独行として残すこと**（quoted heredoc `'AGENT_PROMPT'` を使うと shell 展開されず安全）。
+`elevens spawn-agent --prompt-file <path>` 実行時、prompt-file 内の `{{PROJECT_INSTRUCTIONS}}` プレースホルダが overlay 本文に展開される。Conductor が Agent 起動用の prompt-file を heredoc で書き出す際は、**必ず `{{PROJECT_INSTRUCTIONS}}` を単独行として残すこと**（quoted heredoc `'AGENT_PROMPT'` を使うと shell 展開されず安全）。
 
 overlay が存在しない / 空の場合はプレースホルダが空文字に置換される。
 
@@ -161,26 +161,26 @@ daemon が起動すると Proxy が自動で立ち上がり、Master および C
 
 ### trace CLI
 
-`cmux-team trace` コマンドでトレースを検索・表示できる:
+`elevens trace` コマンドでトレースを検索・表示できる:
 
 ```bash
 # タスクIDでフィルタ
-cmux-team trace --task 035
+elevens trace --task 035
 
 # 全文検索（SQLite FTS5）
-cmux-team trace --search "error"
+elevens trace --search "error"
 
 # 特定トレースの詳細表示（リクエスト/レスポンス本文含む）
-cmux-team trace --show 42
+elevens trace --show 42
 
 # Conductor IDでフィルタ
-cmux-team trace --conductor conductor-1
+elevens trace --conductor conductor-1
 
 # ロールでフィルタ
-cmux-team trace --role impl
+elevens trace --role impl
 
 # 結果数制限（デフォルト20）
-cmux-team trace --limit 50
+elevens trace --limit 50
 ```
 
 ### 活用例
@@ -189,10 +189,10 @@ Master がユーザーに進捗報告する際、過去の API リクエスト�
 
 ```bash
 # あるタスクでどんな API リクエストが行われたか確認
-cmux-team trace --task 035
+elevens trace --task 035
 
 # エラーに関連するリクエストを全文検索
-cmux-team trace --search "rate_limit"
+elevens trace --search "rate_limit"
 ```
 
 ## 3. cmux 操作リファレンス
@@ -204,7 +204,7 @@ cmux-team trace --search "rate_limit"
 | `CMUX_SOCKET_PATH` | cmux ソケットパス。設定されていれば cmux 環境内で動作中 |
 | `CMUX_WORKSPACE_ID` | 現在のワークスペースID |
 | `CMUX_SURFACE_ID` | 現在のサーフェスID |
-| `CMUX_SURFACE` | cmux-team が設定。`surface:N` 形式。これが設定されていれば cmux-team 管理下 |
+| `CMUX_SURFACE` | elevens が設定。`surface:N` 形式。これが設定されていれば elevens 管理下 |
 
 ### 基本操作コマンド
 
@@ -276,20 +276,20 @@ osascript -e 'display notification "ビルド完了" with title "Claude" sound n
 
 ## 4. タスク完了待ち（await-task）
 
-`cmux-team await-task` はタスクの完了を `fs.watch` ベースで待機する CLI コマンド。
-`cmux-team status` のポーリングに比べて軽量・高速で、Claude Code の `Bash run_in_background` と組み合わせることで Master がブロックされずにタスク完了を待てる。
+`elevens await-task` はタスクの完了を `fs.watch` ベースで待機する CLI コマンド。
+`elevens status` のポーリングに比べて軽量・高速で、Claude Code の `Bash run_in_background` と組み合わせることで Master がブロックされずにタスク完了を待てる。
 
 ### 基本的な使い方
 
 ```bash
 # 単一タスクの完了を待つ
-cmux-team await-task --task-id 108
+elevens await-task --task-id 108
 
 # 複数タスクの完了を待つ（カンマ区切り）
-cmux-team await-task --task-id 108,109
+elevens await-task --task-id 108,109
 
 # タイムアウト指定（デフォルト: 3600秒）
-cmux-team await-task --task-id 108 --timeout 7200
+elevens await-task --task-id 108 --timeout 7200
 ```
 
 ### 終了コード
@@ -304,11 +304,11 @@ cmux-team await-task --task-id 108 --timeout 7200
 
 ```bash
 # バックグラウンドでタスク完了を待つ（Claude Code の Bash run_in_background）
-cmux-team await-task --task-id 108
+elevens await-task --task-id 108
 # → task-notification で完了が通知される + summary が読める
 
 # 「結果を見てから次を判断」するフロー
-cmux-team await-task --task-id 108
+elevens await-task --task-id 108
 # 完了後に summary を読んで次のアクションを決定
 ```
 
@@ -343,11 +343,11 @@ cmux-team await-task --task-id 108
 
 ## 6. 他プロジェクトを覗く
 
-cmux-team は AI 観察箱として、**他プロジェクトの runtime 状態を読む**ことを中核ユースケースの 1 つとしている。`--project-root` flag で対象を指定できる。
+elevens は AI 観察箱として、**他プロジェクトの runtime 状態を読む**ことを中核ユースケースの 1 つとしている。`--project-root` flag で対象を指定できる。
 
 | 用途 | 例 |
 |------|----|
-| read 系（status / agents / events / metrics 等） | `cmux-team status --project-root /path/to/other` |
+| read 系（status / agents / events / metrics 等） | `elevens status --project-root /path/to/other` |
 | write 系（create-task / start / spawn-* 等） | cwd と異なる project への書き込みは確認 prompt が出る。TTY なし環境では `--project-root-confirm` または `CMUX_TEAM_PROJECT_ROOT_CONFIRM=1` env で skip |
 
 env 経路 `PROJECT_ROOT=...` も引き続きサポート（flag が指定されたら env は無視される）。flag で指定した path が存在しない / `.team/` を含まない場合は exit 1（strict 検証）。

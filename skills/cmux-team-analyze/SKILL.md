@@ -11,10 +11,10 @@ description: >
 
 # cmux-team-analyze: DuckDB によるメトリクス ad-hoc 解析
 
-このスキルは `cmux-team metrics query` CLI（T412）を介して DuckDB ad-hoc SQL を
+このスキルは `elevens metrics query` CLI（T412）を介して DuckDB ad-hoc SQL を
 実行し、複数 task 横断・時系列・cohort 比較といった探索的解析を行う。
 
-> CLI 本体: `cmux-team metrics query --sql '<SQL>'`（DuckDB 0.10+ が必要）
+> CLI 本体: `elevens metrics query --sql '<SQL>'`（DuckDB 0.10+ が必要）
 > 本 skill は recipe 集 + 利用可能 source の説明書。
 
 ## 1. 起動条件と棲み分け
@@ -24,18 +24,18 @@ description: >
 | 単一 task の session 履歴を時系列で見る | `trace-task` skill |
 | 単一 task の Conductor / Agent 出力を確認 | `trace-task` skill |
 | 複数 task を横断した集計（per-task トレンド・分布） | **本 skill (cmux-team-analyze)** |
-| baseline / evaluation 期間の cohort 比較 | **本 skill** + `cmux-team metrics compare` |
+| baseline / evaluation 期間の cohort 比較 | **本 skill** + `elevens metrics compare` |
 | 介入導入後の副作用検出（token 消費・forced_close 率） | **本 skill** |
 | events.jsonl + traces.db を JOIN した分析 | **本 skill** |
 | snapshot ファイルを跨ぐ per-task トレンド | **本 skill** |
-| 既定 6 軸の集計表を出すだけ | `cmux-team metrics`（aggregate） |
+| 既定 6 軸の集計表を出すだけ | `elevens metrics`（aggregate） |
 
 > **判断軸**: 「1 タスクの中で何が起きたか」なら trace-task。「複数タスクで何が
 > 起きているか」なら本 skill。
 
 ## 2. 利用可能な source
 
-`cmux-team metrics query` 起動時に自動で attach される view / table:
+`elevens metrics query` 起動時に自動で attach される view / table:
 
 | 名前 | 種別 | 由来 | 主な用途 |
 |------|------|------|---------|
@@ -86,7 +86,7 @@ WHERE ...
 # DuckDB Recipe Library
 
 各 recipe は `<!-- recipe: <id> -->` コメントの直後に SQL を置く。コピペで
-`cmux-team metrics query --sql '<RECIPE>'` に流せる形を保つ。
+`elevens metrics query --sql '<RECIPE>'` に流せる形を保つ。
 
 > **動作確認**: 各 recipe は実装フェーズで実 duckdb binary に対して 0 exit を
 > 確認している（結果は task の implementer.md に記録）。
@@ -158,7 +158,7 @@ ORDER BY cohort;
 ```
 
 > 統計検定（Welch / Mann-Whitney / 2-prop z-test）が必要なら
-> `cmux-team metrics compare --baseline ... --comparison ...` を併用する。
+> `elevens metrics compare --baseline ... --comparison ...` を併用する。
 > 本 recipe は探索的に「差がありそうか」を見る用途。
 
 <!-- recipe: R3 -->
@@ -315,8 +315,8 @@ ORDER BY snapshot_date;
 
 - spec: [`docs/spec/11-metrics.md`](../../docs/spec/11-metrics.md) — Metrics taxonomy / data source / cohort 比較
 - CLI:
-  - `cmux-team metrics query` — DuckDB ad-hoc SQL（本 skill が直接利用）
-  - `cmux-team metrics` — 既定 6 軸の per-task / per-period aggregate（事前定義）
-  - `cmux-team metrics snapshot|compare|health` — 日次 snapshot / 統計検定 / 欠損確認
+  - `elevens metrics query` — DuckDB ad-hoc SQL（本 skill が直接利用）
+  - `elevens metrics` — 既定 6 軸の per-task / per-period aggregate（事前定義）
+  - `elevens metrics snapshot|compare|health` — 日次 snapshot / 統計検定 / 欠損確認
 - 関連 skill:
   - `trace-task` — per-task の session 履歴分析（棲み分けは §1 参照）

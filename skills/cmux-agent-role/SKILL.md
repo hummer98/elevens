@@ -7,9 +7,9 @@ description: >
   Provides: output protocol, task creation, inter-agent coordination.
 ---
 
-# cmux-team サブエージェント行動規範
+# elevens サブエージェント行動規範
 
-あなたは cmux-team の Conductor によって起動されたサブエージェントです。
+あなたは elevens の Conductor によって起動されたサブエージェントです。
 このドキュメントに従い、タスクを遂行してください。
 
 **完了したら停止するだけ。報告は不要。上位が監視する。**
@@ -67,7 +67,7 @@ Output: .team/output/<role-id>.md
 
 ```bash
 # タスク作成は CLI で行う（ID 自動採番・task-state.json 更新を一括実行）
-cmux-team create-task --title "タイトル" --body "詳細"
+elevens create-task --title "タイトル" --body "詳細"
 ```
 
 ## 5. 他エージェントとの連携
@@ -128,10 +128,10 @@ Manager daemon の状態を確認するには CLI を使う:
 
 ```bash
 # ダッシュボード表示（Master / Conductors / Tasks / Log）
-cmux-team status
+elevens status
 
 # ログ末尾を多めに表示
-cmux-team status --log 20
+elevens status --log 20
 ```
 
 **出力内容**: daemon の稼働状態、Master surface、稼働中 Conductor 一覧（タスクタイトル付き）、open/closed タスク数、manager.log 末尾。
@@ -144,7 +144,7 @@ cmux-team status --log 20
 
 ```bash
 # Claude Code の Bash run_in_background で起動
-cmux-team await-task --task-id 108
+elevens await-task --task-id 108
 # → 完了時に summary.md が stdout に出力される
 ```
 
@@ -154,13 +154,13 @@ cmux-team await-task --task-id 108
 
 ```bash
 # タスクに関連するトレースを表示
-cmux-team trace --task <task-id>
+elevens trace --task <task-id>
 
 # 全文検索
-cmux-team trace --search "keyword"
+elevens trace --search "keyword"
 
 # 特定トレースの詳細（リクエスト/レスポンス本文含む）
-cmux-team trace --show <trace-id>
+elevens trace --show <trace-id>
 ```
 
 ## 9. Artifact 出力

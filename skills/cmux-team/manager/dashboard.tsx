@@ -1398,7 +1398,7 @@ function buildSettingsRows(state: AppState): any[] {
       rows.push(ui.text(`── ${selected.role} (${path}) ──`, { dim: true }));
       if (!selected.exists) {
         rows.push(ui.text("  (no overlay set)", { dim: true }));
-        rows.push(ui.text(`  set: cmux-team set-agent-instructions --role ${selected.role} --from-file <path>`, { dim: true }));
+        rows.push(ui.text(`  set: elevens set-agent-instructions --role ${selected.role} --from-file <path>`, { dim: true }));
       } else {
         for (const line of selected.preview) {
           rows.push(ui.text(line, { dim: true }));
@@ -1766,13 +1766,13 @@ export async function startDashboard(
             ? buildPoolHeaderDisplay(daemon.pool)
             : buildRateLimitDisplay(daemon.rateLimit);
           const portLabel = daemon.proxyPort ? ` :${daemon.proxyPort}` : "";
-          const left = `─ cmux-team ${headerSubtitle}${portLabel}`;
+          const left = `─ elevens ${headerSubtitle}${portLabel}`;
           const rightText = rl.parts.map((p, i) => (i > 0 ? (p.group ? "  " : " ") : "") + p.text).join("");
           const fill = "─".repeat(Math.max(1, 80 - left.length - rightText.length));
 
           // スロットリング中: headerSubtitle 部分を赤色で表示
           if (isThrottled && throttleLabel) {
-            const prefix = "─ cmux-team ";
+            const prefix = "─ elevens ";
             return ui.row({ gap: 0 }, [
               ui.text(prefix, { dim: true }),
               ui.text(`${throttleLabel}${portLabel}`, { style: { fg: RED, blink: true } }),
@@ -2601,7 +2601,7 @@ export async function startDashboard(
     } finally {
       db.close();
     }
-    const tmpPath = join(tmpdir(), `cmux-team-issue-${item.issue.number}.md`);
+    const tmpPath = join(tmpdir(), `elevens-issue-${item.issue.number}.md`);
     await writeFile(tmpPath, content, "utf-8");
     await openArtifactInViewer(app, tmpPath, () => {
       dashboardActive = true;
@@ -2685,7 +2685,7 @@ export async function startDashboard(
     // ログは [warn] レベルに降格する。
     const message = e?.message ?? String(e);
     logWarn("dashboard_tui_start_failed", message).catch(() => {});
-    logWarn("dashboard_tui_start_hint", "TTY 環境で cmux-team start を実行してください").catch(() => {});
+    logWarn("dashboard_tui_start_hint", "TTY 環境で elevens start を実行してください").catch(() => {});
     return { scheduleRefresh: () => {} };
   }
 
