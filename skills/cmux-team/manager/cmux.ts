@@ -17,6 +17,14 @@ const execFile = promisify(execFileCb);
  */
 export const SUBSTRATE_BINARY: string = process.env.ELEVENS_BACKEND?.trim() || "cmux";
 
+/**
+ * Backend が c11 かどうかの判定（basename ベース）。
+ * `c11` / `/path/to/c11` / `c11-dev` 等の絶対パス指定にも反応する。
+ * c11-only flag（`--no-layout` 等）の付与判定に使う。
+ */
+const SUBSTRATE_BASENAME = SUBSTRATE_BINARY.split("/").pop() ?? SUBSTRATE_BINARY;
+export const IS_C11_BACKEND: boolean = SUBSTRATE_BASENAME === "c11";
+
 type RunCmuxOpts = { timeout?: number };
 
 /**
@@ -152,6 +160,8 @@ export async function tree(workspace?: string, opts?: TreeOpts): Promise<string>
   if (opts?.json) args.push("--json");
   args.push("tree");
   if (workspace) args.push("--workspace", workspace);
+  // c11 only: text 出力時に floor plan ASCII art の前置を抑制（output 肥大化を回避）
+  if (IS_C11_BACKEND && !opts?.json) args.push("--no-layout");
   const { stdout } = await runCmux(args, { timeout: TREE_TIMEOUT_MS });
   return stdout;
 }
