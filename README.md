@@ -1,13 +1,11 @@
-![cmux-team](banner.jpeg)
+# elevens
 
-# cmux-team
-
-[![npm version](https://img.shields.io/npm/v/@hummer98/cmux-team.svg)](https://www.npmjs.com/package/@hummer98/cmux-team)
-[![npm downloads](https://img.shields.io/npm/dm/@hummer98/cmux-team.svg)](https://www.npmjs.com/package/@hummer98/cmux-team)
-[![npm total downloads](https://img.shields.io/npm/dt/@hummer98/cmux-team.svg)](https://www.npmjs.com/package/@hummer98/cmux-team)
+[![npm version](https://img.shields.io/npm/v/@hummer98/elevens.svg)](https://www.npmjs.com/package/@hummer98/elevens)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Multi-agent development orchestration with Claude Code + cmux.
+c11-native multi-agent orchestration package — successor to [cmux-team](https://github.com/hummer98/cmux-team).
+
+> **Status — early access (v0.1.0).** elevens is the successor to cmux-team, migrating from manaflow-ai/cmux to [Stage 11 Agentics' c11](https://github.com/Stage-11-Agentics/c11) as the substrate. This release is a renamed snapshot of cmux-team v4.28.x; **the c11 backend adapter is not yet wired** — see [`docs/seed.md`](docs/seed.md) for the full migration plan and phase schedule. Use cmux-team for current production needs until Phase 1 lands.
 
 **[日本語版 README はこちら](README.ja.md)**
 

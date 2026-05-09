@@ -1,15 +1,15 @@
 {
-  "name": "cmux-team",
-  "version": "4.28.2",
-  "description": "Multi-agent development orchestration with Claude Code + cmux. Spawn, monitor, and integrate parallel sub-agents visually in terminal panes.",
+  "name": "elevens",
+  "version": "0.1.0",
+  "description": "c11-native multi-agent orchestration package (successor to cmux-team). Spawn, monitor, and coordinate parallel Claude Code sub-agents on Stage 11 Agentics' c11 terminal multiplexer.",
   "author": {
     "name": "hummer98",
     "url": "https://github.com/hummer98"
   },
-  "homepage": "https://github.com/hummer98/cmux-team",
-  "repository": "https://github.com/hummer98/cmux-team",
+  "homepage": "https://github.com/hummer98/elevens",
+  "repository": "https://github.com/hummer98/elevens",
   "license": "MIT",
-  "keywords": ["cmux", "multi-agent", "orchestration", "parallel", "team"],
+  "keywords": ["c11", "stage-11-agentics", "multi-agent", "orchestration", "parallel", "claude-code"],
   "skills": "./skills/",
   "commands": "./commands/",
   "hooks": {

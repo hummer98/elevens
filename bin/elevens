@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# cmux-team CLI ラッパー
+# elevens CLI ラッパー (c11-native multi-agent orchestration)
 # bun で skills/cmux-team/manager/main.ts を exec 起動する（node 親を介さない）
+# (skills/cmux-team/ ディレクトリ名は Phase 3 まで継承。docs/seed.md 参照)
 
 set -euo pipefail
 
