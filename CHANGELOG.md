@@ -6,9 +6,14 @@ elevens の初回リリース。cmux-team の self-fork として、Stage 11 Age
 
 ### Notes
 
-- **このリリースは cmux-team v4.28.2 をリネームしたスナップショット。** c11 backend adapter はまだ実装されておらず、現状は cmux 上で動作する。c11 への移行は Phase 1 で実施予定（`docs/seed.md` 参照）
+- **このリリースは cmux-team v4.28.2 をベースに rename + Phase 1 PoC を載せたスナップショット。** default backend は当面 cmux のまま（後方互換維持）。`ELEVENS_BACKEND=c11` を export することで c11 上での動作を試せる
 - production 用途では引き続き cmux-team を使ってください
 - 完全な move 動機・c11 採用理由・CLI 互換性分析・phase 計画は [`docs/seed.md`](docs/seed.md) を参照
+
+### Added
+
+- **substrate adapter PoC (Phase 1)**: `ELEVENS_BACKEND=c11|cmux` 環境変数で multiplexer backend を切替可能にした。`skills/cmux-team/manager/cmux.ts` に `SUBSTRATE_BINARY` を export し、runCmux の起動バイナリを env で解決する。default は `cmux`（後方互換）。c11 / cmux / 絶対パス / カスタムビルド名を透過的に受理。検証結果は `.team/artifacts/A028-phase1-substrate-adapter-poc.md`
+- **`/release` コマンドを elevens 用に改修**: Conductor 経由ではなく Master 直接実行に。npm publish は GitHub Actions の OIDC trusted publishing 経由（`NPM_TOKEN` 不要）
 
 ### Changed
 
@@ -16,6 +21,7 @@ elevens の初回リリース。cmux-team の self-fork として、Stage 11 Age
 - バイナリ名: `cmux-team` → `elevens`
 - リポジトリ: `hummer98/cmux-team` → `hummer98/elevens`
 - バージョンスキーム: v4.x.x → v0.x.x（fresh start。cmux-team としての過去履歴は以下に継承）
+- `package.json` に `publishConfig.access: "public"` を追加（scoped package を public publish するため）
 
 ### Heritage
 
