@@ -1,47 +1,38 @@
 #!/usr/bin/env node
 
-// npm postinstall スクリプト
-// manager/ の依存を bun install で解決
+// elevens postinstall スクリプト
+//
+// 責務: manager/ の bun 依存を解決するだけ。
+//
+// 設計判断 (A031-fresh-install での発覚から修正):
+//   - **他パッケージ (`hummer98/cmux-team`) plugin の auto-add は廃止** — 元実装は
+//     elevens を install しただけで cmux-team plugin が登録される cross-package
+//     副作用があり、user 認知外の状態変化を起こしていた。plugin install は
+//     README で `claude plugin marketplace add hummer98/elevens` →
+//     `claude plugin install elevens@hummer98-elevens` を案内する形に
+//   - **`~/.claude/statusline.sh` の上書きは廃止** — global file を毎回上書きする
+//     cross-package pollution を避ける。statusline 利用は別途 opt-in に分離
+//   - **bun が無くても fail しない** — warn 出力のみで postinstall は exit 0
 
 import { execFileSync } from "node:child_process";
-import { copyFileSync, chmodSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { homedir } from "node:os";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const managerDir = join(__dirname, "..", "skills", "cmux-team", "manager");
 
-// bun install（manager/ の依存解決）
 try {
   execFileSync("which", ["bun"], { stdio: "ignore" });
-  console.log("cmux-team: bun install を実行中...");
+  console.log("elevens: bun install を実行中 (manager/ 依存解決)...");
   execFileSync("bun", ["install"], { cwd: managerDir, stdio: "inherit" });
 } catch {
-  console.warn("cmux-team: bun が見つかりません。手動で以下を実行してください:");
+  console.warn("elevens: bun が見つかりません。manager 依存を手動で解決してください:");
   console.warn(`  cd ${managerDir} && bun install`);
+  console.warn("  bun のインストール: https://bun.sh/docs/installation");
 }
 
-// Claude Code plugin をインストール
-try {
-  execFileSync("which", ["claude"], { stdio: "ignore" });
-  console.log("cmux-team: Claude Code plugin をインストール中...");
-  execFileSync("claude", ["plugin", "add", "hummer98/cmux-team"], { stdio: "inherit" });
-} catch {
-  console.warn("cmux-team: claude が見つかりません。手動で実行してください:");
-  console.warn("  claude plugin add hummer98/cmux-team");
-}
-
-// statusline.sh をインストール
-const statuslineSrc = join(__dirname, "..", "skills", "cmux-team", "manager", "statusline.sh");
-const statuslineDst = join(homedir(), ".claude", "statusline.sh");
-try {
-  copyFileSync(statuslineSrc, statuslineDst);
-  chmodSync(statuslineDst, 0o755);
-  console.log("cmux-team: statusline.sh をインストールしました");
-} catch (e) {
-  console.warn(`cmux-team: statusline.sh のインストールに失敗しました: ${e.message}`);
-}
-
-console.log("cmux-team: インストール完了");
+console.log("elevens: postinstall 完了");
+console.log("elevens: plugin として使う場合は以下を実行してください:");
+console.log("  claude plugin marketplace add hummer98/elevens");
+console.log("  claude plugin install elevens@hummer98-elevens");

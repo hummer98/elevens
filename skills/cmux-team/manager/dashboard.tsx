@@ -15,7 +15,7 @@ import type { DaemonState, TaskSummary } from "./daemon";
 import type { ConductorState } from "./schema";
 import type { AgentState } from "./schema";
 import { THROTTLE_5H_THRESHOLD } from "./schema";
-import { log } from "./logger";
+import { log, warn as logWarn } from "./logger";
 import { installDashboardConsoleRedirect } from "./dashboard-console-redirect";
 import { formatDeliverable } from "./task";
 import { onStateChanged } from "./eventBus";
@@ -1557,9 +1557,38 @@ let eventBusUnsubscribe: (() => void) | null = null;
 
 export async function startDashboard(
   getState: () => DaemonState,
-  opts?: { version?: string; onReload?: () => void; onQuit?: () => void; onFullQuit?: () => void }
+  opts?: {
+    version?: string;
+    onReload?: () => void;
+    onQuit?: () => void;
+    onFullQuit?: () => void;
+    /**
+     * A031 follow-up: TTY 不在時の rezi/tui 起動 skip 制御。
+     * 未指定なら `Boolean(process.stdout.isTTY)` を使う。
+     * - false → rezi の `app.start()` を一切呼ばず、no-op handle を返す（fail-soft）。
+     *   subagent / nohup / CI 経由で起動されたとき `engine_create failed: code=-6`
+     *   を踏まないようにし、`[error] console_error ❌ ダッシュボード起動失敗`
+     *   が manager.log に流れる UX 乱れを防ぐ。
+     * - true  → 従来どおり TUI を起動する（rezi のエラーは catch ブロックで warn 降格）。
+     */
+    isTty?: boolean;
+  }
 ): Promise<{ scheduleRefresh: () => void }> {
   const daemonState = getState();
+
+  // A031 follow-up: TTY が無い環境では rezi/tui の起動自体を skip する。
+  // installDashboardConsoleRedirect も install しない（console.error が
+  // [error] 化される副作用を避けるため）。HTTP dashboard server は cmdStart
+  // 側で別途起動されるため本 skip の影響を受けない。
+  const isTty = opts?.isTty ?? Boolean(process.stdout.isTTY);
+  if (!isTty) {
+    await log(
+      "dashboard_tui_skipped",
+      "non-tty stdout: rezi/tui dashboard not started (HTTP dashboard server is unaffected)",
+    );
+    return { scheduleRefresh: () => {} };
+  }
+
   // T435: registry は app.keys 配線時に確定するが、buildViewWithApp 内の status bar が
   // 参照するため forward declaration として let で宣言する。
   let dashboardBindings: ReadonlyArray<import("./dashboard-keymap").BindingSpec> = [];
@@ -1767,7 +1796,7 @@ export async function startDashboard(
         ...(daemon.updateAvailable
           ? [(() => {
               const ua = daemon.updateAvailable!;
-              const suffix = `(upgrade: npm i -g @hummer98/cmux-team@${ua.latest})`;
+              const suffix = `(upgrade: npm i -g @hummer98/elevens@${ua.latest})`;
               return ui.text(
                 `⬆ update available: v${ua.current} → v${ua.latest}  ${suffix}`,
                 { style: { fg: YELLOW, bold: true } },
@@ -2648,8 +2677,15 @@ export async function startDashboard(
     await app.start();
   } catch (e: any) {
     cleanup();
-    console.error(t("dashboard_startup_failed", { message: e.message }));
-    console.error(t("dashboard_startup_hint"));
+    // A031 follow-up: rezi の `engine_create failed: code=-6` 等は TTY 不在が
+    // 主因のことが多い。ここで `console.error` を呼ぶと、すぐ上で install した
+    // `installDashboardConsoleRedirect` 経由で `[error] console_error ...` が
+    // manager.log に流れ、daemon が重大障害を起こしたかのような UX になる。
+    // 起動失敗そのものは fail-soft（呼び出し側 cmdStart は継続）なので、
+    // ログは [warn] レベルに降格する。
+    const message = e?.message ?? String(e);
+    logWarn("dashboard_tui_start_failed", message).catch(() => {});
+    logWarn("dashboard_tui_start_hint", "TTY 環境で cmux-team start を実行してください").catch(() => {});
     return { scheduleRefresh: () => {} };
   }
 
