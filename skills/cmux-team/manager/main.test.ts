@@ -24,6 +24,8 @@ import {
   buildMasterClaudeArgs,
   makeShutdownGuard,
   formatDaemonStartedDetail,
+  registerSelf,
+  RegisterSelfError,
 } from "./main";
 import type { TaskMeta, TaskState } from "./task";
 import {
@@ -1990,6 +1992,178 @@ describe("cmdSend --from-stdin discriminator (C2 / T203)", () => {
     expect(receivedMessages[0].sessionId).toBe("uuid-real");
     expect(receivedMessages[0].source).toBe("clear");
   }, 15000);
+});
+
+// --- T003 registerSelf cross-check (daemon_pid mismatch) ---
+describe("registerSelf cross-check (T003)", () => {
+  test("daemon_pid mismatch で RegisterSelfError(cross_check_failed) を throw", async () => {
+    await mkdir(join(testDir, ".team"), { recursive: true });
+    await writeFile(
+      join(testDir, ".team/team.json"),
+      JSON.stringify({ manager: { pid: 99999 } }),
+    );
+
+    // 偽 proxy: daemon_pid が team.json の値と異なる
+    const fake = Bun.serve({
+      port: 0,
+      fetch: () =>
+        new Response(JSON.stringify({ ok: true, daemon_pid: 11111 }), {
+          headers: { "Content-Type": "application/json" },
+        }),
+    });
+    await writeFile(join(testDir, ".team/proxy-port"), String(fake.port));
+
+    try {
+      await expect(
+        registerSelf({
+          role: "master",
+          surface: "surface:1",
+          projectRoot: testDir,
+        }),
+      ).rejects.toMatchObject({
+        name: "RegisterSelfError",
+        reason: "cross_check_failed",
+      });
+    } finally {
+      await fake.stop(true);
+    }
+  });
+
+  test("daemon_pid mismatch error の detail に cross-check failed と proxy-port 削除案内が含まれる", async () => {
+    await mkdir(join(testDir, ".team"), { recursive: true });
+    await writeFile(
+      join(testDir, ".team/team.json"),
+      JSON.stringify({ manager: { pid: 99999 } }),
+    );
+    const fake = Bun.serve({
+      port: 0,
+      fetch: () =>
+        new Response(JSON.stringify({ ok: true, daemon_pid: 11111 }), {
+          headers: { "Content-Type": "application/json" },
+        }),
+    });
+    await writeFile(join(testDir, ".team/proxy-port"), String(fake.port));
+
+    try {
+      let caught: RegisterSelfError | undefined;
+      try {
+        await registerSelf({
+          role: "conductor",
+          surface: "surface:1",
+          projectRoot: testDir,
+        });
+      } catch (e: any) {
+        caught = e instanceof RegisterSelfError ? e : undefined;
+      }
+      expect(caught).toBeDefined();
+      expect(caught!.reason).toBe("cross_check_failed");
+      expect(caught!.detail ?? "").toContain("cross-check failed");
+      expect(caught!.detail ?? "").toContain(".team/proxy-port");
+    } finally {
+      await fake.stop(true);
+    }
+  });
+
+  test("daemon_pid 一致時は正常に return する", async () => {
+    await mkdir(join(testDir, ".team"), { recursive: true });
+    await writeFile(
+      join(testDir, ".team/team.json"),
+      JSON.stringify({ manager: { pid: 11111 } }),
+    );
+    const fake = Bun.serve({
+      port: 0,
+      fetch: () =>
+        new Response(JSON.stringify({ ok: true, daemon_pid: 11111 }), {
+          headers: { "Content-Type": "application/json" },
+        }),
+    });
+    await writeFile(join(testDir, ".team/proxy-port"), String(fake.port));
+
+    try {
+      await expect(
+        registerSelf({
+          role: "master",
+          surface: "surface:1",
+          projectRoot: testDir,
+        }),
+      ).resolves.toBeUndefined();
+    } finally {
+      await fake.stop(true);
+    }
+  });
+
+  test("team.json.manager.pid 未設定なら cross-check skip (race の正常系)", async () => {
+    // initInfra 直後 / 初回 handleMessage 前は manager: {} のまま
+    await mkdir(join(testDir, ".team"), { recursive: true });
+    await writeFile(
+      join(testDir, ".team/team.json"),
+      JSON.stringify({ manager: {} }),
+    );
+    const fake = Bun.serve({
+      port: 0,
+      fetch: () =>
+        new Response(JSON.stringify({ ok: true, daemon_pid: 11111 }), {
+          headers: { "Content-Type": "application/json" },
+        }),
+    });
+    await writeFile(join(testDir, ".team/proxy-port"), String(fake.port));
+
+    try {
+      // skip なので daemon_pid 不一致でも成功する (false positive 回避)
+      await expect(
+        registerSelf({
+          role: "conductor",
+          surface: "surface:1",
+          projectRoot: testDir,
+        }),
+      ).resolves.toBeUndefined();
+    } finally {
+      await fake.stop(true);
+    }
+  });
+
+  test("proxy_port_missing で RegisterSelfError(proxy_port_missing) を throw", async () => {
+    // .team/proxy-port を作らない
+    await mkdir(join(testDir, ".team"), { recursive: true });
+    await expect(
+      registerSelf({
+        role: "master",
+        surface: "surface:1",
+        projectRoot: testDir,
+      }),
+    ).rejects.toMatchObject({
+      name: "RegisterSelfError",
+      reason: "proxy_port_missing",
+    });
+  });
+
+  test("4xx レスポンスで RegisterSelfError(post_failed) を throw", async () => {
+    await mkdir(join(testDir, ".team"), { recursive: true });
+    const fake = Bun.serve({
+      port: 0,
+      fetch: () =>
+        new Response(JSON.stringify({ error: "bad" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }),
+    });
+    await writeFile(join(testDir, ".team/proxy-port"), String(fake.port));
+
+    try {
+      await expect(
+        registerSelf({
+          role: "master",
+          surface: "surface:1",
+          projectRoot: testDir,
+        }),
+      ).rejects.toMatchObject({
+        name: "RegisterSelfError",
+        reason: "post_failed",
+      });
+    } finally {
+      await fake.stop(true);
+    }
+  });
 });
 
 // --- T203: SessionStart hook の matcher / command 回帰 ---

@@ -239,6 +239,51 @@ describe("proxy", () => {
     handle.stop();
   });
 
+  // --- T003 GET /api/identify エンドポイント ---
+  describe("GET /api/identify (T003)", () => {
+    test("project_root / daemon_pid / version / started_at / schema_version を返す", async () => {
+      const handle = await start(testDir, {
+        getState: () => ({
+          version: "0.4.1",
+          startedAt: "2026-05-10T13:31:14+09:00",
+        }),
+      });
+      try {
+        const res = await fetch(`http://127.0.0.1:${handle.port}/api/identify`);
+        expect(res.status).toBe(200);
+        expect(res.headers.get("content-type")).toBe("application/json");
+        const body = (await res.json()) as Record<string, unknown>;
+        expect(body.project_root).toBe(testDir);
+        expect(body.daemon_pid).toBe(process.pid);
+        expect(body.version).toBe("0.4.1");
+        expect(body.started_at).toBe("2026-05-10T13:31:14+09:00");
+        expect(body.schema_version).toBe(1);
+      } finally {
+        handle.stop();
+      }
+    });
+
+    // M-3: GET /api/identify が GET 分岐の最後で fall-through せずに自前 endpoint で
+    // 終端することを確認する negative test。upstream を mock せずに proxy を起動するので、
+    // もし fall-through すれば Anthropic API へ転送され body.project_root が testDir と
+    // 一致しなくなる (実際には Anthropic 側が 401 を返す可能性が高い)。
+    // closure 内 projectRoot をそのまま返している = forward されていないことを assert。
+    test("upstream に fall-through しない (M-3)", async () => {
+      const handle = await start(testDir, {
+        getState: () => ({ version: "0.4.1", startedAt: "2026-05-10T00:00:00+09:00" }),
+      });
+      try {
+        const res = await fetch(`http://127.0.0.1:${handle.port}/api/identify`);
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as Record<string, unknown>;
+        expect(body.project_root).toBe(testDir);
+        expect(body.schema_version).toBe(1);
+      } finally {
+        handle.stop();
+      }
+    });
+  });
+
   // --- T211 POST /statusline エンドポイント ---
   describe("POST /statusline (T211)", () => {
     // branch 解決を安定させるため workspace は存在しない dir に固定

@@ -2045,6 +2045,9 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
     }
 
     case "CONDUCTOR_REGISTERED": {
+      // T003: HTTP レスポンスの daemon_pid 添付は proxy.ts 側 (`/api/messages` 分岐) で
+      //   行う。handleMessage の戻り値型は void のまま。registerSelf 側でこの daemon_pid を
+      //   team.json.manager.pid と cross-check する。
       // T234: SESSION_STARTED F1 fallback で同 surface が master として仮登録されていたら
       //   conductor が late register してきた時点で master 仮登録は誤りなので掃除する。
       //   通常経路では registerSelfAsConductor が claude exec 前に POST されるため発生しないが、
@@ -2124,6 +2127,9 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
     }
 
     case "MASTER_REGISTERED": {
+      // T003: HTTP レスポンスの daemon_pid 添付は proxy.ts 側 (`/api/messages` 分岐) で
+      //   行う。handleMessage の戻り値型は void のまま。registerSelf 側でこの daemon_pid を
+      //   team.json.manager.pid と cross-check する。
       // T230: Master 側プロセスが `registerSelfAsMaster` で POST する。
       //   idempotent merge — 既存 state があれば skip（startedAt/pid/status を破壊しないため）。
       //   PID watcher はここでは起動しない。pid は後続の SESSION_STARTED hook で受信する（D6）。

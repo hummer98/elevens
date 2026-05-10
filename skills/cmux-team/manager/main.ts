@@ -166,6 +166,24 @@ export class ProjectRootError extends Error {
   }
 }
 
+/**
+ * T003: registerSelf が登録を諦めた理由を呼び出し側で識別するためのエラー。
+ * `process.exit(1)` を関数内で直接呼ばず、呼び出し側 (`cmdSpawnConductor` /
+ * `cmdLaunchMaster`) で catch → `console.error` → `process.exit(1)` に統一する。
+ *
+ * reason の意味:
+ *  - `proxy_port_missing`: `.team/proxy-port` が無い / proxy 死亡
+ *  - `post_failed`: HTTP POST が 4xx / 5xx / fetch 失敗
+ *  - `cross_check_failed`: レスポンス `daemon_pid` が `team.json.manager.pid` と不一致
+ *    (proxy が他プロジェクトの daemon に転送している兆候)
+ */
+export class RegisterSelfError extends Error {
+  constructor(public reason: string, public detail?: string) {
+    super(detail ?? reason);
+    this.name = "RegisterSelfError";
+  }
+}
+
 export function findProjectRoot(opts?: { flag?: string }): string {
   // 1. --project-root flag（最優先、strict 検証あり、throw する）
   //    library import 経路（flag 未指定）は throw しないので、現行 fall-through を維持する
@@ -1046,10 +1064,42 @@ async function cmdStart(): Promise<void> {
   } catch {}
 
   // ロギングプロキシ起動（既存 proxy が生きていればスキップ）
+  // T003: 既存 proxy が生きていても、自プロジェクトの daemon が握っているかを
+  // identify endpoint で verify してから再利用する。別プロジェクト (旧 cmux-team /
+  // 別 path の elevens) の孤児 daemon が同じ port を握っていた場合は再利用を諦め
+  // 新 port で proxy を起動する (旧 owner は kill しない)。
+  //   identify 不可 (legacy proxy / network glitch / 401 など) は安全側に倒し
+  //   fail-soft で新 port 起動。これにより v0.3.x 系との共存も壊さない。
+  //
+  // 最適化メモ (M-2 / 別 PR で良い): `verifyProxyIdentity` 導入後は HTTP fetch
+  // 自体が TCP connect を含むため、`resolveProxyPort` の TCP probe (1000ms) と合わせ
+  // ワーストケース 2.5s の boot 遅延が発生する。`resolveProxyPort` を省略して
+  // 直接 `.team/proxy-port` の port 文字列を `verifyProxyIdentity` に渡せば
+  // 1.5s に短縮可能。本タスクのスコープでは互換重視で既存の `resolveProxyPort` を
+  // 維持する。
   let proxyHandle: { port: number; stop: () => void } | null = null;
   const existingProxyPort = await resolveProxyPort();
+  let reuseExisting = false;
   if (existingProxyPort) {
-    state.proxyPort = parseInt(existingProxyPort, 10);
+    const verify = await verifyProxyIdentity(existingProxyPort, PROJECT_ROOT);
+    if ("ok" in verify && verify.ok) {
+      reuseExisting = true;
+    } else if ("kind" in verify && verify.kind === "mismatch") {
+      await log(
+        "proxy_owner_mismatch",
+        `port=${existingProxyPort} my=${PROJECT_ROOT} other=${verify.otherProjectRoot} other_pid=${verify.otherDaemonPid}`,
+      );
+    } else if ("kind" in verify && verify.kind === "dead") {
+      await log("proxy_owner_dead", `port=${existingProxyPort}`);
+    } else if ("kind" in verify && verify.kind === "unverifiable") {
+      await log(
+        "proxy_owner_unverifiable",
+        `port=${existingProxyPort} reason=${verify.reason}`,
+      );
+    }
+  }
+  if (reuseExisting) {
+    state.proxyPort = parseInt(existingProxyPort!, 10);
     await log("proxy_reused", `port=${existingProxyPort}`);
     // T305: 既存 proxy 再利用分岐では自分で proxy を起動しないため、api_usage 書き込みは
     // 別プロセスの proxy が担当する。このプロセスで initDB する必要はない。
@@ -1945,8 +1995,65 @@ async function cmdStatus(): Promise<void> {
 }
 
 /** proxy ポートを読み取り、生存確認して返す */
-async function resolveProxyPort(): Promise<string | undefined> {
-  const proxyPortFile = join(PROJECT_ROOT, ".team/proxy-port");
+/**
+ * T003: 既存 proxy が自プロジェクトの daemon が握っている proxy か verify する。
+ *
+ * 結果の分類:
+ *  - `{ ok: true, ... }`: project_root が一致 → そのまま再利用してよい
+ *  - `{ kind: "mismatch", ... }`: 別 project_root を返している → 新 port で起動 + warn
+ *  - `{ kind: "dead" }`: TCP/HTTP 接続不能 → 新 port で起動
+ *  - `{ kind: "unverifiable", ... }`: 接続できたが identify レスが不正 / 欠落
+ *    (legacy proxy が Anthropic API へ forward して 401/非 JSON を返すケースを含む)
+ *    → fail-soft で新 port (旧 owner kill しない)
+ *
+ * 200 以外 / JSON parse 失敗 / `project_root` 非文字列はすべて `kind:unverifiable`
+ * に集約する (legacy proxy の forward 経路で 401/非 JSON が返るケースを網羅するため)。
+ */
+export type ProxyIdentityVerifyResult =
+  | { ok: true; projectRoot: string; daemonPid: number; version: string | null }
+  | { kind: "dead" }
+  | { kind: "unverifiable"; reason: string }
+  | { kind: "mismatch"; otherProjectRoot: string; otherDaemonPid: number };
+
+export async function verifyProxyIdentity(
+  port: string,
+  expectedProjectRoot: string,
+): Promise<ProxyIdentityVerifyResult> {
+  let res: Response;
+  try {
+    res = await fetch(`http://127.0.0.1:${port}/api/identify`, {
+      signal: AbortSignal.timeout(1500),
+    });
+  } catch (e: any) {
+    return { kind: "dead" };
+  }
+  if (res.status !== 200) {
+    return { kind: "unverifiable", reason: `http_status=${res.status}` };
+  }
+  let body: any;
+  try {
+    body = await res.json();
+  } catch (e: any) {
+    return { kind: "unverifiable", reason: "json_parse_failed" };
+  }
+  const projectRoot = body?.project_root;
+  if (typeof projectRoot !== "string" || projectRoot.length === 0) {
+    return { kind: "unverifiable", reason: "project_root_missing" };
+  }
+  const daemonPid = typeof body?.daemon_pid === "number" ? body.daemon_pid : -1;
+  const version = typeof body?.version === "string" ? body.version : null;
+  if (projectRoot !== expectedProjectRoot) {
+    return {
+      kind: "mismatch",
+      otherProjectRoot: projectRoot,
+      otherDaemonPid: daemonPid,
+    };
+  }
+  return { ok: true, projectRoot, daemonPid, version };
+}
+
+async function resolveProxyPort(projectRoot: string = PROJECT_ROOT): Promise<string | undefined> {
+  const proxyPortFile = join(projectRoot, ".team/proxy-port");
   try {
     const port = (await readFile(proxyPortFile, "utf-8")).trim();
     const alive = await new Promise<boolean>((resolve) => {
@@ -1981,39 +2088,77 @@ async function postMessage(msg: Record<string, unknown>): Promise<void> {
 }
 
 /**
- * 自身を daemon に登録する共通処理（T234）。
+ * `.team/team.json` から `manager.pid` を読み出すヘルパー (T003)。
+ *
+ * 以下のケースでは `null` を返して呼び出し側に skip させる:
+ *  - team.json が存在しない (initInfra 完了前)
+ *  - JSON parse 失敗
+ *  - `manager.pid` が未設定 (initInfra 直後 / 初回 `updateTeamJson` flush 前)
+ *  - `manager.pid` が number でない
+ *
+ * 「`manager.pid` 未設定」は initInfra で `manager: {}` を seed した直後、
+ * daemon の最初の `updateTeamJson` flush が走る前の race window で発生する正常系。
+ * cross-check が走らない window を狭めたい場合は cmdStart の proxy 起動直後に
+ * `await updateTeamJson(state)` を 1 度同期 flush する選択肢があるが、
+ * 本タスクのスコープ外。
+ */
+async function readManagerPidFromTeamJson(root: string): Promise<number | null> {
+  try {
+    const raw = await readFile(join(root, ".team/team.json"), "utf-8");
+    const tj = JSON.parse(raw);
+    const p = tj?.manager?.pid;
+    return typeof p === "number" ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 自身を daemon に登録する共通処理（T234, T003 で throw 経路化）。
  *
  * `role` によって `MASTER_REGISTERED` / `CONDUCTOR_REGISTERED` の POST と
  * `master_self_register` / `conductor_self_register` のログを出し分ける。
  *
  * proxy-port が読み取れない / proxy が死んでいる / POST が失敗するいずれの
- * 場合も fail-fast（exit 1）する。daemon 不在で claude だけ起動しても
+ * 場合も `RegisterSelfError` を throw する (T003)。daemon 不在で claude だけ起動しても
  * `state.masters` / `state.conductors` に登録されず TUI・PID watcher・
- * `team.json` に反映されない壊れたセッションが取り残されるため。
+ * `team.json` に反映されない壊れたセッションが取り残されるため、呼び出し側
+ * (`cmdLaunchMaster` / `cmdSpawnConductor`) で catch → `console.error` →
+ * `process.exit(1)` する。
  *
  * `postMessage` は daemon 未起動時に silent skip するため fail-fast と矛盾する。
  * よってここでは `fetch` で直接 POST する。
+ *
+ * T003: HTTP レスポンスの `daemon_pid` を `team.json.manager.pid` と
+ * cross-check し、proxy が他プロジェクトの daemon に転送している兆候があれば
+ * `RegisterSelfError(reason="cross_check_failed")` を throw する。
+ * team.json 不在 / `manager.pid` 未設定 / レスポンス JSON parse 失敗 は silent skip。
  */
-async function registerSelf(
-  role: "master" | "conductor",
-  surface: string,
-  sessionId?: string,
-): Promise<void> {
+export async function registerSelf(args: {
+  role: "master" | "conductor";
+  surface: string;
+  sessionId?: string;
+  /** テストでの差し替え用。default は module level の `PROJECT_ROOT`。 */
+  projectRoot?: string;
+}): Promise<void> {
+  const { role, surface, sessionId } = args;
+  const projectRoot = args.projectRoot ?? PROJECT_ROOT;
   const messageType = role === "master" ? "MASTER_REGISTERED" : "CONDUCTOR_REGISTERED";
   const logEvent = role === "master" ? "master_self_register" : "conductor_self_register";
   const surfaceRole = role === "master" ? "U" : "C";
 
-  const port = await resolveProxyPort();
+  const port = await resolveProxyPort(projectRoot);
   if (!port) {
-    console.error(
-      "daemon が起動していません (.team/proxy-port 不在 / proxy 死亡 / 壊れた proxy-port ファイル)。",
+    throw new RegisterSelfError(
+      "proxy_port_missing",
+      [
+        "daemon が起動していません (.team/proxy-port 不在 / proxy 死亡 / 壊れた proxy-port ファイル)。",
+        "elevens start を先に実行してください。",
+        "壊れた proxy-port ファイルの場合は `.team/proxy-port` を削除して `elevens start` をやり直してください。",
+      ].join("\n"),
     );
-    console.error("elevens start を先に実行してください。");
-    console.error(
-      "壊れた proxy-port ファイルの場合は `.team/proxy-port` を削除して `elevens start` をやり直してください。",
-    );
-    process.exit(1);
   }
+  let res: Response;
   try {
     // T407/T408: Conductor / Master とも cmdSpawnConductor / cmdLaunchMaster 側で
     //   `crypto.randomUUID()` を発行し `--session-id <UUID>` フラグと同 UUID を
@@ -2025,23 +2170,53 @@ async function registerSelf(
       timestamp: new Date().toISOString(),
     };
     if (sessionId) body.sessionId = sessionId;
-    const res = await fetch(`http://127.0.0.1:${port}/api/messages`, {
+    res = await fetch(`http://127.0.0.1:${port}/api/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) {
-      console.error(
-        `${messageType} POST failed: status=${res.status} surface=${surface}`,
-      );
-      process.exit(1);
-    }
   } catch (e: any) {
-    console.error(
+    throw new RegisterSelfError(
+      "post_failed",
       `${messageType} POST failed: ${e?.message ?? e} surface=${surface}`,
     );
-    process.exit(1);
   }
+  if (!res.ok) {
+    throw new RegisterSelfError(
+      "post_failed",
+      `${messageType} POST failed: status=${res.status} surface=${surface}`,
+    );
+  }
+
+  // T003: cross-check daemon pid
+  // initInfra 直後 / 初回 handleMessage 前は team.json.manager は `{}` のまま
+  // (manager.pid 未設定)。`readManagerPidFromTeamJson` が null を返して skip するので
+  // 正常系の race である (cross-check は best-effort、false positive を避けるため)。
+  // レスポンス JSON parse 失敗 / `daemon_pid` フィールド欠落も skip (前方互換)。
+  let responseDaemonPid: number | null = null;
+  try {
+    const respBody = (await res.clone().json()) as { ok?: boolean; daemon_pid?: number };
+    if (typeof respBody?.daemon_pid === "number") {
+      responseDaemonPid = respBody.daemon_pid;
+    }
+  } catch {
+    // レスポンス JSON parse 失敗 → cross-check skip
+  }
+  if (responseDaemonPid !== null) {
+    const expectedPid = await readManagerPidFromTeamJson(projectRoot);
+    if (expectedPid != null && expectedPid !== responseDaemonPid) {
+      throw new RegisterSelfError(
+        "cross_check_failed",
+        [
+          `${messageType} cross-check failed: response.daemon_pid=${responseDaemonPid} ` +
+            `team.json manager.pid=${expectedPid}`,
+          "proxy が他プロジェクトの daemon に転送している可能性があります。",
+          ".team/proxy-port を削除して elevens start をやり直してください。",
+        ].join("\n"),
+      );
+    }
+  }
+
   await log(logEvent, formatSurface(surface, surfaceRole));
 }
 
@@ -2944,7 +3119,16 @@ async function cmdSpawnConductor(): Promise<void> {
   // self-register: 自身を daemon に登録（T228）。
   // proxy-port 不在 / POST 失敗時は fail-fast。daemon 側ハンドラは既存 state があれば skip するため、
   // resume 時に initializeConductorSlots が pre-set した taskId/taskRunId/worktreePath は破壊されない。
-  await registerSelf("conductor", surface, sessionId);
+  // T003: registerSelf は throw する経路に統一。ここで catch → exit 1。
+  try {
+    await registerSelf({ role: "conductor", surface, sessionId });
+  } catch (e: any) {
+    if (e instanceof RegisterSelfError) {
+      console.error(e.detail ?? e.message);
+      process.exit(1);
+    }
+    throw e;
+  }
 
   // T213: main ブランチを env → config の順で解決。T253 で暗黙 "main" フォールバックを削除し
   //   両方空なら fail-stop する。
@@ -3039,7 +3223,16 @@ async function cmdLaunchMaster(): Promise<void> {
 
   // T230: daemon へ自己登録する。proxy-port 不在・POST 失敗は fail-fast（exit 1）。
   // generateMasterPrompt や claude exec より前に実行する（壊れた Master を残さないため）。
-  await registerSelf("master", surface, sessionId);
+  // T003: registerSelf は throw する経路に統一。ここで catch → exit 1。
+  try {
+    await registerSelf({ role: "master", surface, sessionId });
+  } catch (e: any) {
+    if (e instanceof RegisterSelfError) {
+      console.error(e.detail ?? e.message);
+      process.exit(1);
+    }
+    throw e;
+  }
 
   // プロンプト生成
   const { generateMasterPrompt } = await import("./template");

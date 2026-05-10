@@ -252,9 +252,10 @@ daemon 停止時に `cmux clear-status` でクリアする。
 - ストリーミング対応（`text/event-stream` の tee）
 - ポートは `.team/proxy-port` に保存
 - 既存プロセスが生きていれば再利用
-- daemon 起動時に proxy を再利用し、前回ポートと異なる場合は Master セッションを自動再接続
+- daemon 起動時に proxy を再利用する。再利用の前に `GET /api/identify` で `project_root` を verify し、不一致なら新 port で proxy を立て直す（`proxy_owner_mismatch` を warn ログ。旧 owner は kill しない）。identify 不可（legacy proxy / network glitch / 401 など）は安全側で `proxy_owner_unverifiable` を warn し新 port 起動。port 再利用時に前回ポートと異なる場合は Master セッションを自動再接続
 - レート制限ヘッダー（`anthropic-ratelimit-unified-5h-utilization`, `anthropic-ratelimit-unified-7d-utilization`, `anthropic-ratelimit-unified-status` など）を記録し、TUI に使用率と reset 時刻を反映
-- デバッグエンドポイント: `GET /state`, `GET /tasks`, `GET /conductors`, `GET /rate-limit`（最新のレート制限状態）, `POST /master-state`（Master の稼働ステータス受信。T229 以降は optional `surface` を body に受け付ける。未指定時は Master が 1 個の場合のみ自動解決、2 個以上は `master_state_surface_ambiguous` をログして 400 を返す）, `POST /statusline`（T211、Claude Code の statusline 描画。`X-Cmux-Surface` ヘッダーで対象 surface を識別し、DaemonState から master/conductor/agent のロールを逆引きして 1 行文字列を返す）
+- デバッグエンドポイント: `GET /state`, `GET /tasks`, `GET /conductors`, `GET /rate-limit`（最新のレート制限状態）, `GET /api/identify`（T003、proxy 識別: `project_root` / `daemon_pid` / `version` / `started_at` / `schema_version` を返す。daemon boot 時の port 再利用で別プロジェクトの孤児 daemon を排除するために使う）, `POST /master-state`（Master の稼働ステータス受信。T229 以降は optional `surface` を body に受け付ける。未指定時は Master が 1 個の場合のみ自動解決、2 個以上は `master_state_surface_ambiguous` をログして 400 を返す）, `POST /statusline`（T211、Claude Code の statusline 描画。`X-Cmux-Surface` ヘッダーで対象 surface を識別し、DaemonState から master/conductor/agent のロールを逆引きして 1 行文字列を返す）
+- `POST /api/messages` のレスポンスは `{ "ok": true, "daemon_pid": <pid> }`（T003）。受信側 `registerSelf` がこの `daemon_pid` を `team.json.manager.pid` と cross-check し、proxy が他プロジェクトの daemon に転送している兆候があれば fail-fast する
 
 #### 5h レート制限スロットリング
 
@@ -288,6 +289,24 @@ daemon 停止時に `cmux clear-status` でクリアする。
 - `task_completed` の二重記録は CONDUCTOR_DONE ハンドラのステータスガードで防止
 
 `CONDUCTOR_REGISTERED` は **Conductor 実行プロセス自身**（`cmdSpawnConductor`）が起動時に POST する self-register 方式（T228）。`launchConductor`（Manager 起動経路）からは POST しない。daemon ハンドラは idempotent merge で、既存 state があれば `conductor_register_skipped` ログを出して skip する（resume 時の taskId/taskRunId/worktreePath を破壊しないため）。`state.conductors.size >= state.maxConductors` を超過した新規登録では `conductor_register_over_cap` warning ログを出すが登録自体は成功する（soft cap）。
+
+#### registerSelf の daemon_pid cross-check と初回起動 race（T003）
+
+Master / Conductor sub-agent は `registerSelf` で `/api/messages` POST 後、レスポンスの `daemon_pid` と `.team/team.json` の `manager.pid` を突き合わせて proxy 経由で他プロジェクトの daemon に転送されていないか verify する。proxy と daemon は同一プロセスなので `process.pid` = daemon の pid となる。不一致時は `RegisterSelfError(reason="cross_check_failed")` を throw し、呼び出し側（`cmdSpawnConductor` / `cmdLaunchMaster`）が catch して exit 1 する。エラーメッセージで `.team/proxy-port` 削除を案内する。
+
+`registerSelf` 自体は内部で `process.exit(1)` を呼ばず常に `RegisterSelfError` を throw する。reason は次の 3 種:
+
+- `proxy_port_missing`: `.team/proxy-port` 不在 / proxy 死亡 / 壊れた proxy-port ファイル
+- `post_failed`: `/api/messages` POST が 4xx/5xx / fetch 失敗
+- `cross_check_failed`: レスポンス `daemon_pid` と `team.json.manager.pid` が不一致
+
+**ただし以下のケースでは cross-check が silent skip となる（false positive 回避）**:
+
+- `.team/team.json` 不在（`initInfra` 完了前）
+- `team.json.manager.pid` 未設定（`initInfra` で `manager: {}` を seed した直後、daemon の最初の `updateTeamJson` flush が走る前。これは正常系の初回起動 race）
+- レスポンス JSON parse 失敗 / `daemon_pid` フィールド欠落（古い proxy 経路、前方互換）
+
+cross-check が走らない window を狭めたい場合は、`cmdStart` の proxy 起動直後に `await updateTeamJson(state)` を 1 度同期 flush する案がある（T003 のスコープ外）。
 
 `SESSION_CLEAR` は Conductor が `/clear` を実行したときに送信される。Conductor が `running` 状態のときに `SESSION_CLEAR` を受信すると、ユーザーの手動 `/clear` とみなしてタスクを `aborted` に遷移させ、Conductor を `reserved` にリセットする（claude プロセスを kill して token を解放し、pane は保持して次の assign を待つ — T421/D5）。`idle` / `reserved` 状態の場合は何もしない（TUI チラつき防止）。
 

@@ -597,6 +597,22 @@ export async function start(
             pool: poolInfo,
           }), { headers: jsonHeaders });
         }
+
+        // T003: proxy 識別エンドポイント。daemon boot path で port 再利用前に
+        // 自プロジェクトの daemon が握っている proxy か verify するために使う。
+        // 200 以外 / JSON parse 失敗 / project_root 非文字列はすべて呼び出し側で
+        // kind:unverifiable に集約される (legacy proxy が Anthropic API に
+        // forward して 401/非 JSON を返すケースを網羅するため)。
+        if (url.pathname === "/api/identify") {
+          const state = opts?.getState?.();
+          return new Response(JSON.stringify({
+            project_root: projectRoot,
+            daemon_pid: process.pid,
+            version: state?.version ?? null,
+            started_at: state?.startedAt ?? null,
+            schema_version: 1,
+          }), { headers: jsonHeaders });
+        }
       }
 
       // statusline 描画エンドポイント (T211)
@@ -717,6 +733,10 @@ export async function start(
       }
 
       // メッセージ受信エンドポイント（ファイルベース IPC の代替）
+      // T003: success レスポンスに daemon_pid を含める。registerSelf 側で
+      // team.json.manager.pid と cross-check し、proxy が他プロジェクトの daemon に
+      // 転送している兆候があれば fail-fast する。daemon と proxy は同一プロセスなので
+      // process.pid = daemon の pid となる。
       if (req.method === "POST" && url.pathname === "/api/messages") {
         if (!opts?.onMessage) {
           return new Response(JSON.stringify({ error: "no handler" }), { status: 503, headers: { "Content-Type": "application/json" } });
@@ -725,7 +745,10 @@ export async function start(
           const body = await req.json();
           const msg = QueueMessage.parse(body);
           await opts.onMessage(msg);
-          return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } });
+          return new Response(
+            JSON.stringify({ ok: true, daemon_pid: process.pid }),
+            { headers: { "Content-Type": "application/json" } },
+          );
         } catch {
           return new Response(JSON.stringify({ error: "invalid body" }), { status: 400, headers: { "Content-Type": "application/json" } });
         }
