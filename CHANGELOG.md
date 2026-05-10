@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.5.0] - 2026-05-10
+
+### Added
+
+- **`elevens reset-conductor [--surface <s>] [--force]`** (T004): Conductor surface を任意状態 (broken / disconnected / reserved / idle / running / assigning) から `reserved` に戻す pane 単位の局所復旧 CLI。`CMUX_SURFACE` 環境変数から自動解決可能で、pane 内シェルから自分自身をリセットするユースケースに対応。assigned 中は `--force` 必須（紐付く task は abort 扱い）。observation box 原則（real-time 観察 → 介入）のサイクルを閉じる
+- **`elevens close-task --force`** (T001): aborted 状態のタスクを closed に上書きするフラグ。`--force` なしで aborted を close すると exit 1（CLI ガード）。FSM に `aborted+force=true → closed` 分岐追加（`task_closed_from_aborted` ログイベント、`abortedAt` は trace 用に残置 + `closedAt` 新規付与、cascade なし）
+- **proxy port 再利用時の owner identity verify** (T003): `GET /api/identify` エンドポイントを proxy.ts に追加し、`{ project_root, daemon_pid, version, started_at, schema_version }` を返す。`cmdStart` は proxy_reused 判定前に identify を verify し、`mismatch` / `dead` / `unverifiable` のいずれでも新 port で起動。"静かな master 未登録事故" を構造的に防止
+
+### Changed
+
+- **依存解決を closed のみで成立** (T002): `scanTasks` の `closedIds` 構築を `s.status === "closed"` に限定。aborted / deleted の親に紐付く子は実行されない。`docs/spec/07-state-machine.md` に §2.5「依存解決の意味論」を新設
+
+### Fixed
+
+- **`create-task --depends-on` で未存在 ID を入力検証** (T002): `validateDependsOnExist(projectRoot, ids)` を追加し、`cmdCreateTask` / `cmdUpdateTask` で未存在 ID を exit 1 reject。typo に起因する "永遠に起動しないタスク" を防ぐ
+
+### Skill
+
+- **`skills/c11/SKILL.md`** 追加: c11 (Stage-11-Agentics/c11) substrate のリファレンス。surface manifest / lineage / mailbox / flash / blueprint / `c11 tree` / `set-metadata` 等、elevens 開発で頻出する API の自前要約。本家 SKILL.md は AGPL-3.0-or-later のためフルコピーは避け、開発に必要な範囲のみ抜粋
+
+### Internal
+
+- 旧タスクファイル 412 件を `.team/tasks-archive-20260510/` に退避し、`.team/tasks/` を active task のみの状態に整理
+- A032 artifact: Claude Code Task tool subagent observability の比較調査を追記
+
 ## [0.4.1] - 2026-05-10
 
 ### Changed

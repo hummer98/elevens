@@ -171,7 +171,7 @@ See `elevens --help` for the full list. Common commands:
 |---------|-------------|
 | `elevens create-task --title <t> [--status ready] [--body <b>] [--depends-on <ids>] [--base-branch <branch>] [--run-after-all] [--exclusive]` | Create a task (`--base-branch`: worktree start-point & merge target, default: main; `--exclusive`: run alone after drain, implies `--run-after-all`) |
 | `elevens update-task --task-id <id> --status <s>` | Update task status |
-| `elevens close-task --task-id <id> --deliverable-kind <files|merged|pr|none> [kind-specific flags] [--journal <text>]` | Close a task |
+| `elevens close-task --task-id <id> --deliverable-kind <files|merged|pr|none> [kind-specific flags] [--journal <text>] [--force]` | Close a task. `--force` allows overriding an `aborted` task back to `closed` (rescue path for AI-judgment errors; recorded as `task_closed_from_aborted` with `prev_aborted_at`) |
 | `elevens abort-task --task-id <id>` | Abort a running task |
 | `elevens restart-task --task-id <id>` | Restart an assigned Conductor session |
 | `elevens delete-task --task-id <id>` | Delete a draft/ready task |
@@ -189,6 +189,8 @@ See `elevens --help` for the full list. Common commands:
 | `elevens kill-agent --surface <s>` | Force-terminate an Agent (crash) |
 | `elevens send-agent --surface <s> <message>` | Send a message to Agent / Conductor |
 | `elevens spawn-master` | Boot Master role (proxy auto-resolved) |
+| `elevens reset-conductor [--surface <s>] [--force]` | Locally reset a Conductor (any state → `reserved`) from its own surface terminal. `--surface` defaults to `CMUX_SURFACE`. `--force` is required when the lane has an `assigned` task — that task is aborted with `reason=reset_conductor` and cascade is applied. Symmetric with the `SESSION_CLEAR(running)` recovery path |
+| `elevens clear-conductor --surface <s>` | Manually clear a `broken` Conductor (only exit from the `broken` terminal state, alongside `reset-conductor`) |
 
 **Token Pool**
 | Command | What it does |

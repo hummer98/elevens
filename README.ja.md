@@ -171,7 +171,7 @@ Claude: → elevens create-task --title "..." --status ready
 |---------|---------|
 | `elevens create-task --title <t> [--status ready] [--body <b>] [--depends-on <ids>] [--base-branch <branch>] [--run-after-all] [--exclusive]` | タスク作成（`--base-branch`: worktree の起点・マージ先ブランチ、デフォルト: main。`--exclusive`: drain 後に単独実行、`--run-after-all` を含む） |
 | `elevens update-task --task-id <id> --status <s>` | タスク状態更新 |
-| `elevens close-task --task-id <id> --deliverable-kind <files|merged|pr|none> [kind 別フラグ] [--journal <text>]` | タスク close |
+| `elevens close-task --task-id <id> --deliverable-kind <files|merged|pr|none> [kind 別フラグ] [--journal <text>] [--force]` | タスク close。`--force` 指定時は `aborted` → `closed` の上書きを許可（AI 判定誤りを人間が救済する経路。reducer は `task_closed_from_aborted` を log し `prev_aborted_at` を残す） |
 | `elevens abort-task --task-id <id>` | 実行中タスクを中止 |
 | `elevens restart-task --task-id <id>` | assigned タスクの Conductor を再起動 |
 | `elevens delete-task --task-id <id>` | draft / ready タスクを削除 |
@@ -189,6 +189,8 @@ Claude: → elevens create-task --title "..." --status ready
 | `elevens kill-agent --surface <s>` | Agent を強制停止（crash 扱い） |
 | `elevens send-agent --surface <s> <message>` | Agent / Conductor にメッセージ送信 |
 | `elevens spawn-master` | Master 起動（proxy 自動解決） |
+| `elevens reset-conductor [--surface <s>] [--force]` | 任意状態の Conductor をそのレーンに閉じて `reserved` に局所復旧する CLI（surface ターミナルから自分自身を呼び戻す想定）。`--surface` 省略時は `CMUX_SURFACE` から自動解決。`assigned` 中は `--force` 必須で、対象タスクは `reason=reset_conductor` で aborted + cascade。`SESSION_CLEAR(running)` 経路と対称 |
+| `elevens clear-conductor --surface <s>` | `broken` 状態の Conductor を手動でクリアする経路（`broken` 終端状態の解除手段は `reset-conductor` と本コマンドのみ） |
 
 **トークンプール**
 | コマンド | やること |

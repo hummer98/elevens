@@ -87,7 +87,7 @@ glossary には要約と一次リンクのみを置く方針を取る。
 | running | タスク実行中。`SESSION_STARTED(source=clear)` または `SESSION_ACTIVE(hasTaskRunId)` で遷移。 | [`07-state-machine.md#11-状態一覧-9-値`](07-state-machine.md#11-状態一覧-9-値) | assigning / DONE |
 | asking | `AskUserQuestion` を Notification hook で受信した状態。ユーザー入力待ち（T181）。 | [`07-state-machine.md#11-状態一覧-9-値`](07-state-machine.md#11-状態一覧-9-値), [`05-install-and-infrastructure.md#メッセージング`](05-install-and-infrastructure.md#メッセージング) | SESSION_ASK |
 | disconnected | Claude プロセス不在 / SessionEnd / PID 死。300 秒超過で `broken` へ遷移。 | [`07-state-machine.md#11-状態一覧-9-値`](07-state-machine.md#11-状態一覧-9-値) | PID watcher / broken |
-| broken | disconnected 300s 超過の **終端状態**。`cmux-team clear-conductor` のみで解除。 | [`07-state-machine.md#11-状態一覧-9-値`](07-state-machine.md#11-状態一覧-9-値), [`07-state-machine.md#16-不変条件`](07-state-machine.md#16-不変条件) | disconnected |
+| broken | disconnected 300s 超過の **終端状態**。`cmux-team clear-conductor` または `cmux-team reset-conductor`（T004）でのみ解除。 | [`07-state-machine.md#11-状態一覧-9-値`](07-state-machine.md#11-状態一覧-9-値), [`07-state-machine.md#16-不変条件`](07-state-machine.md#16-不変条件) | disconnected / reset-conductor |
 | error | `StopFailure` hook 受信（API エラー確定）状態。`lastApiError` を伴う。次の `SESSION_STARTED` / `SESSION_IDLE` で自然解除される（T392）。 | [`07-state-machine.md#11-状態一覧-9-値`](07-state-machine.md#11-状態一覧-9-値) | StopFailure / lastApiError |
 
 **関連 spec**: [`07-state-machine.md`](07-state-machine.md)

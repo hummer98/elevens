@@ -33,7 +33,7 @@
 | `broken` | disconnected 300s 超過で自動復帰停止 (T250) | `monitorConductors` timeout |
 | `error` | StopFailure hook 受信（API エラー確定）— `lastApiError` を伴う (T392) | `STOP_FAILURE` |
 
-`broken` は **終端状態**。`cmux-team clear-conductor` のみで解除される。
+`broken` は **終端状態**。`cmux-team clear-conductor` または `cmux-team reset-conductor`（T004、任意状態 → `reserved` の局所復旧 CLI）でのみ解除される。
 `error` は次の `SESSION_STARTED` / `SESSION_IDLE` で自然解除される（`lastApiError` も undefined に戻る）。
 
 Master / Agent も同等に `status: "error"` バリアントと `lastApiError` を持つ（`MasterStateSchema` / `AgentState`）。
@@ -101,7 +101,7 @@ stateDiagram-v2
     disconnected --> idle : SESSION_STARTED / SESSION_CLEAR / SESSION_IDLE (no taskRunId)
     disconnected --> running : SESSION_ACTIVE / SESSION_IDLE (hasTaskRunId)
     disconnected --> broken : TIMEOUT(disconnected) 300s
-    broken --> [*] : clear-conductor (manual only)
+    broken --> [*] : clear-conductor / reset-conductor (manual only)
     starting --> error : STOP_FAILURE
     idle --> error : STOP_FAILURE
     assigning --> error : STOP_FAILURE
@@ -128,7 +128,7 @@ stateDiagram-v2
 | `running` | `✻` (spinner) | `[NNN] T123 タイトル 5m` | YELLOW | 旧 catch-all `else` を `case "running"` に明示化 |
 | `asking` | `⚠` | `[NNN] T123 asking <elapsed>` + `? <質問本文>` | YELLOW | 質問本文は 120 char で truncate |
 | `disconnected` | `⚠` | `[NNN] T123 disconnected <elapsed>` | YELLOW | — |
-| `broken` | `⨯` | `[NNN] broken <elapsed> use clear-conductor` | RED | `cmux-team clear-conductor` のみで解除 |
+| `broken` | `⨯` | `[NNN] broken <elapsed> use clear-conductor` | RED | `cmux-team clear-conductor` / `cmux-team reset-conductor` で解除 |
 | `error` | kind 別 (⏳/🔒/💰/⚡/⚠) | `[NNN] T123 error <kind>` + 80 char message | RED | T392 |
 | (未知 status) | (なし) | `[NNN] unknown <status>` | dim | observability 用 fallback。本来到達しない |
 
@@ -142,7 +142,7 @@ stateDiagram-v2
 |----|------|---------|
 | C-I1 | `status=running` ⇒ `taskRunId != null` | `checkConductorInvariants` |
 | C-I2 | `status=broken` ⇒ `taskRunId == null` | `checkConductorInvariants` |
-| C-I3 | `broken` 解除は `clear-conductor` のみ | reducer は `broken` で全 event no-op |
+| C-I3 | `broken` 解除は `clear-conductor` / `reset-conductor`（T004）のみ | reducer は `broken` で全 event no-op |
 | C-I4 | `status=error` ⇒ `lastApiError != null` (T392) | reducer 監視は P3 まで shadow only — 本タスクでは daemon の直接 mutation のみ |
 
 違反は `fsm_invariant_violation` ログに出る (P1 は log only、強制修正しない)。
@@ -236,7 +236,7 @@ stateDiagram-v2
     draft --> aborted : ABORT
     draft --> deleted : DELETE
     assigned --> closed : CLOSE / CLOSE(autoClosed=true)
-    assigned --> aborted : ABORT (user_clear / disconnect_timeout / resume_* / judgment_pending)
+    assigned --> aborted : ABORT (user_clear / disconnect_timeout / resume_* / judgment_pending / reset_conductor)
     assigned --> ready : RESTART / REVERT_TO_READY
     closed --> ready : RESTART
     aborted --> closed : CLOSE(force=true)
@@ -252,7 +252,7 @@ stateDiagram-v2
 - **`ready` 子**: `draft` に戻す (journal: `parent_aborted: <parentId>`)
 - **`draft` / `assigned` / `closed` / `aborted` / `deleted` 子**: 変更なし
 
-cascade 発火経路は 7 本 (CLAUDE.md「依存タスクの cascade」参照):
+cascade 発火経路は 8 本 (CLAUDE.md「依存タスクの cascade」参照):
 
 1. `abort-task` CLI
 2. `delete-task` CLI
@@ -261,6 +261,9 @@ cascade 発火経路は 7 本 (CLAUDE.md「依存タスクの cascade」参照):
 5. `assign_failed` (worktree 作成失敗等)
 6. `resume_marked_aborted` (cmdStart 起動時、T264)
 7. `handleConductorDone` unresolved 分岐 (T269)
+8. `reset_conductor` (T004、`reset-conductor` CLI で `assigned` レーンを強制 abort)
+
+`AbortReason` union (`task.ts`) は上記 8 本に対応する 7 値 (`user_clear` / `disconnect_timeout` / `resume_marked_aborted` / `assign_failed` / `judgment_pending` / `manual_abort` / `reset_conductor`)。`events-writer.ts:mapAbortReason` は `reset_conductor` を events stream の `other` カテゴリへマップする（CLI 起点の手動操作で、user 介入不要なため）。
 
 ### 2.5 依存解決の意味論 (T002)
 
@@ -306,6 +309,7 @@ block された子の解除手段:
 | user_clear | `running → idle` | `assigned → aborted` + cascade | `SESSION_CLEAR(manualUserInitiated)` |
 | disconnect timeout | `disconnected → broken` | `assigned → aborted` + cascade | `forceCloseDisconnectedConductor` |
 | 起動時 resume 不可 | (N/A) | `assigned → aborted(resume_*)` + cascade | `applyResumeTransitions` (T264) |
+| reset-conductor (T004) | `<any> → reserved` | `assigned → aborted(reset_conductor)` + cascade | `RESET_CONDUCTOR` メッセージ → `markTaskAborted` → `killClaudeProcess` → `resetConductor(reserved)` → `requestWakeup`（`SESSION_CLEAR(running)` 経路と対称） |
 
 ## 4. shadow observability 配線
 
