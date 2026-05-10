@@ -262,12 +262,36 @@ cascade 発火経路は 7 本 (CLAUDE.md「依存タスクの cascade」参照):
 6. `resume_marked_aborted` (cmdStart 起動時、T264)
 7. `handleConductorDone` unresolved 分岐 (T269)
 
-### 2.5 不変条件
+### 2.5 依存解決の意味論 (T002)
+
+`depends_on` の解決は **親が `closed` のときのみ** 成立する。
+
+| 親 status | 子 (`ready`, `depends_on=parent`) の executable 判定 |
+|---|---|
+| `closed` | ✅ executable |
+| `aborted` / `deleted` | ❌ block (`closedIds` に含まれない) |
+| 未存在 ID (CLI で reject 済) | ❌ block (永久) |
+| `draft` / `ready` / `assigned` | ❌ block (まだ closed でない) |
+
+cascade ルール (§2.4) と独立: 親が `aborted` / `deleted` に遷移したとき子は cascade で `draft` に降格するが、**user が再 `ready` 化しても親が `closed` でない限り executable にはならない**。これが本仕様の本質である。
+
+block された子の解除手段:
+
+1. 親を `restart-task` / `close-task --force` (T001) で `closed` に持っていく
+2. 子の `--depends-on` を編集して依存先を変更
+3. 子を `abort-task` / `delete-task`
+
+**CLI 入力検証**: `create-task --depends-on <ids>` / `update-task --depends-on <ids>` は実行前に各 ID が `.team/tasks/` に実在するか検証し、未存在なら exit 1 (`Error: depends_on task <id> not found in .team/tasks/`)。複数未存在の場合は最初の未存在 ID のみを報告する (`normalizeTaskIdList` の「最初の invalid を報告」既存挙動と整合)。`--force` bypass は無い。
+
+実装上、`closedIds` は `daemon.ts:scanTasks` で `s.status === "closed"` のみで構築される。`isTerminalStatus` (`closed` / `aborted` / `deleted`) は open 集合・`run_after_all` 競合判定・GC 用途で別 axis として使い続ける。
+
+### 2.6 不変条件
 
 | ID | 条件 | 監視位置 |
 |----|------|---------|
 | T-I1 | `status=assigned` ⇒ `hasConductor=true` | `checkTaskInvariants` |
 | T-I2 | `PARENT_ABORTED` は `ready` にのみ作用 | reducer 側の state guard |
+| T-I3 | `closedIds = { id : status==="closed" }` (aborted / deleted は含まない) | `daemon.ts scanTasks closedIds 構築` |
 
 ## 3. Conductor ↔ Task の同時遷移
 

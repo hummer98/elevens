@@ -3170,9 +3170,11 @@ export async function scanTasks(state: DaemonState): Promise<void> {
 
   const { tasks, taskState } = await loadTasks(state.projectRoot);
 
+  // T002: 依存解決は closed のみで成立。aborted / deleted 親に依存する子は block。
+  // openTasks 集合は terminal 全体 (aborted/deleted も open でない) のまま据え置き。
   const closed = new Set(
     Object.entries(taskState)
-      .filter(([_, s]) => isTerminalStatus(s.status))
+      .filter(([_, s]) => s.status === "closed")
       .map(([id]) => id)
   );
 

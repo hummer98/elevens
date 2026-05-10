@@ -71,7 +71,7 @@ import {
   type TaskUsageByRole,
   type TaskUsageByModel,
 } from "./trace-store";
-import { loadTaskState, loadTasks, saveTaskState, createTaskProgrammatic, cascadeAbortToChildren, detectStartupUniqueViolations, classifyResumeAction, buildResumeAbortJournal, markTaskAborted, parseAbortJournal, normalizeTaskIdList, formatDeliverable, isTerminalStatus, type TaskState, type TaskMeta } from "./task";
+import { loadTaskState, loadTasks, saveTaskState, createTaskProgrammatic, cascadeAbortToChildren, detectStartupUniqueViolations, classifyResumeAction, buildResumeAbortJournal, markTaskAborted, parseAbortJournal, normalizeTaskIdList, validateDependsOnExist, formatDeliverable, isTerminalStatus, type TaskState, type TaskMeta } from "./task";
 // T303: task-state mutation は applyTaskEvent / updateTaskSessionId 経由のみ
 import { applyTaskEvent, refreshTaskStateFromDisk } from "./state-machine/task-state-store";
 import { loadArtifacts, searchArtifacts, validateArtifact, addArtifact } from "./artifact";
@@ -3999,6 +3999,13 @@ async function cmdCreateTask(): Promise<void> {
     console.error(`Error: ${e.message}`);
     process.exit(1);
   }
+  // T002: 未存在 ID を即時 reject (永久 block する「ゾンビ ready」防止)
+  try {
+    await validateDependsOnExist(PROJECT_ROOT, dependsOn);
+  } catch (e: any) {
+    console.error(`Error: ${e.message}`);
+    process.exit(1);
+  }
 
   let result: { id: string; filePath: string; relPath: string };
   try {
@@ -4100,6 +4107,13 @@ async function cmdUpdateTask(): Promise<void> {
     let depsArray: string[];
     try {
       depsArray = normalizeTaskIdList(dependsOn);
+    } catch (e: any) {
+      console.error(`Error: ${e.message}`);
+      process.exit(1);
+    }
+    // T002: 未存在 ID を即時 reject (永久 block する「ゾンビ ready」防止)
+    try {
+      await validateDependsOnExist(PROJECT_ROOT, depsArray);
     } catch (e: any) {
       console.error(`Error: ${e.message}`);
       process.exit(1);

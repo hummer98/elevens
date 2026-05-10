@@ -1,5 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdir, writeFile, readFile } from "fs/promises";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import { createDummyProject, type DummyProject } from "./test-project";
 import {
@@ -19,6 +21,7 @@ import {
   formatDeliverable,
   isTerminalStatus,
   createTaskProgrammatic,
+  validateDependsOnExist,
 } from "./task";
 import type { TaskMeta, TaskState, TaskStateMap } from "./task";
 import { Deliverable } from "./schema";
@@ -386,6 +389,36 @@ describe("filterExecutableTasks", () => {
     );
     expect(result.map((t) => t.id)).toEqual(["99999"]); // 新規のみ実行可能
   });
+
+  // T002: 依存解決は closed のみで成立。closedIds は daemon.ts:scanTasks で
+  // 「closed」のみで構築される (= aborted/deleted は含まれない) という契約を
+  // 関数 API レベルで pin する regression guard。
+  test("T002: aborted 親に依存する ready 子は executable から外れる", () => {
+    // 親 001 は aborted のため closedIds に入っていない
+    const child = makeMeta("003", "ready", ["001"]);
+    const result = filterExecutableTasks([child], new Set(), new Set());
+    expect(result).toHaveLength(0);
+  });
+
+  test("T002: deleted 親に依存する ready 子は executable から外れる", () => {
+    // 親 001 は deleted のため closedIds に入っていない
+    const child = makeMeta("003", "ready", ["001"]);
+    const result = filterExecutableTasks([child], new Set(), new Set());
+    expect(result).toHaveLength(0);
+  });
+
+  test("T002: 未存在 ID に依存する ready 子は executable から外れる", () => {
+    const child = makeMeta("003", "ready", ["999"]);
+    const result = filterExecutableTasks([child], new Set(), new Set());
+    expect(result).toHaveLength(0);
+  });
+
+  test("T002: closed 親に依存する ready 子は executable (既存挙動の retain)", () => {
+    const child = makeMeta("003", "ready", ["001"]);
+    const closed = new Set(["001"]);
+    const result = filterExecutableTasks([child], closed, new Set());
+    expect(result).toHaveLength(1);
+  });
 });
 
 describe("filterRunAfterAllTasks", () => {
@@ -459,6 +492,21 @@ describe("filterRunAfterAllTasks", () => {
     const tB = makeMeta("B", "draft");
     const tC = makeMeta("C", "ready", { runAfterAll: true });
     const result = filterRunAfterAllTasks([tB, tC], new Set(), new Set());
+    expect(result.map(t => t.id)).toEqual(["C"]);
+  });
+
+  // T002: run_after_all 経路でも依存解決は closed のみで成立する
+  test("T002: aborted 親に依存する run_after_all 子は block される", () => {
+    // closedIds は closed のみ。aborted の "X" は含まれないので run_after_all 子はブロック
+    const tC = makeMeta("C", "ready", { runAfterAll: true, dependsOn: ["X"] });
+    const result = filterRunAfterAllTasks([tC], new Set(), new Set());
+    expect(result).toHaveLength(0);
+  });
+
+  // T002: 対称テスト (Low #6 推奨)
+  test("T002: closed 親に依存する run_after_all 子は executable (retain)", () => {
+    const tC = makeMeta("C", "ready", { runAfterAll: true, dependsOn: ["X"] });
+    const result = filterRunAfterAllTasks([tC], new Set(["X"]), new Set());
     expect(result.map(t => t.id)).toEqual(["C"]);
   });
 });
@@ -1356,5 +1404,60 @@ describe("createTaskProgrammatic run_after_all conflict (T300)", () => {
       expect(err.code).toBe("RUN_AFTER_ALL_CONFLICT");
       expect(err.existingTaskId).toBe(existingId);
     }
+  });
+});
+
+// T002: depends_on の各 ID が .team/tasks/ に実在するかの CLI 入力検証
+describe("validateDependsOnExist (T002)", () => {
+  let tmp: string;
+
+  // 最小 fixture: .team/tasks/<NNN>-<slug>/task.md を 1 ファイル仕込む
+  // Low #4: 共有 helper 化はせず describe-local の最小実装にとどめる
+  const seedTask = (id: string, slug: string): void => {
+    const dir = join(tmp, ".team/tasks", `${id}-${slug}`);
+    mkdirSync(dir, { recursive: true });
+    const yaml = `---
+id: ${id}
+title: ${slug}
+priority: medium
+created_at: 2026-05-10T00:00:00Z
+---
+
+## タスク
+fixture
+`;
+    writeFileSync(join(dir, "task.md"), yaml);
+  };
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "cmux-validate-deps-"));
+    mkdirSync(join(tmp, ".team/tasks"), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("ids 空配列なら throw しない", async () => {
+    await validateDependsOnExist(tmp, []);
+  });
+
+  test("全 ID が実在すれば throw しない", async () => {
+    seedTask("001", "foo");
+    seedTask("002", "bar");
+    await validateDependsOnExist(tmp, ["001", "002"]);
+  });
+
+  test("未存在 ID があれば throw する", async () => {
+    await expect(validateDependsOnExist(tmp, ["9999"])).rejects.toThrow(
+      "depends_on task 9999 not found in .team/tasks/"
+    );
+  });
+
+  test("複数未存在の場合は最初の ID を含む", async () => {
+    seedTask("001", "foo");
+    await expect(
+      validateDependsOnExist(tmp, ["001", "888", "999"])
+    ).rejects.toThrow("depends_on task 888 not found in .team/tasks/");
   });
 });

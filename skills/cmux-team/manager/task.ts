@@ -262,6 +262,28 @@ export function normalizeTaskIdList(raw: string): string[] {
 }
 
 /**
+ * T002: depends_on の各 ID が `.team/tasks/` に実在するか検証する。
+ *
+ * - 入力順を保ったまま順次 `existsSync` を確認し、最初の未存在 ID で throw する。
+ * - メッセージ仕様 (固定): `depends_on task <id> not found in .team/tasks/`
+ * - `loadTasks` を 1 回だけ呼んで集合を作り、`findTaskFile` の重い経路を避ける。
+ * - caller (CLI) は catch して `process.exit(1)` する。
+ */
+export async function validateDependsOnExist(
+  projectRoot: string,
+  ids: string[],
+): Promise<void> {
+  if (ids.length === 0) return;
+  const { tasks } = await loadTasks(projectRoot);
+  const existingIds = new Set(tasks.map((t) => t.id));
+  for (const id of ids) {
+    if (!existingIds.has(id)) {
+      throw new Error(`depends_on task ${id} not found in .team/tasks/`);
+    }
+  }
+}
+
+/**
  * YAML frontmatter からメタデータを抽出
  */
 export function parseTaskMeta(content: string, fileName: string, filePath: string): TaskMeta | null {

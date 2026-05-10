@@ -2956,6 +2956,48 @@ describe("depends_on cascade on parent abort/delete (T241)", () => {
   });
 });
 
+// --- T002: 依存解決は closed のみで成立 ---
+describe("T002: 依存解決は closed のみ (scanTasks 統合)", () => {
+  // = 親が closed → aborted へ異常遷移した直後の scanTasks 結果を検証する
+  // タスク本文 §テスト 5「親が closed → aborted 遷移で子が executable から外れる」要件
+  test("aborted 親に depends_on する ready 子は scanTasks で pendingTasks にカウントされない", async () => {
+    // 親 70 を ready で作成 → task-state を aborted に直接 mutate
+    // (= cascade 介入なしで「異常状態」を再現)
+    await createTask("70", "parent");
+    await createTask("71", "child", { dependsOn: ["70"], status: "ready" });
+
+    const { loadTaskState, saveTaskState } = await import("./task");
+    const ts = await loadTaskState(testDir);
+    ts["70"] = { status: "aborted", abortedAt: new Date().toISOString() };
+    // 子 71 は ready のまま (cascade を介入させない)
+    ts["71"] = { status: "ready" };
+    await saveTaskState(testDir, ts);
+
+    const state = await createDaemon(testDir);
+    await scanTasks(state);
+
+    // closedIds は closed のみ。aborted 親 70 は含まれず、子 71 は executable 外
+    expect(state.pendingTasks).toBe(0);
+  });
+
+  test("closed 親に depends_on する ready 子は scanTasks で pendingTasks=1 (retain)", async () => {
+    // 同型のセットアップで親を closed にすれば子は executable になることを確認
+    await createTask("80", "parent");
+    await createTask("81", "child", { dependsOn: ["80"], status: "ready" });
+
+    const { loadTaskState, saveTaskState } = await import("./task");
+    const ts = await loadTaskState(testDir);
+    ts["80"] = { status: "closed", closedAt: new Date().toISOString() };
+    ts["81"] = { status: "ready" };
+    await saveTaskState(testDir, ts);
+
+    const state = await createDaemon(testDir);
+    await scanTasks(state);
+
+    expect(state.pendingTasks).toBe(1);
+  });
+});
+
 // --- T250: broken status テスト ---
 describe("T250 broken status", () => {
   test("broken Conductor は scanTasks の割当候補から除外される", async () => {
