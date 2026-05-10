@@ -103,7 +103,17 @@ export type TaskFsmEvent =
   | { type: "UPDATE_STATUS"; to: "draft" | "ready" }
   | { type: "ASSIGN_OK" }
   | { type: "ASSIGN_FAIL"; errorKind: "task" | "conductor" }
-  | { type: "CLOSE"; autoClosed?: boolean }
+  | {
+      type: "CLOSE";
+      autoClosed?: boolean;
+      /** aborted → closed の上書きを許可するフラグ。aborted 以外の state では無視される。 */
+      force?: boolean;
+      /**
+       * reducer の log detail に出す直前 abortedAt（ISO 8601）。
+       * main.ts cmdCloseTask が taskState[taskId]?.abortedAt を読んで populate する。
+       */
+      prevAbortedAt?: string;
+    }
   | { type: "ABORT"; reason: string }
   | { type: "DELETE"; force?: boolean }
   | { type: "RESTART" }

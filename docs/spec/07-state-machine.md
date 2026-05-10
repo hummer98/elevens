@@ -208,6 +208,7 @@ SessionStart hook (source=startup) → SESSION_STARTED
 | `ASSIGN_FAIL(kind=conductor)` | — | — | — | — | — | — |
 | `CLOSE` | `closed` | `closed` | `closed` | — | — | — |
 | `CLOSE(autoClosed=true)` [^t3] | `closed` | `closed` | `closed` | — | — | — |
+| `CLOSE(force=true)` [^t6] | `closed` | `closed` | `closed` | — | `closed` | — |
 | `ABORT` | `aborted` +cascade [^t2] | `aborted` +cascade [^t2] | `aborted` +cascade [^t2] | — | — | — |
 | `DELETE` | `deleted` +cascade | `deleted` +cascade | — | — | — | — |
 | `RESTART` | — | — | `ready` [^t4] | `ready` | `ready` | — |
@@ -219,6 +220,7 @@ SessionStart hook (source=startup) → SESSION_STARTED
 [^t3]: T303: T274 auto-close 経路の区別。reducer の log event は `task_completed_state_mismatch` (通常 `CLOSE` は `task_closed`)。wrapper (daemon handleConductorDone) は追加 context を載せた `task_completed_state_mismatch` 詳細版と `task_completed auto_closed=true` を別途 emit。
 [^t4]: T303: restart-task CLI は assigned → ready も受理 (cmdRestartTask がクリーンアップ後に再キューに戻す正当経路)。
 [^t5]: T303: assigned 救済経路 (D1〜D4 / M1 / M3)。reason variant: `worktree_missing` / `launch_failed` / `unmatched` / `unique_violation` / `overflow`。assigned 以外はすべて noop。
+[^t6]: `--force` 指定時のみ aborted → closed を許可する救済経路（AI 自動判定の誤りを人間が修正できるようにするため）。reducer の log event は `task_closed_from_aborted`、detail は `prev_aborted_at=<ISO8601>` (元の abortedAt が存在する場合)。`abortedAt` は merge せず残置し、`closedAt` を新規付与することで二重タイムスタンプによる trace 可能性を維持する。cascade なし（子は aborted 時点で既に処理済み）。
 
 ### 2.3 状態遷移図 (Mermaid)
 
@@ -237,6 +239,7 @@ stateDiagram-v2
     assigned --> aborted : ABORT (user_clear / disconnect_timeout / resume_* / judgment_pending)
     assigned --> ready : RESTART / REVERT_TO_READY
     closed --> ready : RESTART
+    aborted --> closed : CLOSE(force=true)
     aborted --> ready : RESTART
     deleted --> [*]
     closed --> [*]

@@ -1227,6 +1227,79 @@ describe("TASK_UPDATED postMessage (T183)", () => {
     expect(state["568"].status).toBe("closed");
     expect(state["568"].deliverable).toEqual({ kind: "none" });
   });
+
+  // aborted → closed (--force による上書き救済経路)
+  test("close-task: aborted タスクは --force なしで reject される", async () => {
+    await setupTeamDir("580", "t-aborted", "aborted");
+    const { writeFile: wf } = await import("fs/promises");
+    const stateFile = join(testDir, ".team/task-state.json");
+    const state = JSON.parse(await readFile(stateFile, "utf-8"));
+    state["580"] = {
+      status: "aborted",
+      abortedAt: "2026-04-23T11:00:00Z",
+      journal: "Task 580 aborted [user_clear]",
+    };
+    await wf(stateFile, JSON.stringify(state, null, 2));
+
+    const r = await runCli([
+      "close-task", "--task-id", "580",
+      "--deliverable-kind", "none",
+    ]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("aborted");
+    expect(r.stderr).toContain("--force");
+
+    const after = JSON.parse(await readFile(stateFile, "utf-8"));
+    expect(after["580"].status).toBe("aborted");
+  });
+
+  test("close-task: aborted + --force で closed に遷移し、abortedAt が残置される", async () => {
+    await setupTeamDir("581", "t-aborted-force", "aborted");
+    const { writeFile: wf } = await import("fs/promises");
+    const stateFile = join(testDir, ".team/task-state.json");
+    const state = JSON.parse(await readFile(stateFile, "utf-8"));
+    state["581"] = {
+      status: "aborted",
+      abortedAt: "2026-04-23T11:00:00Z",
+      journal: "Task 581 aborted [user_clear]",
+    };
+    await wf(stateFile, JSON.stringify(state, null, 2));
+
+    const r = await runCli([
+      "close-task", "--task-id", "581",
+      "--deliverable-kind", "none", "--force",
+      "--journal", "force-closed by user",
+    ]);
+    expect(r.code).toBe(0);
+
+    const after = JSON.parse(await readFile(stateFile, "utf-8"));
+    expect(after["581"].status).toBe("closed");
+    expect(after["581"].closedAt).toBeDefined();
+    expect(after["581"].abortedAt).toBe("2026-04-23T11:00:00Z");
+    expect(after["581"].journal).toBe("force-closed by user");
+    expect(after["581"].deliverable).toEqual({ kind: "none" });
+
+    const log = await readFile(join(testDir, ".team/logs/manager.log"), "utf-8");
+    expect(log).toContain("task_closed_from_aborted");
+    expect(log).toContain("prev_aborted_at=2026-04-23T11:00:00Z");
+  });
+
+  test("close-task: aborted + --force で journal 省略しても closed に遷移する（推奨だが必須ではない）", async () => {
+    await setupTeamDir("582", "t-aborted-no-journal", "aborted");
+    const { writeFile: wf } = await import("fs/promises");
+    const stateFile = join(testDir, ".team/task-state.json");
+    const state = JSON.parse(await readFile(stateFile, "utf-8"));
+    state["582"] = { status: "aborted", abortedAt: "2026-04-23T11:00:00Z" };
+    await wf(stateFile, JSON.stringify(state, null, 2));
+
+    const r = await runCli([
+      "close-task", "--task-id", "582",
+      "--deliverable-kind", "none", "--force",
+    ]);
+    expect(r.code).toBe(0);
+    const after = JSON.parse(await readFile(stateFile, "utf-8"));
+    expect(after["582"].status).toBe("closed");
+  });
 });
 
 // --- T291: resolveCanonicalTaskId ユニットテスト ---

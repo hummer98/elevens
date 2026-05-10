@@ -4329,14 +4329,29 @@ async function cmdCloseTask(): Promise<void> {
     console.error(`Error: task ${taskId} is assigned (running). Use --force to close a running task.`);
     process.exit(1);
   }
+  // aborted は --force でのみ closed に上書き可。journal は推奨だが必須化はしない。
+  if (currentStatus === "aborted" && !force) {
+    console.error(
+      `Error: task ${taskId} is already aborted. Use --force to close an aborted task (journal recommended).`,
+    );
+    process.exit(1);
+  }
+
+  // aborted 経路では event.force と event.prevAbortedAt を渡す。reducer は aborted+force のとき
+  // log event = task_closed_from_aborted を emit する。CLI flag --force と event.force は
+  // 名前は同じだが意味は独立（前者は CLI ガード bypass、後者は aborted→closed 遷移許可）。
+  const prevAbortedAt = taskState[taskId]?.abortedAt;
+  const closeEvent =
+    currentStatus === "aborted"
+      ? ({ type: "CLOSE", force: true, ...(prevAbortedAt ? { prevAbortedAt } : {}) } as const)
+      : ({ type: "CLOSE" } as const);
 
   // task-state.json で closed + closedAt + journal + deliverable を設定（ファイルは移動しない）
   // T303: applyTaskEvent(CLOSE) 経由。reducer は assigned / ready / draft → closed に遷移。
-  //       それ以外 (aborted) は noop で弾かれるが CLI 入口で既に reject していない旧経路は
-  //       reducer で拾う (冪等)。
+  //       aborted は force=true 指定時のみ closed に遷移する。
   await applyTaskEvent(PROJECT_ROOT, {
     taskId,
-    event: { type: "CLOSE" },
+    event: closeEvent,
     ctx: { hasConductor: currentStatus === "assigned", parentAborted: false },
     patch: (_p, next) =>
       next === "closed"
@@ -4347,6 +4362,7 @@ async function cmdCloseTask(): Promise<void> {
               deliverable,
             },
             // close 時は assigned 時の resume metadata をクリア (冪等)
+            // abortedAt は merge していないので aborted→closed でも残置される
             remove: [],
           }
         : {},

@@ -339,6 +339,7 @@ describe("applyTaskActions — T303", () => {
       [
         { type: "log", event: "task_aborted_core", detail: "reason=user_clear" },
         { type: "log", event: "task_closed" },
+        { type: "log", event: "task_closed_from_aborted", detail: "prev_aborted_at=2026-04-23T11:00:00Z" },
         { type: "log", event: "task_deleted" },
         { type: "log", event: "task_restarted" },
         { type: "log", event: "task_create_idempotent_skip" },
@@ -355,6 +356,7 @@ describe("applyTaskActions — T303", () => {
     const mlog = await readLog(project.root);
     expect(mlog).toContain("task_aborted_core");
     expect(mlog).toContain("task_closed");
+    expect(mlog).toContain("task_closed_from_aborted");
   });
 
   test("mixed actions: log + cascade_children", async () => {

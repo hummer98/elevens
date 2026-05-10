@@ -99,7 +99,17 @@ export function taskReduce(
         const logEvent = event.autoClosed ? "task_completed_state_mismatch" : "task_closed";
         return withActions("closed", [{ type: "log", event: logEvent }]);
       }
-      // closed / aborted からは no-op。
+      // Why: aborted は AI 自動判定の誤りを人間が修正できる救済経路。--force 必須で
+      //      誤操作防止し、abortedAt は trace のため残す（cascade なし — 子は aborted 時点で処理済み）。
+      if (state === "aborted" && event.force === true) {
+        const detail = event.prevAbortedAt
+          ? `prev_aborted_at=${event.prevAbortedAt}`
+          : undefined;
+        return withActions("closed", [
+          { type: "log", event: "task_closed_from_aborted", ...(detail ? { detail } : {}) },
+        ]);
+      }
+      // closed / aborted (force 無し) からは no-op。
       return noop(state);
     }
 

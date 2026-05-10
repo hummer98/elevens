@@ -608,6 +608,7 @@ describe("Task FSM — deleted は終端 state", () => {
     { type: "ASSIGN_OK" },
     { type: "ASSIGN_FAIL", errorKind: "task" },
     { type: "CLOSE" },
+    { type: "CLOSE", force: true },
     { type: "ABORT", reason: "user_clear" },
     { type: "DELETE" },
     { type: "RESTART" },
@@ -684,6 +685,76 @@ describe("Task FSM — CLOSE (A017 §2.2)", () => {
   test("aborted + CLOSE → aborted (no-op)", () => {
     const { next } = taskReduce("aborted", { type: "CLOSE" }, tctx({ hasConductor: false }));
     expect(next).toBe("aborted");
+  });
+
+  // --force による aborted → closed 遷移
+  test("aborted + CLOSE (force=true) → closed + log(task_closed_from_aborted)", () => {
+    const { next, actions } = taskReduce(
+      "aborted",
+      { type: "CLOSE", force: true },
+      tctx({ hasConductor: false }),
+    );
+    expect(next).toBe("closed");
+    const log = actions.find((a) => a.type === "log");
+    expect(log).toBeDefined();
+    if (log && log.type === "log") {
+      expect(log.event).toBe("task_closed_from_aborted");
+      expect(log.detail).toBeUndefined();
+    }
+    expect(actions.find((a) => a.type === "cascade_children")).toBeUndefined();
+  });
+
+  test("aborted + CLOSE (force=true, prevAbortedAt) → detail に prev_aborted_at が入る", () => {
+    const { actions } = taskReduce(
+      "aborted",
+      { type: "CLOSE", force: true, prevAbortedAt: "2026-04-23T11:00:00Z" },
+      tctx({ hasConductor: false }),
+    );
+    const log = actions.find((a) => a.type === "log");
+    if (log && log.type === "log") {
+      expect(log.detail).toBe("prev_aborted_at=2026-04-23T11:00:00Z");
+    }
+  });
+
+  test("aborted + CLOSE (force=false) → aborted (noop, 既存挙動)", () => {
+    const { next, actions } = taskReduce(
+      "aborted",
+      { type: "CLOSE", force: false },
+      tctx({ hasConductor: false }),
+    );
+    expect(next).toBe("aborted");
+    expect(actions).toEqual([]);
+  });
+
+  test("closed + CLOSE (force=true) → closed (誤操作防止 noop)", () => {
+    const { next, actions } = taskReduce(
+      "closed",
+      { type: "CLOSE", force: true },
+      tctx({ hasConductor: false }),
+    );
+    expect(next).toBe("closed");
+    expect(actions).toEqual([]);
+  });
+
+  test("deleted + CLOSE (force=true) → deleted (terminal state guard)", () => {
+    const { next, actions } = taskReduce(
+      "deleted",
+      { type: "CLOSE", force: true },
+      tctx({ hasConductor: false }),
+    );
+    expect(next).toBe("deleted");
+    expect(actions).toEqual([]);
+  });
+
+  test("assigned + CLOSE (force=true) → closed + task_closed (force は通常経路に影響しない)", () => {
+    const { next, actions } = taskReduce(
+      "assigned",
+      { type: "CLOSE", force: true },
+      tctx({ hasConductor: true }),
+    );
+    expect(next).toBe("closed");
+    const log = actions.find((a) => a.type === "log");
+    expect(log && log.type === "log" ? log.event : undefined).toBe("task_closed");
   });
 });
 

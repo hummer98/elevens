@@ -469,6 +469,66 @@ describe("task-state-store — applyTaskEvent (T303)", () => {
     const logContent = await readLog(project.root);
     expect(logContent).toMatch(/task_completed_state_mismatch/);
   });
+
+  // ---- CLOSE force (aborted → closed) ---------------------------
+  test("CLOSE force=true on aborted → closed + task_closed_from_aborted log + abortedAt 残置", async () => {
+    await writeState(project.root, {
+      "070": {
+        status: "aborted",
+        abortedAt: "2026-04-23T11:00:00Z",
+        journal: "Task 070 aborted [user_clear]",
+      },
+    });
+    const result = await applyTaskEvent(project.root, {
+      taskId: "070",
+      event: {
+        type: "CLOSE",
+        force: true,
+        prevAbortedAt: "2026-04-23T11:00:00Z",
+      },
+      patch: (_prev, next) =>
+        next === "closed"
+          ? {
+              merge: {
+                closedAt: "2026-04-23T12:00:00Z",
+                journal: "force-closed by user",
+                deliverable: { kind: "none" },
+              },
+            }
+          : {},
+    });
+    expect(result.committed).toBe(true);
+    expect(result.prev).toBe("aborted");
+    expect(result.next).toBe("closed");
+
+    const after = await readState(project.root);
+    expect(after["070"]?.status).toBe("closed");
+    expect(after["070"]?.closedAt).toBe("2026-04-23T12:00:00Z");
+    // abortedAt は残置（trace 可能性）
+    expect(after["070"]?.abortedAt).toBe("2026-04-23T11:00:00Z");
+    expect(after["070"]?.deliverable?.kind).toBe("none");
+
+    const logContent = await readLog(project.root);
+    expect(logContent).toMatch(/task_closed_from_aborted/);
+    expect(logContent).toMatch(/prev_aborted_at=2026-04-23T11:00:00Z/);
+  });
+
+  test("CLOSE force=false on aborted → noop（committed=false、abortedAt そのまま）", async () => {
+    await writeState(project.root, {
+      "071": { status: "aborted", abortedAt: "2026-04-23T11:00:00Z" },
+    });
+    const result = await applyTaskEvent(project.root, {
+      taskId: "071",
+      event: { type: "CLOSE" },
+    });
+    expect(result.committed).toBe(false);
+    expect(result.prev).toBe("aborted");
+    expect(result.next).toBe("aborted");
+
+    const after = await readState(project.root);
+    expect(after["071"]?.status).toBe("aborted");
+    expect(after["071"]?.abortedAt).toBe("2026-04-23T11:00:00Z");
+  });
 });
 
 describe("task-state-store — updateTaskSessionId (T303 R3)", () => {
