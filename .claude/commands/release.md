@@ -100,14 +100,31 @@ git push origin main
 git push origin "v${NEW_VERSION}"
 ```
 
-### 7. GitHub Actions release.yml の OIDC publish を監視（Phase C 開始）
+### 7. GitHub Actions release.yml の OIDC publish を kick + 監視（Phase C 開始）
 
-`.github/workflows/release.yml` は tag push を契機に動き、`npm publish --provenance --access public` を OIDC trusted publisher 経由で実行する（`NPM_TOKEN` 不要）。
+`.github/workflows/release.yml` は `npm publish --provenance --access public` を OIDC trusted publisher 経由で実行する（`NPM_TOKEN` 不要）。
+
+**重要 (運用ノート):** yml 上は `on: push: tags: 'v*'` も設定されているが、実運用では tag push trigger は機能しておらず、過去 6 リリース（v0.3.0〜v0.5.0）すべて `workflow_dispatch` で起動している。tag push 後に明示的に `gh workflow run` を叩いて kick する。原因調査は別タスク。
 
 ```bash
 cd "$PROJECT_ROOT"
-sleep 5
-RUN_ID=$(gh run list --workflow=release.yml --limit=1 --json databaseId --jq '.[0].databaseId')
+gh workflow run release.yml --ref "v${NEW_VERSION}"
+
+# kick した run を id で特定する（list の最新が必ず該当 run とは限らないので、ref 一致で絞り込む）
+sleep 3
+RUN_ID=$(gh run list \
+  --workflow=release.yml \
+  --branch "v${NEW_VERSION}" \
+  --event workflow_dispatch \
+  --limit=1 \
+  --json databaseId \
+  --jq '.[0].databaseId')
+
+if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+  echo "Error: workflow run for v${NEW_VERSION} not found"
+  exit 1
+fi
+echo "RUN_ID=${RUN_ID}"
 gh run watch ${RUN_ID} --exit-status > /tmp/gh-run-watch-${NEW_VERSION}.log 2>&1 &
 GH_WATCH_PID=$!
 ```
