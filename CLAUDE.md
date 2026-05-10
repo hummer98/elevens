@@ -75,10 +75,13 @@ cmux-team/
 │   ├── manager/              # Manager daemon（TypeScript / Bun）
 │   └── templates/            # エージェントプロンプトテンプレート
 ├── skills/cmux-agent-role/SKILL.md  # サブエージェント行動規範スキル
+├── skills/c11/SKILL.md       # c11 substrate リファレンス（自前要約; AGPL コピー不可）
 ├── commands/                 # スラッシュコマンド定義
 ├── docs/spec/                # 統合仕様書（実装と同期）
 └── bin/                      # CLI エントリポイント
 ```
+
+**c11 (Stage-11-Agentics/c11) 関連の概念・API・cmux との差分が必要なときは `skills/c11/SKILL.md` を Read する。** elevens は c11 を substrate として動くため、surface manifest / lineage / mailbox / flash / blueprint / `c11 tree` / `set-metadata` / wrapper 経由 hook 等を頻繁に扱う。
 
 **cmux-team の仕様・挙動について質問された場合は、`docs/spec/` の該当ファイルを Read して回答すること。**
 
@@ -269,8 +272,8 @@ state 遷移・cascade・CONDUCTOR_DONE 分岐・rebase conflict 自解決の詳
 | | Txxx（タスク） | Axxx（アーティファクト） |
 |---|---|---|
 | 本質 | 「やること」の管理 | 「わかったこと」の記録 |
-| 誰が作る | Master / ユーザー（CLI 経由） | 誰でも（直接ファイル作成） |
+| 誰が作る | Master / ユーザー（CLI 経由） | 誰でも（`/artifact` 優先、直接作成は spec 厳守時のみ） |
 
 - `type`: `research` / `decision` / `session` / `spec` / `report`
 - `author`: surface ID 文字列（例: `surface:100`）
-- `/artifact` コマンドで会話から要約生成・保存
+- **新規作成は `/elevens:artifact <type> <タイトル>` を default とする。** `commands/artifact.md` 規定の frontmatter (`id` / `type` / `title` / `created` / `author`) と type 別本文構造（research → 背景／調査結果／比較・分析／結論 等）を漏れなく揃えるため。直接 `Write` は spec を完全遵守できる場合のみ許容（フィールド欠落・章立て逸脱を見落としやすいので非推奨）。
