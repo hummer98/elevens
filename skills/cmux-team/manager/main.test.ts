@@ -1302,6 +1302,106 @@ describe("TASK_UPDATED postMessage (T183)", () => {
     const after = JSON.parse(await readFile(stateFile, "utf-8"));
     expect(after["582"].status).toBe("closed");
   });
+
+  // --- T004: reset-conductor CLI ---
+  //
+  // 設計: plan.md §3.2 / design-review-rev2.md。
+  // CLI → daemon の HTTP API に RESET_CONDUCTOR メッセージを POST する経路を検証する。
+  // assigned 中の Conductor に対する pre-check (CLI 側 best-effort)、--force 伝搬、
+  // 出力文言、CMUX_SURFACE 自動解決をすべてカバーする。
+  //
+  // env を切り替えるテスト用に runCli の env 拡張版を定義する（既存 runCli は env 固定）。
+  async function runCliEnv(args: string[], extraEnv: Record<string, string>): Promise<{ code: number; stdout: string; stderr: string }> {
+    return await new Promise((resolve) => {
+      const proc = spawn("bun", ["run", MAIN_TS, ...args], {
+        cwd: testDir,
+        env: { ...process.env, PROJECT_ROOT: testDir, ...extraEnv },
+      });
+      let stdout = "";
+      let stderr = "";
+      proc.stdout.on("data", (d) => { stdout += d.toString(); });
+      proc.stderr.on("data", (d) => { stderr += d.toString(); });
+      proc.on("close", (code) => resolve({ code: code ?? 0, stdout, stderr }));
+    });
+  }
+
+  // .team/team.json に conductors を書き出すヘルパー。proxy-port も併せて書く。
+  async function writeTeamJsonWithConductor(entry: Record<string, unknown>): Promise<void> {
+    const { writeFile: wf, mkdir: mk } = await import("fs/promises");
+    await mk(join(testDir, ".team"), { recursive: true });
+    await wf(join(testDir, ".team/team.json"), JSON.stringify({ conductors: [entry] }));
+    await wf(join(testDir, ".team/proxy-port"), String(port));
+  }
+
+  test("reset-conductor: --surface 指定で RESET_CONDUCTOR が POST される (AC1/AC3)", async () => {
+    await writeTeamJsonWithConductor({ surface: "surface:200", status: "broken" });
+    const r = await runCli(["reset-conductor", "--surface", "surface:200"]);
+    expect(r.code).toBe(0);
+    expect(receivedMessages.map((m) => m.type)).toEqual(["RESET_CONDUCTOR"]);
+    expect(receivedMessages[0].surface).toBe("surface:200");
+  });
+
+  test("reset-conductor: --surface に数字のみ渡しても surface: プレフィクスが付く", async () => {
+    await writeTeamJsonWithConductor({ surface: "surface:200", status: "broken" });
+    const r = await runCli(["reset-conductor", "--surface", "200"]);
+    expect(r.code).toBe(0);
+    expect(receivedMessages[0].surface).toBe("surface:200");
+  });
+
+  test("reset-conductor: CMUX_SURFACE env で auto-resolve できる (AC2)", async () => {
+    await writeTeamJsonWithConductor({ surface: "surface:201", status: "broken" });
+    const r = await runCliEnv(["reset-conductor"], { CMUX_SURFACE: "surface:201" });
+    expect(r.code).toBe(0);
+    expect(receivedMessages[0].surface).toBe("surface:201");
+  });
+
+  test("reset-conductor: assigned + --force なしで CLI が exit 1 する (AC5 CLI 側)", async () => {
+    await writeTeamJsonWithConductor({ surface: "surface:202", status: "running", taskId: "1" });
+    const r = await runCli(["reset-conductor", "--surface", "202"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("--force");
+    // POST は走らない
+    expect(receivedMessages.length).toBe(0);
+  });
+
+  test("reset-conductor: --force で message.force=true が乗る (AC6 CLI 側)", async () => {
+    await writeTeamJsonWithConductor({ surface: "surface:203", status: "running", taskId: "1" });
+    const r = await runCli(["reset-conductor", "--surface", "203", "--force"]);
+    expect(r.code).toBe(0);
+    expect(receivedMessages[0].type).toBe("RESET_CONDUCTOR");
+    expect(receivedMessages[0].force).toBe(true);
+  });
+
+  test("reset-conductor: 出力文言が \"OK reset <surface> (<oldStatus> → reserved)\" 形式 (R8)", async () => {
+    await writeTeamJsonWithConductor({ surface: "surface:204", status: "broken" });
+    const r = await runCli(["reset-conductor", "--surface", "204"]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/OK reset surface:204 \(broken → reserved\)/);
+  });
+
+  test("reset-conductor: surface が team.json に存在しない場合は exit 1", async () => {
+    const { writeFile: wf } = await import("fs/promises");
+    await wf(join(testDir, ".team/team.json"), JSON.stringify({ conductors: [] }));
+    await wf(join(testDir, ".team/proxy-port"), String(port));
+    const r = await runCli(["reset-conductor", "--surface", "404"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("not found");
+    expect(receivedMessages.length).toBe(0);
+  });
+
+  test("reset-conductor: assigning Conductor も --force なしで reject", async () => {
+    await writeTeamJsonWithConductor({ surface: "surface:205", status: "assigning", taskId: "1" });
+    const r = await runCli(["reset-conductor", "--surface", "205"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("--force");
+  });
+
+  test("reset-conductor: asking Conductor も --force なしで reject", async () => {
+    await writeTeamJsonWithConductor({ surface: "surface:206", status: "asking", taskId: "1" });
+    const r = await runCli(["reset-conductor", "--surface", "206"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("--force");
+  });
 });
 
 // --- T291: resolveCanonicalTaskId ユニットテスト ---

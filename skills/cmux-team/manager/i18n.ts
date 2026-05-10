@@ -510,6 +510,31 @@ Notes:
   - Worktree / branch residue is already cleaned up at the broken transition; this CLI only resets the status
 `,
 
+  help_reset_conductor: `
+elevens reset-conductor -- reset a Conductor surface to the reserved state
+
+Usage:
+  elevens reset-conductor [--surface <id>] [--force]
+
+Options:
+  --surface <id>   surface ID (e.g. 112 or surface:112). When omitted, resolves
+                   from CMUX_SURFACE env or "cmux identify" (the pane shell)
+  --force          allow reset of an assigned Conductor (assigning / running / asking).
+                   The associated task is aborted (journal: "reason=reset_conductor; ...")
+
+Examples:
+  elevens reset-conductor                                # reset the surface running this shell
+  elevens reset-conductor --surface 112
+  elevens reset-conductor --surface surface:112 --force  # abort the running task and reset
+
+Notes:
+  - Resets any-state Conductor (broken / disconnected / idle / reserved / error / starting)
+    to "reserved", at which point findIdleConductor picks it up on the next tick
+  - Assigned states (assigning / running / asking) require --force
+  - Use this when you spot a stuck or broken Conductor in your pane and want to recover
+    locally without restarting the entire daemon (observatory: real-time → intervention loop)
+`,
+
   help_delete_task: `
 elevens delete-task -- delete a task (sets to deleted)
 
@@ -924,6 +949,8 @@ Usage:
   elevens agents                             list running agents
   elevens close-agent --surface <surface>    close an agent (normal exit)
   elevens kill-agent --surface <surface>     kill an agent (crash/force)
+  elevens clear-conductor --surface <id>     reset a broken Conductor (broken -> idle)
+  elevens reset-conductor [--surface <id>] [--force]   reset a Conductor surface to reserved
   elevens send-agent --surface <surface> <message>    send a message to a spawned Agent
   elevens create-task --title <title> [--priority <p>] [--status <s>] [--body <text>] [--depends-on <ids>] [--run-after-all] [--exclusive]
   elevens update-task --task-id <id> --status <status>
@@ -1568,6 +1595,32 @@ Notes:
   - worktree / branch 残骸は broken 遷移時点で既に掃除済みのため、ここでは行いません
 `,
 
+  help_reset_conductor: `
+elevens reset-conductor -- Conductor surface を reserved 状態にリセットする
+
+Usage:
+  elevens reset-conductor [--surface <id>] [--force]
+
+Options:
+  --surface <id>   surface ID（例: 112 または surface:112）。省略時は
+                   CMUX_SURFACE env → "cmux identify"（pane シェル）から自動解決
+  --force          assigned 系（assigning / running / asking）の Conductor も
+                   リセット可能にする。紐付くタスクは aborted に変更され、
+                   journal に "reason=reset_conductor; ..." を記録する
+
+Examples:
+  elevens reset-conductor                                # 実行中の pane の surface をリセット
+  elevens reset-conductor --surface 112
+  elevens reset-conductor --surface surface:112 --force  # 実行中のタスクを止めてリセット
+
+Notes:
+  - 任意状態の Conductor（broken / disconnected / idle / reserved / error / starting）を
+    "reserved" に戻し、次の tick で findIdleConductor が拾えるようにします
+  - assigned 系（assigning / running / asking）は --force が必要です
+  - pane で「壊れている」と気づいた瞬間に、daemon 全体を再起動せず局所復旧する用途
+    （observatory: real-time 観察 → 介入のサイクルを閉じる）
+`,
+
   help_delete_task: `
 elevens delete-task -- タスクを削除（deleted）にする
 
@@ -1982,6 +2035,8 @@ Usage:
   elevens agents                             稼働中エージェント一覧
   elevens close-agent --surface <surface>    Agent を正常終了
   elevens kill-agent --surface <surface>     Agent を強制停止（crash 扱い）
+  elevens clear-conductor --surface <id>     broken Conductor をリセット（broken → idle）
+  elevens reset-conductor [--surface <id>] [--force]   Conductor surface を reserved にリセット
   elevens send-agent --surface <surface> <message>    Agent にメッセージ送信
   elevens create-task --title <title> [--priority <p>] [--status <s>] [--body <text>] [--depends-on <ids>] [--run-after-all] [--exclusive]
   elevens update-task --task-id <id> --status <status>

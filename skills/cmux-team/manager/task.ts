@@ -571,8 +571,12 @@ export function filterRunAfterAllTasks(
 /**
  * T290: markTaskAborted が受け付ける reason 列挙。
  *
- * 6 経路（daemon.ts 4 経路 + main.ts 2 経路）と resume 3 reason を覆う。
+ * 7 経路（daemon.ts 4 経路: user_clear / judgment_pending / assign_failed / disconnect_timeout
+ * + main.ts 3 経路: abort_task / reset_conductor + resume 系のいずれか）と resume 3 reason を覆う。
  * journal 新 format `reason=<AbortReason>; <detail>` の `<AbortReason>` に入る値。
+ *
+ * T004: `reset_conductor` は `elevens reset-conductor --force` 経由で daemon が
+ *       assigned 系 Conductor を reserved に戻す際の abort 理由。
  */
 export type AbortReason =
   | "user_clear"
@@ -580,6 +584,7 @@ export type AbortReason =
   | "assign_failed"
   | "disconnect_timeout"
   | "abort_task"
+  | "reset_conductor"
   | "resume_no_session_id"
   | "resume_no_task_run_id"
   | "resume_no_worktree";

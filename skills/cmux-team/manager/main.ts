@@ -298,6 +298,7 @@ const WRITE_COMMANDS: Record<string, true | Set<string>> = {
   "kill-agent": true,
   "close-agent": true,
   "clear-conductor": true,
+  "reset-conductor": true,
   "set-agent-instructions": true,
   "delete-agent-instructions": true,
   artifacts: new Set(["add"]),
@@ -5031,6 +5032,67 @@ async function cmdClearConductor(): Promise<void> {
   console.log(`OK cleared ${normalizedSurface} (broken → idle)`);
 }
 
+/**
+ * T004: 任意状態の Conductor surface を `reserved` に戻す。
+ *
+ * 観察箱原則の「real-time 観察 → 介入」サイクルを閉じる pane 単位の局所復旧 CLI。
+ * daemon の `RESET_CONDUCTOR` ハンドラが SESSION_CLEAR running 経路と同形のシーケンスで
+ * watcher 停止 → markTaskAborted → trace DB 行追加 → killClaudeProcess → reserved 復帰
+ * を実行する。次 tick の `findIdleConductor` が reserved を拾うため Conductor は再利用可能になる。
+ *
+ * - `--surface` 省略時は `CMUX_SURFACE` 環境変数 → `cmux identify` の順で自動解決。
+ * - `--force` なしで assigned 系（`assigning` / `running` / `asking`）に対しては reject。
+ * - pre-check は best-effort UX（`team.json` は daemon snapshot で 数 ms 遅れる可能性があるため
+ *   真の判定は daemon 側で再実行する）。
+ */
+async function cmdResetConductor(): Promise<void> {
+  if (hasHelpFlag()) showHelp(t("help_reset_conductor"));
+  const surfaceArg = getArg("surface") ?? await resolveCallerSurfaceOrExit();
+  const normalizedSurface = surfaceArg.startsWith("surface:") ? surfaceArg : `surface:${surfaceArg}`;
+  const force = hasFlag("force");
+
+  const teamJsonPath = join(PROJECT_ROOT, ".team/team.json");
+  if (!existsSync(teamJsonPath)) {
+    console.error("Error: team.json not found");
+    process.exit(1);
+  }
+  let teamJson: any;
+  try {
+    teamJson = JSON.parse(await readFile(teamJsonPath, "utf-8"));
+  } catch {
+    console.error("Error: team.json unreadable");
+    process.exit(1);
+  }
+  const conductor = (teamJson.conductors ?? []).find(
+    (c: any) => c.surface === normalizedSurface,
+  );
+  if (!conductor) {
+    console.error(`Error: conductor ${normalizedSurface} not found in team.json`);
+    process.exit(1);
+  }
+  const oldStatus: string = conductor.status ?? "unknown";
+  // pre-check: assigned 系 + !force → reject。真の判定は daemon 側で再実行する。
+  if (
+    (oldStatus === "assigning" || oldStatus === "running" || oldStatus === "asking") &&
+    !force
+  ) {
+    console.error(
+      `Error: conductor ${normalizedSurface} is assigned (status: ${oldStatus}). ` +
+        `Use --force to reset an assigned conductor.`,
+    );
+    process.exit(1);
+  }
+
+  await postMessage({
+    type: "RESET_CONDUCTOR",
+    surface: normalizedSurface,
+    force,
+    reason: "user_reset",
+    timestamp: new Date().toISOString(),
+  });
+  console.log(`OK reset ${normalizedSurface} (${oldStatus} → reserved)`);
+}
+
 async function cmdAbortTask(): Promise<void> {
   if (hasHelpFlag()) showHelp(t("help_abort_task"));
   // T291: canonical 不明で exit 1（孤児 taskState を生まないための安全側）
@@ -6440,6 +6502,9 @@ switch (command) {
     break;
   case "clear-conductor":
     await cmdClearConductor();
+    break;
+  case "reset-conductor":
+    await cmdResetConductor();
     break;
   case "delete-task":
     await cmdDeleteTask();

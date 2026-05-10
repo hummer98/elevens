@@ -149,8 +149,12 @@ export type EventStreamRecord =
     };
 
 /**
- * `task.ts:AbortReason`（8 値）→ spec §6.6 `SpecAbortReason`（6 値）への構造的マップ。
- * 拡張時は両端を同時に見直すため、テストで全 8 値を網羅する。
+ * `task.ts:AbortReason`（9 値）→ spec §6.6 `SpecAbortReason`（6 値）への構造的マップ。
+ * 拡張時は両端を同時に見直すため、テストで全値を網羅する。
+ *
+ * T004: `reset_conductor` は abort_task と同じ user 主導 abort なので "other" にマップ。
+ *       events.jsonl の reason フィールドは spec § 6.6 の 6 値のみ。区別が必要な場合は
+ *       journal の `reason=reset_conductor;` prefix を grep する。
  */
 export function mapAbortReason(r: AbortReason): SpecAbortReason {
   switch (r) {
@@ -163,6 +167,7 @@ export function mapAbortReason(r: AbortReason): SpecAbortReason {
     case "disconnect_timeout":
       return "disconnect_timeout";
     case "abort_task":
+    case "reset_conductor":
       return "other";
     case "resume_no_session_id":
     case "resume_no_task_run_id":

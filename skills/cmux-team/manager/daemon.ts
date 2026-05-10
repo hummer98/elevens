@@ -1643,6 +1643,118 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
       break;
     }
 
+    case "RESET_CONDUCTOR": {
+      // T004: surface ターミナルから Conductor を pane 単位で復旧する経路。
+      //       任意状態の Conductor を `reserved` に戻し、次 tick の findIdleConductor
+      //       で再利用可能にする。assigned 系（assigning/running/asking）は force=true
+      //       指定時のみ許可し、紐付く task を `markTaskAborted` で abort 状態へ。
+      //       SESSION_CLEAR running 経路 (handleMessage SESSION_CLEAR) と同形のシーケンス：
+      //       watcher 停止 → markTaskAborted → trace DB 行追加 → notifyStateChanged →
+      //       pid 退避 → killClaudeProcess → resetConductor(reserved) → requestWakeup。
+      const conductor = state.conductors.get(message.surface);
+      if (!conductor) {
+        await log(
+          "conductor_reset_ignored",
+          `surface=${message.surface} reason=not_found`
+        );
+        break;
+      }
+      const isAssigned =
+        conductor.status === "assigning" ||
+        conductor.status === "running" ||
+        conductor.status === "asking";
+      if (isAssigned && !message.force) {
+        await log(
+          "conductor_reset_ignored",
+          `${formatSurface(conductor.surface, "C")} status=${conductor.status} reason=force_required`
+        );
+        break;
+      }
+
+      // R1: watcher を先に止める — pid kill 後の watcher 誤検出（disconnected 倒れ）を防ぐ。
+      // SESSION_CLEAR running 経路 (handleMessage SESSION_CLEAR) と同形。
+      // isAssigned 全ケース（assigning も含む）でクリアする。
+      if (isAssigned) {
+        if (conductor.pidWatcherInterval) {
+          clearInterval(conductor.pidWatcherInterval);
+          conductor.pidWatcherInterval = undefined;
+        }
+        if (conductor.mailboxWatcherStop) {
+          try { conductor.mailboxWatcherStop(); } catch { /* best-effort */ }
+          conductor.mailboxWatcherStop = undefined;
+        }
+      }
+
+      // R2/R3: assigned + force: 紐付く task を abort 状態へ + trace DB に task_sessions 行追加
+      const abortedTaskId = conductor.taskId;
+      const abortedTaskRunId = conductor.taskRunId;
+      const abortedSessionId = conductor.sessionId;
+      if (isAssigned && abortedTaskId) {
+        const detail = `${formatSurface(conductor.surface, "C")} taskRunId=${abortedTaskRunId ?? "-"}`;
+        try {
+          const { revertedChildren } = await markTaskAborted(
+            state.projectRoot,
+            abortedTaskId,
+            "reset_conductor",
+            detail,
+            { taskTitle: conductor.taskTitle ?? "" },
+          );
+          // R4: cascade で子 task が draft に巻き戻った場合は TUI に即時反映。
+          // SESSION_CLEAR running 経路 (handleMessage SESSION_CLEAR) と同形。
+          if (revertedChildren.length > 0) {
+            notifyStateChanged("daemon.ts:handleMessage:reset-conductor-cascade");
+          }
+        } catch (e: any) {
+          await log("error", `RESET_CONDUCTOR markTaskAborted failed: task_id=${abortedTaskId} ${e?.message ?? e}`);
+        }
+
+        // R3: task_sessions(event="aborted") を追加 — abort-task との対称性を保つ。
+        // retrospective 観察軸（cohort 比較・task lifecycle 再構成）で必要。
+        if (state.traceDb) {
+          try {
+            insertTaskSession(state.traceDb, {
+              timestamp: new Date().toISOString(),
+              task_id: abortedTaskId,
+              task_run_id: abortedTaskRunId,
+              session_id: abortedSessionId ?? "",
+              role: "conductor",
+              surface: conductor.surface,
+              event: "aborted",
+            });
+          } catch (e: any) {
+            await log("error", `RESET_CONDUCTOR insertTaskSession failed: task_id=${abortedTaskId} ${e?.message ?? e}`);
+          }
+        }
+      }
+
+      // pid 退避 → killClaudeProcess（SESSION_CLEAR running 経路と同形）。
+      // 1) conductor.pid を先に undefined に倒し、PID watcher 等が誤反応しないようにする。
+      // 2) backend.killClaudeProcess で claude プロセスを kill（pane は保持）。
+      // 3) resetConductor で worktree / branch / agents を cleanup し reserved に倒す。
+      const killTarget = conductor.pid;
+      conductor.pid = undefined;
+      if (killTarget !== undefined) {
+        const backend = ccBackend(state.backend);
+        if (backend) {
+          try {
+            await backend.killClaudeProcess(backend.surfaceToRef(conductor.surface), killTarget);
+          } catch (e: any) {
+            await log(
+              "error",
+              `RESET_CONDUCTOR killClaudeProcess failed: ${formatSurface(conductor.surface, "C")} pid=${killTarget} ${e?.message ?? e}`
+            );
+          }
+        }
+      }
+      await resetConductor(conductor, state.projectRoot, state.workspace ?? undefined, {
+        targetStatus: "reserved",
+        reason: message.reason ?? "user_reset",
+      }, ccBackend(state.backend));
+      // 即時 tick を発火し、次の scanTasks で reserved を拾えるようにする
+      requestWakeup(state);
+      break;
+    }
+
     case "AGENT_TOKEN_BOUND": {
       // T323: spawn-agent の selectToken 成功直後に POST される第 2 メッセージ。
       // AGENT_SPAWNED で先に登録された agent.tokenHandle を後追い更新する。

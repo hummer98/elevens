@@ -3322,6 +3322,343 @@ describe("T250 broken status", () => {
   });
 });
 
+// --- T004: RESET_CONDUCTOR (reset-conductor CLI) ---------------------------
+//
+// `elevens reset-conductor` から daemon に届く RESET_CONDUCTOR メッセージを
+// handleMessage がどう処理するかを検証する。設計は plan.md §3.4 / design-review-rev2.md
+// 参照。SESSION_CLEAR running 経路 (daemon.ts:2756–2817) と同形のシーケンス：
+// watcher 停止 → markTaskAborted → insertTaskSession → notifyStateChanged →
+// pid 退避 → killClaudeProcess → resetConductor(reserved) → requestWakeup。
+describe("T004 RESET_CONDUCTOR (reset-conductor CLI)", () => {
+  test("RESET_CONDUCTOR で broken Conductor が reserved に戻る (AC4)", async () => {
+    const cmuxMod = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const { ClaudeCodeBackend } = await import("./claude-code-backend");
+    const paneSpy = spyOn(cmuxMod, "getPaneForSurface").mockResolvedValue("pane:1");
+    const killSpy = spyOn(ClaudeCodeBackend.prototype, "killClaudeProcess").mockResolvedValue(undefined);
+    try {
+      const state = await createDaemon(testDir);
+      const conductor: ConductorState = {
+        surface: "surface:broken-rc1",
+        startedAt: new Date().toISOString(),
+        disconnectedAt: new Date().toISOString(),
+        agents: [],
+        status: "broken",
+      };
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "RESET_CONDUCTOR",
+        surface: conductor.surface,
+        reason: "user_reset",
+        timestamp: new Date().toISOString(),
+      });
+
+      expect(conductor.status).toBe("reserved");
+      expect(conductor.disconnectedAt).toBeUndefined();
+      expect(conductor.taskRunId).toBeUndefined();
+      expect(conductor.taskId).toBeUndefined();
+      expect(conductor.pid).toBeUndefined();
+      expect(conductor.sessionId).toBeUndefined();
+      // broken は taskId が無いので markTaskAborted は呼ばれず killClaudeProcess も走らない
+      expect(killSpy).not.toHaveBeenCalled();
+    } finally {
+      paneSpy.mockRestore();
+      killSpy.mockRestore();
+    }
+  });
+
+  test("RESET_CONDUCTOR で disconnected Conductor が reserved に戻る (AC4)", async () => {
+    const cmuxMod = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const { ClaudeCodeBackend } = await import("./claude-code-backend");
+    const paneSpy = spyOn(cmuxMod, "getPaneForSurface").mockResolvedValue("pane:1");
+    const killSpy = spyOn(ClaudeCodeBackend.prototype, "killClaudeProcess").mockResolvedValue(undefined);
+    try {
+      const state = await createDaemon(testDir);
+      const conductor: ConductorState = {
+        surface: "surface:disc-rc1",
+        startedAt: new Date().toISOString(),
+        disconnectedAt: new Date().toISOString(),
+        agents: [],
+        status: "disconnected",
+      };
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "RESET_CONDUCTOR",
+        surface: conductor.surface,
+        timestamp: new Date().toISOString(),
+      });
+
+      expect(conductor.status).toBe("reserved");
+      expect(conductor.disconnectedAt).toBeUndefined();
+      // isAssignableStatus(reserved) が true で次 tick で findIdleConductor が拾える
+      const { isAssignableStatus } = await import("./schema");
+      expect(isAssignableStatus(conductor.status)).toBe(true);
+    } finally {
+      paneSpy.mockRestore();
+      killSpy.mockRestore();
+    }
+  });
+
+  test("RESET_CONDUCTOR が idle Conductor に来ると reserved に戻る", async () => {
+    const cmuxMod = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const { ClaudeCodeBackend } = await import("./claude-code-backend");
+    const paneSpy = spyOn(cmuxMod, "getPaneForSurface").mockResolvedValue("pane:1");
+    const killSpy = spyOn(ClaudeCodeBackend.prototype, "killClaudeProcess").mockResolvedValue(undefined);
+    try {
+      const state = await createDaemon(testDir);
+      const conductor: ConductorState = {
+        surface: "surface:idle-rc1",
+        startedAt: new Date().toISOString(),
+        agents: [],
+        status: "idle",
+        pid: 999999,
+      };
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "RESET_CONDUCTOR",
+        surface: conductor.surface,
+        timestamp: new Date().toISOString(),
+      });
+
+      expect(conductor.status).toBe("reserved");
+      expect(conductor.pid).toBeUndefined();
+      // idle で pid 有り → killClaudeProcess が呼ばれる
+      expect(killSpy).toHaveBeenCalled();
+    } finally {
+      paneSpy.mockRestore();
+      killSpy.mockRestore();
+    }
+  });
+
+  test("RESET_CONDUCTOR が reserved Conductor に来ても冪等に成功する", async () => {
+    const cmuxMod = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const { ClaudeCodeBackend } = await import("./claude-code-backend");
+    const paneSpy = spyOn(cmuxMod, "getPaneForSurface").mockResolvedValue("pane:1");
+    const killSpy = spyOn(ClaudeCodeBackend.prototype, "killClaudeProcess").mockResolvedValue(undefined);
+    try {
+      const state = await createDaemon(testDir);
+      const conductor: ConductorState = {
+        surface: "surface:reserved-rc1",
+        startedAt: new Date().toISOString(),
+        agents: [],
+        status: "reserved",
+      };
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "RESET_CONDUCTOR",
+        surface: conductor.surface,
+        timestamp: new Date().toISOString(),
+      });
+
+      // reserved → reserved で no-op 的に冪等
+      expect(conductor.status).toBe("reserved");
+    } finally {
+      paneSpy.mockRestore();
+      killSpy.mockRestore();
+    }
+  });
+
+  test("RESET_CONDUCTOR が未登録 surface に来ても無視される (not_found)", async () => {
+    const state = await createDaemon(testDir);
+    // 何も登録しない
+
+    await handleMessage(state, {
+      type: "RESET_CONDUCTOR",
+      surface: "surface:ghost-rc",
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(state.conductors.has("surface:ghost-rc")).toBe(false);
+  });
+
+  test("RESET_CONDUCTOR が running Conductor に force=false で来ても無視される (force_required, AC5)", async () => {
+    const state = await createDaemon(testDir);
+    const conductor: ConductorState = {
+      surface: "surface:running-rc-noforce",
+      startedAt: new Date().toISOString(),
+      taskRunId: "task-1-rc",
+      taskId: "1",
+      agents: [],
+      status: "running",
+      pid: 999998,
+    };
+    state.conductors.set(conductor.surface, conductor);
+
+    await handleMessage(state, {
+      type: "RESET_CONDUCTOR",
+      surface: conductor.surface,
+      timestamp: new Date().toISOString(),
+    });
+
+    // 状態は変化しない
+    expect(conductor.status).toBe("running");
+    expect(conductor.taskRunId).toBe("task-1-rc");
+    expect(conductor.taskId).toBe("1");
+    expect(conductor.pid).toBe(999998);
+  });
+
+  test("RESET_CONDUCTOR が assigning Conductor に force=false で来ても無視される", async () => {
+    const state = await createDaemon(testDir);
+    const conductor: ConductorState = {
+      surface: "surface:assigning-rc-noforce",
+      startedAt: new Date().toISOString(),
+      taskRunId: "task-2-rc",
+      taskId: "2",
+      agents: [],
+      status: "assigning",
+    };
+    state.conductors.set(conductor.surface, conductor);
+
+    await handleMessage(state, {
+      type: "RESET_CONDUCTOR",
+      surface: conductor.surface,
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(conductor.status).toBe("assigning");
+    expect(conductor.taskId).toBe("2");
+  });
+
+  test("RESET_CONDUCTOR が running Conductor に force=true で来ると task が aborted になり surface が reserved に戻る (AC6)", async () => {
+    const cmuxMod = await import("./cmux");
+    const { spyOn, mock } = await import("bun:test");
+    const { ClaudeCodeBackend } = await import("./claude-code-backend");
+    const paneSpy = spyOn(cmuxMod, "getPaneForSurface").mockResolvedValue("pane:1");
+    const killSpy = spyOn(ClaudeCodeBackend.prototype, "killClaudeProcess").mockResolvedValue(undefined);
+    try {
+      // task-state.json に taskId=42 を assigned で登録（markTaskAborted の前提）
+      const { saveTaskState, loadTaskState } = await import("./task");
+      const taskRunId = "task-42-rc";
+      await saveTaskState(testDir, {
+        "42": { status: "assigned", taskRunId, sessionId: "sess-42" } as any,
+      });
+      // task.md frontmatter も書き出す（plan §6.3 R5: setupTeamDir 同等）
+      await mkdir(join(testDir, ".team/tasks/042-rc-test"), { recursive: true });
+      await writeFile(
+        join(testDir, ".team/tasks/042-rc-test/task.md"),
+        `---\nid: 42\ntitle: rc-test\nstatus: assigned\ntaskRunId: ${taskRunId}\n---\n\nbody\n`,
+      );
+
+      const state = await createDaemon(testDir);
+      // trace DB を初期化（state.traceDb に格納）
+      const { initDB, getTaskSessions } = await import("./trace-store");
+      state.traceDb = initDB(testDir);
+
+      // pidWatcherInterval / mailboxWatcherStop を仕込む（R1 watcher 停止検証）
+      const intervalHandle = setInterval(() => {}, 999999);
+      const stopMock = mock(() => {});
+      const conductor: ConductorState = {
+        surface: "surface:running-rc-force",
+        startedAt: new Date().toISOString(),
+        taskRunId,
+        taskId: "42",
+        taskTitle: "rc-test",
+        sessionId: "sess-42",
+        agents: [],
+        status: "running",
+        pid: 999997,
+        pidWatcherInterval: intervalHandle as unknown as ReturnType<typeof setInterval>,
+        mailboxWatcherStop: stopMock as () => void,
+      };
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "RESET_CONDUCTOR",
+        surface: conductor.surface,
+        force: true,
+        timestamp: new Date().toISOString(),
+      });
+
+      // R1: watcher が停止される
+      expect(conductor.pidWatcherInterval).toBeUndefined();
+      expect(stopMock).toHaveBeenCalled();
+      expect(conductor.mailboxWatcherStop).toBeUndefined();
+
+      // task が aborted、journal が `reason=reset_conductor;` で始まる (R2)
+      const ts = await loadTaskState(testDir);
+      expect(ts["42"]?.status).toBe("aborted");
+      expect(ts["42"]?.journal ?? "").toMatch(/^reason=reset_conductor;/);
+
+      // killClaudeProcess が呼ばれる
+      expect(killSpy).toHaveBeenCalled();
+
+      // surface が reserved に戻る
+      expect(conductor.status).toBe("reserved");
+      expect(conductor.taskId).toBeUndefined();
+      expect(conductor.taskRunId).toBeUndefined();
+      expect(conductor.pid).toBeUndefined();
+
+      // R3: trace DB の task_sessions に event="aborted" / role="conductor" 行が追加される
+      const rows = getTaskSessions(state.traceDb!, { taskId: "42", event: "aborted" });
+      expect(rows.length).toBeGreaterThanOrEqual(1);
+      const abortedRow = rows.find((r: any) => r.role === "conductor" && r.task_run_id === taskRunId);
+      expect(abortedRow).toBeDefined();
+      expect(abortedRow?.surface).toBe(conductor.surface);
+
+      state.traceDb?.close();
+    } finally {
+      paneSpy.mockRestore();
+      killSpy.mockRestore();
+    }
+  });
+
+  test("RESET_CONDUCTOR が assigning Conductor に force=true で来ると promptSentAt / promptBytes がクリアされる", async () => {
+    const cmuxMod = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const { ClaudeCodeBackend } = await import("./claude-code-backend");
+    const paneSpy = spyOn(cmuxMod, "getPaneForSurface").mockResolvedValue("pane:1");
+    const killSpy = spyOn(ClaudeCodeBackend.prototype, "killClaudeProcess").mockResolvedValue(undefined);
+    try {
+      const { saveTaskState } = await import("./task");
+      await saveTaskState(testDir, {
+        "43": { status: "assigned", taskRunId: "task-43-rc" } as any,
+      });
+      await mkdir(join(testDir, ".team/tasks/043-rc-assigning"), { recursive: true });
+      await writeFile(
+        join(testDir, ".team/tasks/043-rc-assigning/task.md"),
+        `---\nid: 43\ntitle: rc-assigning\nstatus: assigned\n---\n\nbody\n`,
+      );
+
+      const state = await createDaemon(testDir);
+      const conductor: ConductorState = {
+        surface: "surface:assigning-rc-force",
+        startedAt: new Date().toISOString(),
+        taskRunId: "task-43-rc",
+        taskId: "43",
+        agents: [],
+        status: "assigning",
+        promptSentAt: new Date().toISOString(),
+        promptBytes: 1234,
+        assigningSetAt: new Date().toISOString(),
+      };
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "RESET_CONDUCTOR",
+        surface: conductor.surface,
+        force: true,
+        timestamp: new Date().toISOString(),
+      });
+
+      // resetConductor が promptSentAt / promptBytes をクリアする
+      expect(conductor.promptSentAt).toBeUndefined();
+      expect(conductor.promptBytes).toBeUndefined();
+      expect(conductor.assigningSetAt).toBeUndefined();
+      expect(conductor.status).toBe("reserved");
+    } finally {
+      paneSpy.mockRestore();
+      killSpy.mockRestore();
+    }
+  });
+});
+
 // --- T255: initializeLayout マトリクス復帰 統合テスト (M6〜M16) ---
 //
 // pure 関数 (planLayoutRestore) のマトリクス分類は layout-restore.test.ts で検証済み。

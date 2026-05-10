@@ -38,6 +38,20 @@ export const ConductorClearMessage = z.object({
   timestamp: z.string().datetime(),
 });
 
+// T004: 任意状態の Conductor surface を `reserved` に戻す（`elevens reset-conductor` が送る）。
+// `broken` / `disconnected` / `idle` / `reserved` / `error` / `starting` は常に許可、
+// assigned 系（`assigning` / `running` / `asking`）は `force=true` 指定時のみ許可。
+// daemon 側で SESSION_CLEAR running 経路と同形のシーケンスを走らせ、
+// task が紐付いている場合は `markTaskAborted("reset_conductor", ...)` で abort 状態へ。
+export const ResetConductorMessage = z.object({
+  type: z.literal("RESET_CONDUCTOR"),
+  surface: z.string(),
+  /** assigned 系の Conductor を強制リセットする（task は aborted へ） */
+  force: z.boolean().optional(),
+  reason: z.string().optional(),
+  timestamp: z.string().datetime(),
+});
+
 export const AgentSpawnedMessage = z.object({
   type: z.literal("AGENT_SPAWNED"),
   conductorSurface: z.string(),
@@ -239,6 +253,7 @@ export const QueueMessage = z.discriminatedUnion("type", [
   TaskUpdatedMessage,
   ConductorDoneMessage,
   ConductorClearMessage,
+  ResetConductorMessage,
   ConductorRegisteredMessage,
   MasterRegisteredMessage,
   AgentSpawnedMessage,
@@ -263,6 +278,7 @@ export type TaskCreatedMessage = z.infer<typeof TaskCreatedMessage>;
 export type TaskUpdatedMessage = z.infer<typeof TaskUpdatedMessage>;
 export type ConductorDoneMessage = z.infer<typeof ConductorDoneMessage>;
 export type ConductorClearMessage = z.infer<typeof ConductorClearMessage>;
+export type ResetConductorMessage = z.infer<typeof ResetConductorMessage>;
 export type ConductorRegisteredMessage = z.infer<typeof ConductorRegisteredMessage>;
 export type MasterRegisteredMessage = z.infer<typeof MasterRegisteredMessage>;
 export type SessionAskMessage = z.infer<typeof SessionAskMessage>;

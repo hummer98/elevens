@@ -100,6 +100,39 @@ describe("QueueMessage discriminated union", () => {
     });
     expect(parsed.success).toBe(true);
   });
+
+  // T004: RESET_CONDUCTOR（elevens reset-conductor 経路で送信される pane 単位の局所復旧 message）
+  test("RESET_CONDUCTOR は QueueMessage にも含まれる", () => {
+    const parsed = QueueMessage.safeParse({
+      type: "RESET_CONDUCTOR",
+      surface: "surface:300",
+      timestamp: "2026-05-10T10:00:00.000Z",
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  test("RESET_CONDUCTOR は force / reason フィールド付きでもパース可能", () => {
+    const parsed = QueueMessage.safeParse({
+      type: "RESET_CONDUCTOR",
+      surface: "surface:300",
+      force: true,
+      reason: "user_reset",
+      timestamp: "2026-05-10T10:00:00.000Z",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success && parsed.data.type === "RESET_CONDUCTOR") {
+      expect(parsed.data.force).toBe(true);
+      expect(parsed.data.reason).toBe("user_reset");
+    }
+  });
+
+  test("RESET_CONDUCTOR: surface 欠落は reject", () => {
+    const parsed = QueueMessage.safeParse({
+      type: "RESET_CONDUCTOR",
+      timestamp: "2026-05-10T10:00:00.000Z",
+    });
+    expect(parsed.success).toBe(false);
+  });
 });
 
 describe("AgentTokenBoundMessage", () => {

@@ -217,13 +217,14 @@ describe("emitEvent: payload type 動作", () => {
   });
 });
 
-describe("mapAbortReason: 8 値 → 6 値マップ全網羅", () => {
+describe("mapAbortReason: 9 値 → 6 値マップ全網羅", () => {
   const cases: Array<[AbortReason, SpecAbortReason]> = [
     ["user_clear", "user_clear"],
     ["judgment_pending", "judgment_pending"],
     ["assign_failed", "assign_failed"],
     ["disconnect_timeout", "disconnect_timeout"],
     ["abort_task", "other"],
+    ["reset_conductor", "other"],
     ["resume_no_session_id", "resume_marked_aborted"],
     ["resume_no_task_run_id", "resume_marked_aborted"],
     ["resume_no_worktree", "resume_marked_aborted"],
