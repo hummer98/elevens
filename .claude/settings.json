@@ -1,4 +1,12 @@
 {
+  "skillOverrides": {
+    "using-cmux": "off",
+    "elevens-investigate": "off"
+  },
+  "enabledPlugins": {
+    "cmux-team@hummer98-cmux-team": false,
+    "using-cmux@hummer98-using-cmux": false
+  },
   "hooks": {
     "PreToolUse": [
       {

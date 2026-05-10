@@ -289,7 +289,7 @@ skill は 3 source（plugin / user / project）から prefix 付きで列挙す�
     "plugin:cmux-team",
     "plugin:cmux-agent-role",
     "user:nano-banana",
-    "project:cmux-team-investigate"
+    "project:elevens-investigate"
   ],
   "timestamp": "2026-05-01T10:00:00.000Z"
 }

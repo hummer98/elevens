@@ -55,7 +55,7 @@ describe("getLoadedPluginsAndSkills (T410)", () => {
         "/tmp/plugins/cmux-team/skills": ["cmux-team", "cmux-agent-role"],
         "/tmp/plugins/code-review/skills": ["code-review"],
         "/tmp/.claude-user/skills": ["nano-banana", "ghe"],
-        "/tmp/project/.claude/skills": ["cmux-team-investigate"],
+        "/tmp/project/.claude/skills": ["elevens-investigate"],
       }),
       userSkillsDir: "/tmp/.claude-user/skills",
       projectSkillsDir: "/tmp/project/.claude/skills",
@@ -66,7 +66,7 @@ describe("getLoadedPluginsAndSkills (T410)", () => {
       "plugin:code-review",
       "user:nano-banana",
       "user:ghe",
-      "project:cmux-team-investigate",
+      "project:elevens-investigate",
     ]);
   });
 

@@ -123,7 +123,7 @@ cmux-team/
 - テンプレートは `{{VARIABLE}}` プレースホルダーを使用
 - README.md やユーザー向けテキストは日本語
 
-別プロジェクト（mado, Dear 等）の `.team/` 調査は `.claude/skills/cmux-team-investigate/SKILL.md` を参照（npm publish 対象外）。
+別プロジェクト（mado, Dear 等）の `.team/` 調査は `.claude/skills/elevens-investigate/SKILL.md` を参照（npm publish 対象外）。
 
 ## 実装ルール（ガードレール）
 

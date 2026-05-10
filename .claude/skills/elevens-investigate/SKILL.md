@@ -1,5 +1,5 @@
 ---
-name: cmux-team-investigate
+name: elevens-investigate
 description: >
   Use when investigating another cmux-team project (e.g. ~/git/mado, ~/git/Dear) from this repository.
   Triggers: ユーザーが「mado で〜」「Dear で〜」「~/git/<別プロジェクト> で〜」のように
