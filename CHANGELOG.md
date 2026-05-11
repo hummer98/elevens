@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.0] - 2026-05-12
+
+### Added
+
+- **`artifact_added` event を events stream に emit** (T006): `addArtifact()` が `.team/logs/events.jsonl` に `artifact_added` イベントを書き出すようになった。Web Dashboard / `/elevens:watch` / retro / trace-task から「いつ・どのタスクからアーティファクトが生まれたか」を時系列で追跡可能。AI observatory layer の一部完成。フロントマター `task:` を持つアーティファクトは event の `task_id` フィールドにも反映される。`docs/spec/10-events-stream.md` §5.3 / §6.17 に schema を新設
+
+### Fixed
+
+- **サイドバー throttle 表示から reset 残時間を削除** (T005): c11 サイドバーの throttle ラベルを `⏸ reset 2h22m` 形式から `⏸ throttled` 固定に変更。`remaining` 値は単一アカウントの 5h reset header 由来で token pool モードでは pool 全体の次回 available 時刻を反映しない誤情報になりがちだった。reset 時刻の参照は TUI ヘッダ / Web Dashboard / `/rate-limit` ログに集約。`daemon.ts` 内ローカル `formatResetRemaining` を削除（-22 行）
+
+### Docs
+
+- `docs/spec/00-project-overview.md` / `docs/spec/10-events-stream.md` を events stream の 17 種構成に同期（T006 follow-up）
+- `commands/release.md` Step 7 を `gh workflow run` 前提に書き換え（tag push trigger が機能していない実運用ノートを反映）
+
 ## [0.5.0] - 2026-05-10
 
 ### Added

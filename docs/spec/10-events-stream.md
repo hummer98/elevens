@@ -91,8 +91,6 @@ EventBus が「**実 state mutation → TUI refresh**」の疎結合接続を担
 
 合計 **17 event 種**。Task lifecycle 8 種 + Conductor lifecycle 8 種 + Artifact lifecycle 1 種。
 
-> **脚注**: T357 の task body 冒頭および issue #42 progress summary では「17 event 種」と記載されているが、v2 schema 確定版に列挙されている event は本節の 16 種である。lifecycle カテゴリの再整理過程で 1 event 集約された結果。schema 上の真値は本 spec を参照。
-
 ### 5.1 Task lifecycle（8 event）
 
 | # | event | 概要 | 主な reader 用途 |
