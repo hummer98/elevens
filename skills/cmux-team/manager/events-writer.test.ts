@@ -215,6 +215,42 @@ describe("emitEvent: payload type 動作", () => {
     expect(rec.kind).toBe("rate_limit");
     expect(rec.message).toBe("API Error: Server is temporarily limiting requests");
   });
+
+  // T006 Phase 1: artifact_added
+  test("T1: artifact_added: 全 field が round-trip する", async () => {
+    await emitEvent({
+      event: "artifact_added",
+      artifact_id: "A045",
+      artifact_path: ".team/artifacts/A045-foo.md",
+      artifact_type: "research",
+      title: "調査",
+      author: "surface:100",
+      task_id: "T038",
+    });
+    const [rec] = (await readJsonl()) as [Record<string, unknown>];
+    expect(rec.event).toBe("artifact_added");
+    expect(rec.artifact_id).toBe("A045");
+    expect(rec.artifact_path).toBe(".team/artifacts/A045-foo.md");
+    expect(rec.artifact_type).toBe("research");
+    expect(rec.title).toBe("調査");
+    expect(rec.author).toBe("surface:100");
+    expect(rec.task_id).toBe("T038");
+  });
+
+  test("T2: artifact_added: task_id 省略時は record に含まれない", async () => {
+    await emitEvent({
+      event: "artifact_added",
+      artifact_id: "A046",
+      artifact_path: ".team/artifacts/A046-bar.md",
+      artifact_type: "decision",
+      title: "決定",
+      author: "unknown",
+    });
+    const [rec] = (await readJsonl()) as [Record<string, unknown>];
+    expect(rec.event).toBe("artifact_added");
+    expect(rec.artifact_id).toBe("A046");
+    expect("task_id" in rec).toBe(false);
+  });
 });
 
 describe("mapAbortReason: 9 値 → 6 値マップ全網羅", () => {

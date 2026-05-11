@@ -4,6 +4,7 @@
 import { readdir, readFile, writeFile, mkdir, unlink } from "fs/promises";
 import { existsSync } from "fs";
 import { join, basename } from "path";
+import { emitEvent } from "./events-writer";
 
 export interface ArtifactMeta {
   id: string;
@@ -230,6 +231,16 @@ export async function addArtifact(
   } catch (e: any) {
     unlinkWarning = `unlink failed: ${e?.message ?? e}`;
   }
+
+  await emitEvent({
+    event: "artifact_added",
+    artifact_id: id,
+    artifact_path: join(".team/artifacts", destFileName),
+    artifact_type: meta.type ?? "research",
+    title: meta.title ?? "",
+    author: meta.author ?? defaultAuthor,
+    ...(meta.task ? { task_id: meta.task } : {}),
+  });
 
   return { id, destPath, unlinkWarning };
 }

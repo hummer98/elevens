@@ -45,7 +45,7 @@ EventBus が「**実 state mutation → TUI refresh**」の疎結合接続を担
 | 改行 | LF |
 | encoding | UTF-8 |
 | ordering | append-only、event 発火順。同一プロセス内では `ts` 単調増加を保証する努力義務 |
-| writer | Manager daemon のみ（Phase 1）。CLI 等の外部からの emit は未サポート |
+| writer | Manager daemon および `cmux-team artifacts add` CLI。それ以外の外部 writer は未サポート |
 | reader | `tail -F` / `cmux-team events --follow` / Master watch mode |
 | 推奨 mode | append + line-buffered fsync。truncate / `O_TRUNC` 禁止 |
 
@@ -60,7 +60,7 @@ EventBus が「**実 state mutation → TUI refresh**」の疎結合接続を担
 | field | type | required | description |
 |-------|------|----------|-------------|
 | `ts` | string (ISO 8601 with ms + `Z`) | ✓ | event 発火時刻。例: `"2026-04-27T12:34:56.789Z"`（UTC、ミリ秒精度） |
-| `event` | string (snake_case) | ✓ | event 種別。§5 の 16 種のいずれか。reader は unknown 値を受信しても skip して継続する |
+| `event` | string (snake_case) | ✓ | event 種別。§5 の 17 種のいずれか。reader は unknown 値を受信しても skip して継続する |
 | `schema_version` | integer | ✓ | 現行値 `2`。breaking change 時に bump。詳細は §4 |
 
 レコード例:
@@ -89,7 +89,7 @@ EventBus が「**実 state mutation → TUI refresh**」の疎結合接続を担
 
 ## 5. Event 一覧
 
-合計 **16 event 種**。Task lifecycle 8 種 + Conductor lifecycle 8 種。
+合計 **17 event 種**。Task lifecycle 8 種 + Conductor lifecycle 8 種 + Artifact lifecycle 1 種。
 
 > **脚注**: T357 の task body 冒頭および issue #42 progress summary では「17 event 種」と記載されているが、v2 schema 確定版に列挙されている event は本節の 16 種である。lifecycle カテゴリの再整理過程で 1 event 集約された結果。schema 上の真値は本 spec を参照。
 
@@ -118,6 +118,12 @@ EventBus が「**実 state mutation → TUI refresh**」の疎結合接続を担
 | 6.14 | `conductor_start_timeout` | `STARTING_TIMEOUT_SEC`（60s）超過 | 起動失敗の検知 |
 | 6.15 | `conductor_assign_timeout` | `ASSIGNING_TIMEOUT_SEC`（60s）超過 | assign 失敗の検知 |
 | 6.16 | `conductor_disconnect_timeout` | `DISCONNECT_TIMEOUT_SEC`（300s）超過 **直前** の警告 | user 介入の窓を提供 |
+
+### 5.3 Artifact lifecycle（1 event）
+
+| # | event | 概要 | 主な reader 用途 |
+|---|-------|------|------------------|
+| 6.17 | `artifact_added` | artifact が追加された | observatory での知見追跡 |
 
 ---
 
@@ -293,6 +299,19 @@ Conductor が `assigning → running` に進んだ時、または `disconnected 
 | `conductor_surface` | string | ✓ | |
 | `task_id` | string | optional | broken 化対象の task（idle 中に disconnect していた場合は省略可） |
 | `elapsed_ms` | integer | ✓ | 既定 300000 |
+
+### 6.17 `artifact_added`
+
+`cmux-team artifacts add`（および `/elevens:artifact` 経由）でアーティファクトが追加された時に emit。`addArtifact()`（`skills/cmux-team/manager/artifact.ts`）の末尾で `events-writer` 経由に書き出す。`author` は呼び出し時の `process.env.CMUX_SURFACE` または既存 frontmatter の `author:` から決定する（未設定なら `"unknown"`）。`task_id` は frontmatter の `task:` がある場合のみ含まれる。
+
+| field | type | required | description |
+|-------|------|----------|-------------|
+| `artifact_id` | string | ✓ | `A045` 形式（`ANNN`） |
+| `artifact_path` | string | ✓ | projectRoot 相対のパス。例: `.team/artifacts/A045-foo.md` |
+| `artifact_type` | string | ✓ | `research` / `decision` / `session` / `spec` / `report` |
+| `title` | string | ✓ | frontmatter `title:` |
+| `author` | string | ✓ | surface ID（例: `surface:100`）または `"unknown"` |
+| `task_id` | string | optional | frontmatter `task:` が指定された場合のみ（例: `T038`） |
 
 ---
 

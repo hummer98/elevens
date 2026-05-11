@@ -146,6 +146,18 @@ export type EventStreamRecord =
         value?: unknown;
         previous?: unknown;
       }>;
+    }
+  | {
+      // T006 Phase 1: artifact 追加 event。`addArtifact()` の末尾で emit。
+      // observatory として「いつ・誰が・どの種類の知見を残したか」を retrospective に
+      // 追えるようにする。schema_version は bump しない（add-only）。
+      event: "artifact_added";
+      artifact_id: string;
+      artifact_path: string;
+      artifact_type: string;
+      title: string;
+      author: string;
+      task_id?: string;
     };
 
 /**
