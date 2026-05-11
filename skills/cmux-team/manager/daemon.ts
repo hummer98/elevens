@@ -4628,26 +4628,6 @@ type SidebarStatus = {
   category: "error" | "throttled" | "running" | "running_pending" | "done" | "idle";
 };
 
-/** dashboard.tsx からコピー — daemon.ts が React/Ink モジュールに依存しないようにする */
-function formatResetRemaining(resetIso: string | null): string {
-  if (!resetIso) return "";
-  const asNum = Number(resetIso);
-  const resetMs = !isNaN(asNum) && asNum > 1e9 ? asNum * 1000 : new Date(resetIso).getTime();
-  if (isNaN(resetMs)) return "";
-  const sec = Math.floor((resetMs - Date.now()) / 1000);
-  if (sec <= 0) return "0m";
-  if (sec < 60) return "<1m";
-  if (sec < 3600) return `${Math.floor(sec / 60)}m`;
-  if (sec < 86400) {
-    const h = Math.floor(sec / 3600);
-    const m = Math.floor((sec % 3600) / 60);
-    return m > 0 ? `${h}h${m}m` : `${h}h`;
-  }
-  const d = Math.floor(sec / 86400);
-  const h = Math.floor((sec % 86400) / 3600);
-  return h > 0 ? `${d}d${h}h` : `${d}d`;
-}
-
 function computeSidebarStatus(
   state: Pick<
     DaemonState,
@@ -4693,9 +4673,8 @@ function computeSidebarStatus(
       !isStale5h(state.rateLimit) &&
       state.rateLimit?.unifiedStatus === "rate_limited");
   if (throttled) {
-    const remaining = formatResetRemaining(state.rateLimit?.unified5hReset ?? null);
     return {
-      label: remaining ? `⏸ reset ${remaining}` : "⏸ throttled",
+      label: "⏸ throttled",
       icon: "pause.circle.fill",
       color: "#FF3B30",
       category: "throttled",
