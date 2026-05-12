@@ -6415,7 +6415,7 @@ async function cmdArtifacts(): Promise<void> {
   filtered.sort((a, b) => {
     const aVal = sortBy === "updated" ? (a.updated || a.created) : a.created;
     const bVal = sortBy === "updated" ? (b.updated || b.created) : b.created;
-    return aVal.localeCompare(bVal);
+    return bVal.localeCompare(aVal);
   });
 
   // 一覧表示

@@ -1179,7 +1179,7 @@ function getFilteredArtifacts(state: AppState): ArtifactMeta[] {
     list.sort((a, b) => (b.updated ?? b.created).localeCompare(a.updated ?? a.created));
   } else {
     // id 順（デフォルト）
-    list.sort((a, b) => a.id.localeCompare(b.id));
+    list.sort((a, b) => b.id.localeCompare(a.id));
   }
 
   return list;
