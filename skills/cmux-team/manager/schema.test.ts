@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import {
+  AbortTaskMessage,
   AGENT_ROLES,
   AgentSpawnedMessage,
   AgentTokenBoundMessage,
@@ -131,6 +132,81 @@ describe("QueueMessage discriminated union", () => {
       type: "RESET_CONDUCTOR",
       timestamp: "2026-05-10T10:00:00.000Z",
     });
+    expect(parsed.success).toBe(false);
+  });
+
+  // T008: ABORT_TASK は `elevens abort-task` から daemon へ送られ、
+  // T004 RESET_CONDUCTOR と同形のシーケンス（watcher 停止 → markTaskAborted →
+  // trace DB → kill → reserved）を daemon 側で集約実行する。
+  test("ABORT_TASK は QueueMessage にも含まれる", () => {
+    const parsed = QueueMessage.safeParse({
+      type: "ABORT_TASK",
+      taskId: "T123",
+      surface: "surface:400",
+      timestamp: "2026-05-12T10:00:00.000Z",
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  test("ABORT_TASK は taskTitle / journal の任意フィールド付きでもパース可能", () => {
+    const parsed = QueueMessage.safeParse({
+      type: "ABORT_TASK",
+      taskId: "T123",
+      surface: "surface:400",
+      taskTitle: "サンプルタスク",
+      journal: "reason=abort_task; user request",
+      timestamp: "2026-05-12T10:00:00.000Z",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success && parsed.data.type === "ABORT_TASK") {
+      expect(parsed.data.taskTitle).toBe("サンプルタスク");
+      expect(parsed.data.journal).toBe("reason=abort_task; user request");
+    }
+  });
+
+  test("ABORT_TASK: taskId 欠落は reject", () => {
+    const parsed = QueueMessage.safeParse({
+      type: "ABORT_TASK",
+      surface: "surface:400",
+      timestamp: "2026-05-12T10:00:00.000Z",
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  test("ABORT_TASK: surface 欠落は reject", () => {
+    const parsed = QueueMessage.safeParse({
+      type: "ABORT_TASK",
+      taskId: "T123",
+      timestamp: "2026-05-12T10:00:00.000Z",
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  test("ABORT_TASK: timestamp 欠落は reject", () => {
+    const parsed = QueueMessage.safeParse({
+      type: "ABORT_TASK",
+      taskId: "T123",
+      surface: "surface:400",
+    });
+    expect(parsed.success).toBe(false);
+  });
+});
+
+describe("AbortTaskMessage (T008)", () => {
+  const base = {
+    type: "ABORT_TASK" as const,
+    taskId: "T123",
+    surface: "surface:400",
+    timestamp: "2026-05-12T10:00:00.000Z",
+  };
+
+  test("正常系: 必須フィールドのみで parse 成功", () => {
+    const parsed = AbortTaskMessage.safeParse(base);
+    expect(parsed.success).toBe(true);
+  });
+
+  test("異常系: type 不一致は reject", () => {
+    const parsed = AbortTaskMessage.safeParse({ ...base, type: "RESET_CONDUCTOR" });
     expect(parsed.success).toBe(false);
   });
 });

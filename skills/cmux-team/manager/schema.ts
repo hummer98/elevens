@@ -52,6 +52,20 @@ export const ResetConductorMessage = z.object({
   timestamp: z.string().datetime(),
 });
 
+// T008: `elevens abort-task` から daemon に送るメッセージ。
+// daemon 側で T004 RESET_CONDUCTOR と同形のシーケンス
+//   (watcher 停止 → markTaskAborted → insertTaskSession → kill → reserved) を実行する。
+// 旧来の「CLI が直接 process.kill して CONDUCTOR_DONE を後追いする」モデルは廃止。
+// reason は journal/events で `abort_task` 固定なので任意フィールドにせず固定運用。
+export const AbortTaskMessage = z.object({
+  type: z.literal("ABORT_TASK"),
+  taskId: z.string(),
+  surface: z.string(),
+  taskTitle: z.string().optional(),
+  journal: z.string().optional(),
+  timestamp: z.string().datetime(),
+});
+
 export const AgentSpawnedMessage = z.object({
   type: z.literal("AGENT_SPAWNED"),
   conductorSurface: z.string(),
@@ -254,6 +268,7 @@ export const QueueMessage = z.discriminatedUnion("type", [
   ConductorDoneMessage,
   ConductorClearMessage,
   ResetConductorMessage,
+  AbortTaskMessage,
   ConductorRegisteredMessage,
   MasterRegisteredMessage,
   AgentSpawnedMessage,
@@ -279,6 +294,7 @@ export type TaskUpdatedMessage = z.infer<typeof TaskUpdatedMessage>;
 export type ConductorDoneMessage = z.infer<typeof ConductorDoneMessage>;
 export type ConductorClearMessage = z.infer<typeof ConductorClearMessage>;
 export type ResetConductorMessage = z.infer<typeof ResetConductorMessage>;
+export type AbortTaskMessage = z.infer<typeof AbortTaskMessage>;
 export type ConductorRegisteredMessage = z.infer<typeof ConductorRegisteredMessage>;
 export type MasterRegisteredMessage = z.infer<typeof MasterRegisteredMessage>;
 export type SessionAskMessage = z.infer<typeof SessionAskMessage>;

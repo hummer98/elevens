@@ -1755,6 +1755,114 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
       break;
     }
 
+    case "ABORT_TASK": {
+      // T008: `elevens abort-task` から届く。watcher 停止 → markTaskAborted →
+      //       trace DB → kill → resetConductor(reserved) のシーケンスを daemon 側で集約実行する。
+      //       旧モデル（CLI が直接 SIGTERM → daemon が事後に disconnect_timeout → broken）を構造的に廃止する。
+      //       RESET_CONDUCTOR / SESSION_CLEAR running と同形の paradigm（R1〜R5）。
+      const conductor = state.conductors.get(message.surface);
+      if (!conductor) {
+        await log(
+          "abort_task_ignored",
+          `surface=${message.surface} task_id=${message.taskId} reason=not_found`
+        );
+        break;
+      }
+
+      // CLI 側で task-state は既に検証済みだが、abort と他経路（SESSION_CLEAR 等）の
+      // race で stale な taskId を中止しないよう、conductor の現在 taskId と一致するかだけ見る。
+      if (conductor.taskId !== message.taskId) {
+        await log(
+          "abort_task_ignored",
+          `${formatSurface(conductor.surface, "C")} message_task_id=${message.taskId} current_task_id=${conductor.taskId ?? "-"} reason=stale_task_id`
+        );
+        break;
+      }
+
+      // R1: watcher を先に止める — pid kill 後の watcher 誤検出（disconnected 倒れ）を防ぐ。
+      if (conductor.pidWatcherInterval) {
+        clearInterval(conductor.pidWatcherInterval);
+        conductor.pidWatcherInterval = undefined;
+      }
+      if (conductor.mailboxWatcherStop) {
+        try { conductor.mailboxWatcherStop(); } catch { /* best-effort */ }
+        conductor.mailboxWatcherStop = undefined;
+      }
+
+      // R2: markTaskAborted（cascade + task_aborted + events.jsonl emit を含む）
+      const abortedTaskId = conductor.taskId;
+      const abortedTaskRunId = conductor.taskRunId;
+      const abortedSessionId = conductor.sessionId;
+      const detail = message.journal
+        ?? `${formatSurface(conductor.surface, "C")} taskRunId=${abortedTaskRunId ?? "-"}`;
+      try {
+        const { revertedChildren } = await markTaskAborted(
+          state.projectRoot,
+          abortedTaskId,
+          "abort_task",
+          detail,
+          { taskTitle: message.taskTitle ?? conductor.taskTitle ?? "" },
+        );
+        if (revertedChildren.length > 0) {
+          notifyStateChanged("daemon.ts:handleMessage:abort-task-cascade");
+        }
+      } catch (e: any) {
+        await log("error", `ABORT_TASK markTaskAborted failed: task_id=${abortedTaskId} ${e?.message ?? e}`);
+      }
+
+      // R3: trace DB の task_sessions に event="aborted" / role="conductor" 行を追加
+      //     （RESET_CONDUCTOR と対称）。retrospective 観察軸で必要。
+      if (state.traceDb) {
+        try {
+          insertTaskSession(state.traceDb, {
+            timestamp: new Date().toISOString(),
+            task_id: abortedTaskId,
+            task_run_id: abortedTaskRunId,
+            session_id: abortedSessionId ?? "",
+            role: "conductor",
+            surface: conductor.surface,
+            event: "aborted",
+          });
+        } catch (e: any) {
+          await log("error", `ABORT_TASK insertTaskSession failed: task_id=${abortedTaskId} ${e?.message ?? e}`);
+        }
+      }
+
+      // R4: pid 退避 → killClaudeProcess（旧 CLI 側の abort_signal_sent ログを daemon 側で emit）。
+      //     pid undefined のとき（既に session 起動前 or kill 済）は T260 旧挙動に合わせて
+      //     abort_signal_sent ログを出さない（method=none は CLI 側で歴史的に suppress されてきた）。
+      const killTarget = conductor.pid;
+      conductor.pid = undefined;
+      if (killTarget !== undefined) {
+        await log(
+          "abort_signal_sent",
+          `task_id=${abortedTaskId} surface=${formatSurface(conductor.surface, "C")} reason=abort_task method=kill_claude_process pid=${killTarget}`
+        );
+        const backend = ccBackend(state.backend);
+        if (backend) {
+          try {
+            await backend.killClaudeProcess(backend.surfaceToRef(conductor.surface), killTarget);
+          } catch (e: any) {
+            await log(
+              "error",
+              `ABORT_TASK killClaudeProcess failed: ${formatSurface(conductor.surface, "C")} pid=${killTarget} ${e?.message ?? e}`
+            );
+          }
+        }
+      }
+
+      // R5: resetConductor(reserved) — RESET_CONDUCTOR と同形。
+      //     `reason` は ConductorState 用のフリーテキスト（AbortReason 型ではない）。
+      await resetConductor(conductor, state.projectRoot, state.workspace ?? undefined, {
+        targetStatus: "reserved",
+        reason: "abort_task",
+      }, ccBackend(state.backend));
+
+      // 次 tick で reserved → assigning 経路（findIdleConductor）を起動
+      requestWakeup(state);
+      break;
+    }
+
     case "AGENT_TOKEN_BOUND": {
       // T323: spawn-agent の selectToken 成功直後に POST される第 2 メッセージ。
       // AGENT_SPAWNED で先に登録された agent.tokenHandle を後追い更新する。

@@ -920,6 +920,39 @@ describe("TASK_UPDATED postMessage (T183)", () => {
     expect(receivedMessages[0].taskFile).toBe(taskFile);
   });
 
+  // T008: conductor 有り経路は daemon に ABORT_TASK 1 メッセージだけを投げる。
+  //       旧来の cleanupAssignedTask + CONDUCTOR_DONE + spawn-conductor の併用は廃止。
+  test("abort-task: conductor 有りパスで ABORT_TASK が postMessage される (T008)", async () => {
+    await setupTeamDir("507", "t7", "assigned");
+    // team.json に conductors を仕込む（taskId 一致で見つかる）
+    const { writeFile: wf } = await import("fs/promises");
+    await wf(join(testDir, ".team/team.json"), JSON.stringify({
+      conductors: [
+        {
+          surface: "surface:600",
+          taskId: "507",
+          taskRunId: "task-507-run",
+          sessionId: "sess-507",
+          status: "running",
+        },
+      ],
+    }));
+    const r = await runCli([
+      "abort-task",
+      "--task-id",
+      "507",
+      "--journal",
+      "user requested abort",
+    ]);
+    expect(r.code).toBe(0);
+    expect(receivedMessages.map((m) => m.type)).toEqual(["ABORT_TASK"]);
+    expect(receivedMessages[0].taskId).toBe("507");
+    expect(receivedMessages[0].surface).toBe("surface:600");
+    expect(receivedMessages[0].journal).toBe("user requested abort");
+    expect(receivedMessages[0].taskTitle).toBe("t7");
+    expect(r.stdout).toContain("returning to reserved");
+  });
+
   test("後方互換: proxy が TASK_UPDATED を 400 で返しても CLI は成功する", async () => {
     // server を閉じて新しく 400 だけ返すサーバーに差し替える
     await new Promise<void>((resolve) => server.close(() => resolve()));

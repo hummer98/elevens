@@ -3659,6 +3659,305 @@ describe("T004 RESET_CONDUCTOR (reset-conductor CLI)", () => {
   });
 });
 
+// --- T008: ABORT_TASK (elevens abort-task) ---------------------------------
+//
+// `elevens abort-task` から daemon に届く ABORT_TASK メッセージを検証する。
+// T004 RESET_CONDUCTOR と同形の paradigm（watcher 停止 → markTaskAborted →
+// trace DB → kill → resetConductor(reserved)）に乗ることで、旧 abort 経路で
+// pid_watcher 誤発火 → 5 分後 broken に勝手に倒れる問題を構造的に解消する。
+describe("T008 ABORT_TASK (elevens abort-task)", () => {
+  test("ABORT_TASK で running Conductor が reserved に戻り、task が aborted になる", async () => {
+    const cmuxMod = await import("./cmux");
+    const { spyOn, mock } = await import("bun:test");
+    const { ClaudeCodeBackend } = await import("./claude-code-backend");
+    const paneSpy = spyOn(cmuxMod, "getPaneForSurface").mockResolvedValue("pane:1");
+    const killSpy = spyOn(ClaudeCodeBackend.prototype, "killClaudeProcess").mockResolvedValue(undefined);
+    try {
+      const { saveTaskState, loadTaskState } = await import("./task");
+      const taskRunId = "task-101-abort";
+      await saveTaskState(testDir, {
+        "101": { status: "assigned", taskRunId, sessionId: "sess-101" } as any,
+      });
+      await mkdir(join(testDir, ".team/tasks/101-abort-test"), { recursive: true });
+      await writeFile(
+        join(testDir, ".team/tasks/101-abort-test/task.md"),
+        `---\nid: 101\ntitle: abort-test\nstatus: assigned\ntaskRunId: ${taskRunId}\n---\n\nbody\n`,
+      );
+
+      const state = await createDaemon(testDir);
+      const { initDB, getTaskSessions } = await import("./trace-store");
+      state.traceDb = initDB(testDir);
+
+      const intervalHandle = setInterval(() => {}, 999999);
+      const stopMock = mock(() => {});
+      const conductor: ConductorState = {
+        surface: "surface:running-abort",
+        startedAt: new Date().toISOString(),
+        taskRunId,
+        taskId: "101",
+        taskTitle: "abort-test",
+        sessionId: "sess-101",
+        agents: [],
+        status: "running",
+        pid: 888001,
+        pidWatcherInterval: intervalHandle as unknown as ReturnType<typeof setInterval>,
+        mailboxWatcherStop: stopMock as () => void,
+      };
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "ABORT_TASK",
+        taskId: "101",
+        surface: conductor.surface,
+        taskTitle: "abort-test",
+        timestamp: new Date().toISOString(),
+      });
+
+      // R1: watcher 停止
+      expect(conductor.pidWatcherInterval).toBeUndefined();
+      expect(stopMock).toHaveBeenCalled();
+      expect(conductor.mailboxWatcherStop).toBeUndefined();
+
+      // R2: task が aborted、journal は `reason=abort_task;` で始まる
+      const ts = await loadTaskState(testDir);
+      expect(ts["101"]?.status).toBe("aborted");
+      expect(ts["101"]?.journal ?? "").toMatch(/^reason=abort_task;/);
+
+      // R3: trace DB に event="aborted" / role="conductor" 行が追加される
+      const rows = getTaskSessions(state.traceDb!, { taskId: "101", event: "aborted" });
+      expect(rows.length).toBeGreaterThanOrEqual(1);
+      const abortedRow = rows.find((r: any) => r.role === "conductor" && r.task_run_id === taskRunId);
+      expect(abortedRow).toBeDefined();
+      expect(abortedRow?.surface).toBe(conductor.surface);
+
+      // R4: killClaudeProcess が呼ばれる
+      expect(killSpy).toHaveBeenCalled();
+
+      // R5: surface が reserved に戻り、task 情報がクリアされる（broken に倒れない）
+      expect(conductor.status).toBe("reserved");
+      expect(conductor.taskId).toBeUndefined();
+      expect(conductor.taskRunId).toBeUndefined();
+      expect(conductor.pid).toBeUndefined();
+
+      state.traceDb?.close();
+    } finally {
+      paneSpy.mockRestore();
+      killSpy.mockRestore();
+    }
+  });
+
+  test("ABORT_TASK 後に 6 分経過しても disconnect_timeout / broken に遷移しない (本タスクの核心)", async () => {
+    const cmuxMod = await import("./cmux");
+    const { spyOn, mock } = await import("bun:test");
+    const { ClaudeCodeBackend } = await import("./claude-code-backend");
+    const paneSpy = spyOn(cmuxMod, "getPaneForSurface").mockResolvedValue("pane:1");
+    const killSpy = spyOn(ClaudeCodeBackend.prototype, "killClaudeProcess").mockResolvedValue(undefined);
+    try {
+      const { saveTaskState } = await import("./task");
+      const taskRunId = "task-102-clock";
+      await saveTaskState(testDir, {
+        "102": { status: "assigned", taskRunId } as any,
+      });
+      await mkdir(join(testDir, ".team/tasks/102-clock-test"), { recursive: true });
+      await writeFile(
+        join(testDir, ".team/tasks/102-clock-test/task.md"),
+        `---\nid: 102\ntitle: clock-test\nstatus: assigned\n---\n\nbody\n`,
+      );
+
+      const state = await createDaemon(testDir);
+      const { initDB } = await import("./trace-store");
+      state.traceDb = initDB(testDir);
+
+      const conductor: ConductorState = {
+        surface: "surface:running-clock",
+        startedAt: new Date().toISOString(),
+        taskRunId,
+        taskId: "102",
+        agents: [],
+        status: "running",
+        pid: 888002,
+        pidWatcherInterval: setInterval(() => {}, 999999) as unknown as ReturnType<typeof setInterval>,
+        mailboxWatcherStop: mock(() => {}) as () => void,
+      };
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "ABORT_TASK",
+        taskId: "102",
+        surface: conductor.surface,
+        timestamp: new Date().toISOString(),
+      });
+
+      expect(conductor.status).toBe("reserved");
+
+      // わざと disconnectedAt を 10 分前に書き込んでも、status が "disconnected" でない限り
+      // monitorConductors (daemon.ts:4222) の disconnected ガードで skip されることを確認。
+      conductor.disconnectedAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      await monitorConductors(state);
+
+      // reserved のまま broken に倒れていない
+      expect(conductor.status).toBe("reserved");
+
+      state.traceDb?.close();
+    } finally {
+      paneSpy.mockRestore();
+      killSpy.mockRestore();
+    }
+  });
+
+  test("ABORT_TASK が未登録 surface に来ても abort_task_ignored ログのみで state 不変", async () => {
+    const state = await createDaemon(testDir);
+    // conductors map は空のまま
+    await handleMessage(state, {
+      type: "ABORT_TASK",
+      taskId: "999",
+      surface: "surface:nonexistent",
+      timestamp: new Date().toISOString(),
+    });
+    expect(state.conductors.size).toBe(0);
+  });
+
+  test("ABORT_TASK で conductor.taskId と message.taskId が不一致なら stale_task_id で ignored", async () => {
+    const state = await createDaemon(testDir);
+    const intervalHandle = setInterval(() => {}, 999999);
+    const conductor: ConductorState = {
+      surface: "surface:stale-abort",
+      startedAt: new Date().toISOString(),
+      taskRunId: "task-old",
+      taskId: "old-id",
+      agents: [],
+      status: "running",
+      pid: 888003,
+      pidWatcherInterval: intervalHandle as unknown as ReturnType<typeof setInterval>,
+    };
+    state.conductors.set(conductor.surface, conductor);
+
+    await handleMessage(state, {
+      type: "ABORT_TASK",
+      taskId: "new-id", // mismatch
+      surface: conductor.surface,
+      timestamp: new Date().toISOString(),
+    });
+
+    // state は不変（watcher も止まらない）
+    expect(conductor.status).toBe("running");
+    expect(conductor.taskId).toBe("old-id");
+    expect(conductor.pid).toBe(888003);
+    expect(conductor.pidWatcherInterval).toBe(intervalHandle as unknown as ReturnType<typeof setInterval>);
+
+    // teardown
+    clearInterval(intervalHandle);
+  });
+
+  test("ABORT_TASK で conductor.pid === undefined のときは kill は呼ばれない", async () => {
+    const cmuxMod = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const { ClaudeCodeBackend } = await import("./claude-code-backend");
+    const paneSpy = spyOn(cmuxMod, "getPaneForSurface").mockResolvedValue("pane:1");
+    const killSpy = spyOn(ClaudeCodeBackend.prototype, "killClaudeProcess").mockResolvedValue(undefined);
+    try {
+      const { saveTaskState } = await import("./task");
+      const taskRunId = "task-103-nopid";
+      await saveTaskState(testDir, {
+        "103": { status: "assigned", taskRunId } as any,
+      });
+      await mkdir(join(testDir, ".team/tasks/103-nopid-test"), { recursive: true });
+      await writeFile(
+        join(testDir, ".team/tasks/103-nopid-test/task.md"),
+        `---\nid: 103\ntitle: nopid-test\nstatus: assigned\n---\n\nbody\n`,
+      );
+
+      const state = await createDaemon(testDir);
+      const { initDB } = await import("./trace-store");
+      state.traceDb = initDB(testDir);
+
+      const conductor: ConductorState = {
+        surface: "surface:nopid-abort",
+        startedAt: new Date().toISOString(),
+        taskRunId,
+        taskId: "103",
+        agents: [],
+        status: "running",
+        // pid は undefined
+      };
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "ABORT_TASK",
+        taskId: "103",
+        surface: conductor.surface,
+        timestamp: new Date().toISOString(),
+      });
+
+      expect(killSpy).not.toHaveBeenCalled();
+      expect(conductor.status).toBe("reserved");
+      state.traceDb?.close();
+    } finally {
+      paneSpy.mockRestore();
+      killSpy.mockRestore();
+    }
+  });
+
+  test("ABORT_TASK で子 task が draft に巻き戻ると revertedChildren cascade が起きる", async () => {
+    const cmuxMod = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const { ClaudeCodeBackend } = await import("./claude-code-backend");
+    const paneSpy = spyOn(cmuxMod, "getPaneForSurface").mockResolvedValue("pane:1");
+    const killSpy = spyOn(ClaudeCodeBackend.prototype, "killClaudeProcess").mockResolvedValue(undefined);
+    try {
+      const { saveTaskState, loadTaskState } = await import("./task");
+      const taskRunId = "task-104-parent";
+      // 親 task=104 (assigned) + 子 task=105 (ready, depends_on: [104])
+      await saveTaskState(testDir, {
+        "104": { status: "assigned", taskRunId } as any,
+        "105": { status: "ready" } as any,
+      });
+      await mkdir(join(testDir, ".team/tasks/104-parent"), { recursive: true });
+      await writeFile(
+        join(testDir, ".team/tasks/104-parent/task.md"),
+        `---\nid: 104\ntitle: parent\nstatus: assigned\n---\n\nbody\n`,
+      );
+      await mkdir(join(testDir, ".team/tasks/105-child"), { recursive: true });
+      await writeFile(
+        join(testDir, ".team/tasks/105-child/task.md"),
+        `---\nid: 105\ntitle: child\nstatus: ready\ndepends_on: [104]\n---\n\nbody\n`,
+      );
+
+      const state = await createDaemon(testDir);
+      const { initDB } = await import("./trace-store");
+      state.traceDb = initDB(testDir);
+
+      const conductor: ConductorState = {
+        surface: "surface:cascade-abort",
+        startedAt: new Date().toISOString(),
+        taskRunId,
+        taskId: "104",
+        agents: [],
+        status: "running",
+        pid: 888004,
+      };
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "ABORT_TASK",
+        taskId: "104",
+        surface: conductor.surface,
+        timestamp: new Date().toISOString(),
+      });
+
+      const ts = await loadTaskState(testDir);
+      expect(ts["104"]?.status).toBe("aborted");
+      // 子 task は draft に巻き戻される（cascade）
+      expect(ts["105"]?.status).toBe("draft");
+      expect(conductor.status).toBe("reserved");
+      state.traceDb?.close();
+    } finally {
+      paneSpy.mockRestore();
+      killSpy.mockRestore();
+    }
+  });
+});
+
 // --- T255: initializeLayout マトリクス復帰 統合テスト (M6〜M16) ---
 //
 // pure 関数 (planLayoutRestore) のマトリクス分類は layout-restore.test.ts で検証済み。

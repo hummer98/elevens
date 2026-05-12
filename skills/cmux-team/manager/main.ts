@@ -5149,54 +5149,21 @@ async function cmdAbortTask(): Promise<void> {
     return;
   }
 
-  // 3〜5. クリーンアップ（sub-agent close, PID kill, worktree 削除）
-  const cleanup = await cleanupAssignedTask(conductor);
-  // T260: 実際にどの手段で停止シグナルを送ったか記録する。
-  //       method=none はログしない（シグナルを送っていないため）。
-  if (cleanup.method !== "none") {
-    await log(
-      "abort_signal_sent",
-      `task_id=${taskId} surface=${formatSurface(conductor.surface, "C")} reason=abort_task method=${cleanup.method}${cleanup.pid !== undefined ? ` pid=${cleanup.pid}` : ""}`
-    );
-  }
-
-  // 6. T290: taskState 書き換え・cascade・task_aborted log・child_reverted_to_draft log を
-  //          markTaskAborted に集約。journal は detail として渡す。
-  await markTaskAborted(PROJECT_ROOT, taskId, "abort_task", journal, { taskTitle: title });
-
-  // タスク-セッション索引に記録
-  try {
-    const db = initDB(PROJECT_ROOT);
-    insertTaskSession(db, {
-      timestamp: new Date().toISOString(),
-      task_id: taskId,
-      task_run_id: conductor?.taskRunId,
-      session_id: conductor?.sessionId ?? "",
-      role: "conductor",
-      surface: conductor?.surface,
-      event: "aborted",
-    });
-    db.close();
-  } catch (e: any) {
-    log("error", `trace DB aborted insert failed: ${e?.message ?? e}`).catch(() => {});
-  }
-
-  // 7. CONDUCTOR_DONE メッセージ送信（daemon に通知）
+  // 3. T008: daemon に ABORT_TASK を投げ、watcher 停止 → markTaskAborted →
+  //    insertTaskSession → killClaudeProcess → resetConductor(reserved) を集約実行させる。
+  //    旧モデル (CLI が直接 SIGTERM して CONDUCTOR_DONE を後追い) は廃止：
+  //    pid_watcher が誤発火する前に watcher を確実に停止するため、シーケンスを daemon 側に
+  //    一本化する。reserved に倒すと findIdleConductor が次 tick で拾って自然に再 spawn する。
   await postMessage({
-    type: "CONDUCTOR_DONE",
+    type: "ABORT_TASK",
+    taskId,
     surface: conductor.surface,
-    taskRunId: conductor.taskRunId,
-    success: false,
-    reason: "aborted",
+    taskTitle: title,
+    journal,
     timestamp: new Date().toISOString(),
   });
 
-  // 8. Conductor を再起動（session-id は cmdSpawnConductor が自己生成して daemon に通知する）
-  await cmux.send(conductor.surface, `export CMUX_SURFACE=${conductor.surface} CMUX_CLAUDE_HOOKS_DISABLED=1\n`);
-  await sleep(500);
-  await cmux.send(conductor.surface, buildLaunchCommand(PROJECT_ROOT, "elevens spawn-conductor") + "\n");
-
-  console.log(`OK aborted ${taskId} (conductor ${conductor.surface} restarting)`);
+  console.log(`OK aborted ${taskId} (conductor ${conductor.surface} returning to reserved)`);
 }
 
 /**
