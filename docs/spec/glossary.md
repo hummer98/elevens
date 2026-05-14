@@ -12,7 +12,7 @@ glossary には要約と一次リンクのみを置く方針を取る。
 2. [Task 関連](#2-task-関連)
 3. [Task FSM 状態](#3-task-fsm-状態6-値--関連)
 4. [Task 属性](#4-task-属性)
-5. [Conductor FSM 状態](#5-conductor-fsm-状態7-値)
+5. [Conductor FSM 状態](#5-conductor-fsm-状態9-値)
 6. [Token Pool](#6-token-pool)
 7. [テンプレート変数](#7-テンプレート変数)
 8. [Sync state](#8-sync-stategit-同期判定)
@@ -41,6 +41,9 @@ glossary には要約と一次リンクのみを置く方針を取る。
 |------|------|-----------|------|
 | Task（タスク） | 単位作業の定義。`.team/tasks/TNNN-slug/task.md` で表現し、CLI（`create-task` / `update-task`）経由でのみ作成・更新する。 | [`00-project-overview.md#per-project-statecmux-team-start-で作成`](00-project-overview.md#per-project-statecmux-team-start-で作成), [`../../CLAUDE.md#タスクの作成更新は-cli-経由直接ファイル操作禁止`](../../CLAUDE.md#タスクの作成更新は-cli-経由直接ファイル操作禁止) | TaskRun / Task FSM / Artifact |
 | Artifact（アーティファクト） | 「わかったこと」の記録。`.team/artifacts/Axxx-<slug>.md`。誰でも直接ファイル作成可（Task との対比）。`type` は research / decision / session / spec / report。 | [`../../CLAUDE.md#artifacts知見の記録`](../../CLAUDE.md#artifacts知見の記録) | Task / `/artifact` コマンド |
+| Epic（PoC） | 「達成したいゴール」の単位。`.team/epics/ENNN-<slug>.md` で表現（単一ファイル、frontmatter + body）。Master が intent を書き、Epic Planner（`/loop`）が Task 分解・再分解・done 判定を自律実行する。CLI: `elevens epic create / list / show / resume / abort`。 | [`14-epic.md`](14-epic.md) | Task / epic_id / Epic Planner |
+| epic_id | Task frontmatter の optional フィールド。Epic 配下の Task を逆引きするための紐づけ（例: `epic_id: E001`）。指定方法は `elevens create-task --epic-id E001`。 | [`14-epic.md#6-task-との-link`](14-epic.md#6-task-との-link) | Epic / Task |
+| Epic Planner | Epic ごとに `/loop` で自律稼働する Planner ロール。template は `skills/cmux-team/templates/ja/epic-planner.md`（既存の Task 用 `planner.md` とは別物）。各 wakeup で epic.md を read → 次の Task を create-task / 既存 Task の結果確認 / done 判定 / 再分解 を行う。 | [`14-epic.md`](14-epic.md), [`../../skills/cmux-team/templates/ja/epic-planner.md`](../../skills/cmux-team/templates/ja/epic-planner.md) | Epic / `/loop` |
 | Deliverable（納品物） | `close-task` で指定するタスクの納品方式。kind は `files` / `merged` / `pr` / `none`。auto-close 経路は `none` を daemon が自動付与。 | [`08-runtime-boundary.md`](08-runtime-boundary.md), [`05-install-and-infrastructure.md#cli-サブコマンド`](05-install-and-infrastructure.md#cli-サブコマンド), [`07-state-machine.md#21-状態一覧-6-値`](07-state-machine.md#21-状態一覧-6-値) | close-task / Task FSM (closed) |
 | TaskRun / taskRunId | タスク実行 ID（`task-NNN-TIMESTAMP` 形式）。worktree 名・出力ディレクトリ（`.team/tasks/TNNN-slug/runs/<taskRunId>/`）の根として使う。 | [`05-install-and-infrastructure.md#タスク状態の拡張フィールドresume-用`](05-install-and-infrastructure.md#タスク状態の拡張フィールドresume-用), [`00-project-overview.md#per-project-statecmux-team-start-で作成`](00-project-overview.md#per-project-statecmux-team-start-で作成) | Task / OUTPUT_DIR / Worktree |
 | conductorSlot | assigned タスクが占有する Conductor の surface ID（例: `surface:5`）。resume 用 metadata として `task-state.json` に記録される。 | [`05-install-and-infrastructure.md#タスク状態の拡張フィールドresume-用`](05-install-and-infrastructure.md#タスク状態の拡張フィールドresume-用) | surface / sessionId / resume |
@@ -59,7 +62,7 @@ glossary には要約と一次リンクのみを置く方針を取る。
 | ready | 実行待ち。assignable な状態。`update-task --status ready` で昇格、昇格時は sync state ガードが走る。 | [`07-state-machine.md#21-状態一覧-6-値`](07-state-machine.md#21-状態一覧-6-値), [`../../CLAUDE.md#ready-昇格時の-sync-state-ガード`](../../CLAUDE.md#ready-昇格時の-sync-state-ガード) | sync state / draft |
 | assigned | Conductor に割り当て済み。`assignTask` 成功で遷移。assigned のタスク本文の編集は禁止（変更は `abort-task` → 新タスク）。 | [`07-state-machine.md#21-状態一覧-6-値`](07-state-machine.md#21-状態一覧-6-値), [`../../CLAUDE.md#タスクの作成更新は-cli-経由直接ファイル操作禁止`](../../CLAUDE.md#タスクの作成更新は-cli-経由直接ファイル操作禁止) | Conductor (assigning/running) |
 | closed | 正常完了。`close-task` 必須引数 `--deliverable-kind` で kind を指定。auto-close 経路は `kind: "none"` を daemon が自動付与。 | [`07-state-machine.md#21-状態一覧-6-値`](07-state-machine.md#21-状態一覧-6-値), [`05-install-and-infrastructure.md#cli-サブコマンド`](05-install-and-infrastructure.md#cli-サブコマンド) | Deliverable |
-| aborted | 中止状態。`abort-task` CLI、disconnect timeout、user_clear、judgment_pending 等から遷移。`restart-task` で `ready` に戻せる。 | [`07-state-machine.md#21-状態一覧-6-値`](07-state-machine.md#21-状態一覧-6-値), [`07-state-machine.md#24-cascade-ルール-t241`](07-state-machine.md#24-cascade-ルール-t241) | cascade / restart-task |
+| aborted | 中止状態。`abort-task` CLI、disconnect timeout、user_clear、judgment_pending、`reset-conductor`（T004）等から遷移。`restart-task` で `ready` に戻せるほか、`close-task --force`（T001）で `closed` に上書きする救済経路もある（`abortedAt` は残置、`closedAt` を新規付与）。 | [`07-state-machine.md#21-状態一覧-6-値`](07-state-machine.md#21-状態一覧-6-値), [`07-state-machine.md#24-cascade-ルール-t241`](07-state-machine.md#24-cascade-ルール-t241) | cascade / restart-task / close-task --force |
 | deleted | 明示削除（終端）。draft / ready からのみ遷移可能。assigned は `abort-task` を使う。 | [`07-state-machine.md#21-状態一覧-6-値`](07-state-machine.md#21-状態一覧-6-値) | delete-task |
 | disconnected | （Conductor 状態だが Task と連動）Claude プロセス不在 / SessionEnd / PID 死。`DISCONNECT_TIMEOUT_SEC`（300s）超過で `broken` に遷移し、紐づくタスクは `aborted` + cascade。 | [`07-state-machine.md#11-状態一覧-9-値`](07-state-machine.md#11-状態一覧-9-値), [`07-state-machine.md#3-conductor--task-の同時遷移`](07-state-machine.md#3-conductor--task-の同時遷移) | broken / cascade |
 

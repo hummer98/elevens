@@ -38,6 +38,8 @@ export interface TaskMeta {
   kind?: string;
   /** T229: 作成元 surface（`surface:NNN`）。frontmatter `created_by` 由来 */
   createdBy?: string;
+  /** Epic 配下の Task に付く親 Epic ID（例: "E001"）。frontmatter `epic_id` 由来。docs/spec/14-epic.md */
+  epicId?: string;
 }
 
 export interface TaskState {
@@ -301,6 +303,7 @@ export function parseTaskMeta(content: string, fileName: string, filePath: strin
   const baseBranch = unquote(fm.match(/^base_branch:\s*(.+)$/m)?.[1]?.trim() ?? "");
   const kind = unquote(fm.match(/^kind:\s*(.+)$/m)?.[1]?.trim() ?? "");
   const createdBy = unquote(fm.match(/^created_by:\s*(.+)$/m)?.[1]?.trim() ?? "");
+  const epicId = unquote(fm.match(/^epic_id:\s*(.+)$/m)?.[1]?.trim() ?? "");
 
   // depends_on: [033, 034] or depends_on: 033
   let dependsOn: string[] = [];
@@ -339,6 +342,7 @@ export function parseTaskMeta(content: string, fileName: string, filePath: strin
     baseBranch: baseBranch || undefined,
     kind: kind || undefined,
     createdBy: createdBy || undefined,
+    epicId: epicId || undefined,
   };
 }
 
@@ -861,6 +865,8 @@ export async function createTaskProgrammatic(
     sectionHeader?: string;
     /** T229: 作成元 surface（`surface:NNN`）。frontmatter に `created_by:` として埋め込む */
     createdBy?: string;
+    /** Epic 配下の Task に付ける親 Epic ID（例: "E001"）。docs/spec/14-epic.md */
+    epicId?: string;
   },
 ): Promise<{ id: string; filePath: string; dirName: string; relPath: string }> {
   const title = opts.title;
@@ -935,6 +941,7 @@ export async function createTaskProgrammatic(
   }
   if (kind) frontmatterLines.push(`kind: ${kind}`);
   if (opts.createdBy) frontmatterLines.push(`created_by: ${opts.createdBy}`);
+  if (opts.epicId) frontmatterLines.push(`epic_id: ${opts.epicId}`);
   frontmatterLines.push(`created_at: ${new Date().toISOString()}`);
 
   const content = `---

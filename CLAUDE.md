@@ -1,6 +1,6 @@
-# cmux-team
+# elevens
 
-Claude Code + cmux によるマルチエージェント開発オーケストレーションのスキル/コマンドパッケージ。
+Claude Code + cmux によるマルチエージェント開発オーケストレーションのプロジェクト。中核は cmux-team スキル/コマンドパッケージ。
 Master（ユーザー対話）→ Manager（イベント駆動監視）→ Conductor（タスク実行）→ Agent（実作業）の4層構造。
 
 ## プロジェクトミッション
@@ -17,7 +17,7 @@ Master（ユーザー対話）→ Manager（イベント駆動監視）→ Condu
 
 ### 観察箱 (AI Observatory) としての性格
 
-cmux-team は「AI を働かせる基盤」であると同時に「**AI のふるまいを観察して洞察を得るためのプラットフォーム**」である。観察は二層構造を取る:
+elevens は「AI を働かせる基盤」であると同時に「**AI のふるまいを観察して洞察を得るためのプラットフォーム**」である。観察は二層構造を取る:
 
 | 層 | 媒体 | 主な利用 |
 |---|---|---|
@@ -69,7 +69,7 @@ cmux-team は「AI を働かせる基盤」であると同時に「**AI のふ�
 ## リポジトリ構造
 
 ```
-cmux-team/
+elevens/
 ├── skills/cmux-team/
 │   ├── SKILL.md              # 4層アーキテクチャ定義スキル
 │   ├── manager/              # Manager daemon（TypeScript / Bun）
@@ -83,7 +83,7 @@ cmux-team/
 
 **c11 (Stage-11-Agentics/c11) 関連の概念・API・cmux との差分が必要なときは `skills/c11/SKILL.md` を Read する。** elevens は c11 を substrate として動くため、surface manifest / lineage / mailbox / flash / blueprint / `c11 tree` / `set-metadata` / wrapper 経由 hook 等を頻繁に扱う。
 
-**cmux-team の仕様・挙動について質問された場合は、`docs/spec/` の該当ファイルを Read して回答すること。**
+**elevens の仕様・挙動について質問された場合は、`docs/spec/` の該当ファイルを Read して回答すること。**
 
 | ファイル | 内容 |
 |---------|------|
@@ -96,6 +96,7 @@ cmux-team/
 | `docs/spec/08-runtime-boundary.md` | Deliverable 型・close-task 仕様 |
 | `docs/spec/09-token-pool.md` | Token pool — `cmux-team token` CLI・DB スキーマ・選択アルゴリズム・設定 |
 | `docs/spec/11-metrics.md` | Metrics taxonomy（6 軸）・data source・CodeDNA 評価判定基準 |
+| `docs/spec/14-epic.md` | Epic（PoC）— 上位 orchestration の達成ゴール単位、Epic Planner（`/loop`）、Hybrid done 判定、budget |
 
 ## スキル・コマンドの追加・修正方法
 
@@ -184,6 +185,59 @@ cmux-team update-task --task-id 112 --status ready
 - `--exclusive` 同士は共存可能（ID 昇順に順次排他実行）
 - `--exclusive` と非排他 `--run-after-all` は共存不可
 - 詳細な FSM 仕様は `docs/spec/07-state-machine.md` を参照
+
+## Epic（PoC）
+
+Task / Artifact と並ぶ第三のカテゴリ。「達成したい E2E シナリオと勘所」をユーザーが定義し、
+細かい Task 分解・実装判断は **Epic Planner**（`/loop` 自律エージェント）に委譲する上位 orchestration layer。
+Master / Manager / Conductor / Agent の 4 層に**上から覆いかぶさる形**で動く。
+
+### CLI（PoC）
+
+```bash
+# 新規作成
+elevens epic create --title "TITLE" --body "INTENT" [--budget-token 500000] [--budget-iteration 30] [--budget-hours 24]
+
+# 一覧 / 詳細
+elevens epic list [--status active|blocked|closed|aborted|all]
+elevens epic show E001
+
+# 状態操作（人間 / Master 経路のみ）
+elevens epic resume E001 [--budget-token N] [--budget-iteration N] [--budget-hours H]  # blocked → active
+elevens epic abort  E001 [--journal TEXT]                                                # → aborted
+```
+
+### Task との link
+
+```bash
+elevens create-task --title "..." --status ready --epic-id E001 --body "..."
+```
+
+`--epic-id E001` を付けた Task は frontmatter に `epic_id: E001` として記録され、`epic show E001` で逆引きされる。
+
+### Status FSM（4 値）
+
+`active`（Planner 稼働中）→ `closed`（done、Planner が evidence 付きで closed に書き換える）/ `blocked`（budget 超過 / 判断保留 → Master 介入）/ `aborted`（中止）。
+詳細は `docs/spec/14-epic.md` §4。
+
+### Epic Planner の起動（Phase 1 PoC = 手動）
+
+別ペインで Claude Code を起動し、`skills/cmux-team/templates/ja/epic-planner.md` の内容をシステムプロンプト相当として読み込ませ、
+担当 Epic ID（例: `E001`）を伝えて `/loop` を起動する。
+Phase 2 で `elevens epic start E001` が daemon 経由で専用 pane を spawn する想定。
+
+### Hybrid done 判定
+
+Planner が `status=closed` に遷移するときは **evidence を Journal に必ず記録**する:
+Intent の Done 条件と、それを満たした証拠（テスト結果 / 関連 Task ID と closed 状態 / artifact 参照 / 判定理由）。
+evidence 抜きの closed は仕様違反。`docs/spec/14-epic.md` §7 を参照。
+
+### Budget 超過時
+
+Planner は自身で `status=blocked` に書き換え `/loop` を抜ける。Master / 人間が `elevens epic resume`（budget 増額可）か `abort` を判断。
+詳細は `docs/spec/14-epic.md` §8。
+
+> Phase 1 PoC スコープ: CLI + epic.md + Planner template + 手動 `/loop`。daemon 統合 / 自動 spawn / abort cascade / budget hard enforcement は Phase 2。
 
 ## 通信プロトコル
 

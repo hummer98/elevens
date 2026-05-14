@@ -75,6 +75,7 @@ import { loadTaskState, loadTasks, saveTaskState, createTaskProgrammatic, cascad
 // T303: task-state mutation は applyTaskEvent / updateTaskSessionId 経由のみ
 import { applyTaskEvent, refreshTaskStateFromDisk } from "./state-machine/task-state-store";
 import { loadArtifacts, searchArtifacts, validateArtifact, addArtifact } from "./artifact";
+import { loadEpics, readEpic, createEpic, updateEpicStatus, listEpicTasks, EPIC_STATUSES, type EpicStatus } from "./epic";
 import { runPreflight, printPreflightIssues } from "./preflight";
 import { acquireOrExit, installCrashHandler, releasePidFile } from "./pidfile";
 import { ensureEnvrcHookPrompt } from "./envrc-prompt";
@@ -303,6 +304,7 @@ const WRITE_COMMANDS: Record<string, true | Set<string>> = {
   "delete-agent-instructions": true,
   artifacts: new Set(["add"]),
   token: new Set(["add", "remove", "rotate", "set-plan", "promote", "migrate-subscription"]),
+  epic: new Set(["create", "resume", "abort"]),
 };
 
 function isWriteCommand(command: string | undefined, subCmd: string | undefined): boolean {
@@ -4168,6 +4170,11 @@ async function cmdCreateTask(): Promise<void> {
   const runAfterAll = runAfterAllArg || exclusiveArg;
   const exclusive = exclusiveArg;
   const kind = getArg("kind") || "";
+  const epicId = getArg("epic-id");
+  if (epicId && !/^E\d{3}$/.test(epicId)) {
+    console.error(`Error: --epic-id は E001 形式（got: ${epicId}）`);
+    process.exit(1);
+  }
 
   if (runAfterAllArg && exclusiveArg) {
     await log(
@@ -4216,6 +4223,8 @@ async function cmdCreateTask(): Promise<void> {
       sectionHeader: t("task_section_header"),
       // T229: 作成元 surface を CMUX_SURFACE から拾い createdBy として記録する
       createdBy: process.env.CMUX_SURFACE,
+      // Epic（PoC）: --epic-id 指定時に Task → Epic の親子関係を記録
+      epicId,
     });
   } catch (e: any) {
     if (e?.code === "RUN_AFTER_ALL_CONFLICT") {
@@ -6393,6 +6402,208 @@ async function cmdArtifacts(): Promise<void> {
   }
 }
 
+/**
+ * Epic（PoC）サブコマンド本体。spec: docs/spec/14-epic.md。
+ * create / list / show / resume / abort をサポート。start は Phase 2 で daemon 統合。
+ */
+async function cmdEpic(): Promise<void> {
+  const sub = args[1];
+  if (!sub || hasHelpFlag()) {
+    showEpicUsage();
+    return;
+  }
+  switch (sub) {
+    case "create":
+      await cmdEpicCreate();
+      break;
+    case "list":
+      await cmdEpicList();
+      break;
+    case "show":
+      await cmdEpicShow();
+      break;
+    case "resume":
+      await cmdEpicResume();
+      break;
+    case "abort":
+      await cmdEpicAbort();
+      break;
+    default:
+      console.error(`Unknown epic subcommand: ${sub}`);
+      showEpicUsage();
+      process.exit(1);
+  }
+}
+
+function showEpicUsage(): void {
+  console.log(`Usage: elevens epic <subcommand>
+
+Subcommands:
+  create --title TITLE [--body INTENT] [--budget-token N] [--budget-iteration N] [--budget-hours H]
+                          新規 Epic を作成（status=active）。
+  list [--status STATUS]  Epic 一覧（STATUS: active|blocked|closed|aborted|all、default=all）。
+  show E001               詳細表示（frontmatter + body + 配下 Task 一覧）。
+  resume E001 [--budget-token N] [--budget-iteration N] [--budget-hours H] [--journal TEXT]
+                          blocked → active へ遷移（必要なら budget 増額）。
+  abort E001 [--journal TEXT]
+                          active / blocked → aborted。
+
+詳細仕様: docs/spec/14-epic.md`);
+}
+
+async function cmdEpicCreate(): Promise<void> {
+  const title = requireArg("title");
+  const body = getArg("body");
+  const budgetTokenRaw = getArg("budget-token");
+  const budgetIterationRaw = getArg("budget-iteration");
+  const budgetHoursRaw = getArg("budget-hours");
+  const createdBy = getArg("created-by") ?? process.env.CMUX_SURFACE ?? "unknown";
+
+  const budget: Partial<{ token: number; iteration: number; wall_clock_hours: number }> = {};
+  if (budgetTokenRaw) {
+    const n = parseInt(budgetTokenRaw, 10);
+    if (isNaN(n) || n <= 0) {
+      console.error(`Error: --budget-token は正の整数（got: ${budgetTokenRaw}）`);
+      process.exit(1);
+    }
+    budget.token = n;
+  }
+  if (budgetIterationRaw) {
+    const n = parseInt(budgetIterationRaw, 10);
+    if (isNaN(n) || n <= 0) {
+      console.error(`Error: --budget-iteration は正の整数（got: ${budgetIterationRaw}）`);
+      process.exit(1);
+    }
+    budget.iteration = n;
+  }
+  if (budgetHoursRaw) {
+    const n = parseFloat(budgetHoursRaw);
+    if (isNaN(n) || n <= 0) {
+      console.error(`Error: --budget-hours は正の数値（got: ${budgetHoursRaw}）`);
+      process.exit(1);
+    }
+    budget.wall_clock_hours = n;
+  }
+
+  const result = await createEpic({
+    projectRoot: PROJECT_ROOT,
+    title,
+    body,
+    budget,
+    createdBy,
+  });
+  console.log(`Epic ${result.id} created: ${result.filePath}`);
+}
+
+async function cmdEpicList(): Promise<void> {
+  const filter = getArg("status") ?? "all";
+  if (filter !== "all" && !EPIC_STATUSES.includes(filter as EpicStatus)) {
+    console.error(`Error: --status は ${EPIC_STATUSES.join(" | ")} | all（got: ${filter}）`);
+    process.exit(1);
+  }
+
+  const epics = await loadEpics(PROJECT_ROOT);
+  const filtered = filter === "all"
+    ? epics
+    : epics.filter((e) => e.status === filter);
+
+  if (filtered.length === 0) {
+    console.log("(no epics)");
+    return;
+  }
+
+  filtered.sort((a, b) => a.id.localeCompare(b.id));
+  for (const e of filtered) {
+    const date = (e.updated ?? e.created).slice(0, 10);
+    console.log(`${e.id}  ${e.status.padEnd(8)}  ${e.title}  ${date}`);
+  }
+}
+
+async function cmdEpicShow(): Promise<void> {
+  const id = args[2];
+  if (!id) {
+    console.error("Error: Epic ID が必要です（例: elevens epic show E001）");
+    process.exit(1);
+  }
+  const epic = await readEpic(PROJECT_ROOT, id);
+  if (!epic) {
+    console.error(`Error: Epic ${id} が見つかりません`);
+    process.exit(1);
+  }
+
+  console.log(`=== ${epic.id}: ${epic.title} ===`);
+  console.log(`status:     ${epic.status}`);
+  console.log(`created:    ${epic.created}`);
+  if (epic.updated) console.log(`updated:    ${epic.updated}`);
+  console.log(`created_by: ${epic.createdBy}`);
+  console.log(`budget:     token=${epic.budget.token} iteration=${epic.budget.iteration} wall_clock_hours=${epic.budget.wall_clock_hours}`);
+  console.log(`file:       ${epic.filePath}`);
+  console.log("");
+
+  // 配下 Task
+  const childTasks = await listEpicTasks(PROJECT_ROOT, epic.id);
+  if (childTasks.length > 0) {
+    console.log(`--- Child Tasks (${childTasks.length}) ---`);
+    for (const t of childTasks) {
+      console.log(`T${t.id}  ${t.status.padEnd(10)}  ${t.title}`);
+    }
+    console.log("");
+  } else {
+    console.log("--- Child Tasks (none) ---");
+    console.log("");
+  }
+
+  // Body
+  console.log("--- Body ---");
+  console.log(epic.body);
+}
+
+async function cmdEpicResume(): Promise<void> {
+  const id = args[2];
+  if (!id) {
+    console.error("Error: Epic ID が必要です（例: elevens epic resume E001）");
+    process.exit(1);
+  }
+  const journal = getArg("journal");
+  const budgetTokenRaw = getArg("budget-token");
+  const budgetIterationRaw = getArg("budget-iteration");
+  const budgetHoursRaw = getArg("budget-hours");
+
+  const budget: Partial<{ token: number; iteration: number; wall_clock_hours: number }> = {};
+  if (budgetTokenRaw) budget.token = parseInt(budgetTokenRaw, 10);
+  if (budgetIterationRaw) budget.iteration = parseInt(budgetIterationRaw, 10);
+  if (budgetHoursRaw) budget.wall_clock_hours = parseFloat(budgetHoursRaw);
+
+  try {
+    const result = await updateEpicStatus(PROJECT_ROOT, id, "active", {
+      budget,
+      journalEntry: journal ?? `resume by ${process.env.CMUX_SURFACE ?? "user"}`,
+    });
+    console.log(`Epic ${id} resumed (status=active): ${result.filePath}`);
+  } catch (e: any) {
+    console.error(`Error: ${e?.message ?? e}`);
+    process.exit(1);
+  }
+}
+
+async function cmdEpicAbort(): Promise<void> {
+  const id = args[2];
+  if (!id) {
+    console.error("Error: Epic ID が必要です（例: elevens epic abort E001）");
+    process.exit(1);
+  }
+  const journal = getArg("journal");
+  try {
+    const result = await updateEpicStatus(PROJECT_ROOT, id, "aborted", {
+      journalEntry: journal ?? `aborted by ${process.env.CMUX_SURFACE ?? "user"}`,
+    });
+    console.log(`Epic ${id} aborted: ${result.filePath}`);
+  } catch (e: any) {
+    console.error(`Error: ${e?.message ?? e}`);
+    process.exit(1);
+  }
+}
+
 // --- ルーティング ---
 // 単体テストから import した場合にトップレベル副作用を走らせないためのガード
 if (import.meta.main) {
@@ -6549,6 +6760,9 @@ switch (command) {
       })
     );
   }
+  case "epic":
+    await cmdEpic();
+    break;
   case "gh":
     await cmdGh();
     break;
