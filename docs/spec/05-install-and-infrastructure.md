@@ -133,7 +133,7 @@ skills/cmux-team/manager/
 | `create-task` | タスクファイル作成 + task-state.json 初期エントリー（`--depends-on`, `--base-branch`, `--run-after-all` をサポート） |
 | `update-task` | タスク更新（`--status` / `--title` / `--body` / `--depends-on`、draft → ready で TASK_CREATED トリガー） |
 | `close-task` | タスクを closed にマーク + deliverable（納品方式）保存 + journal 保存 + CONDUCTOR_DONE 送信。T295 以降 `--deliverable-kind <files\|merged\|pr\|none>` が必須で、kind ごとに付随フラグが異なる（`--deliverable <path>` / `--merged-into <branch> --merge-sha <sha>` / `--pr-url <url>`）。`--force` で実行中も強制クローズ可能 |
-| `abort-task` | 実行中タスクの中止（sub-agent 停止 → Conductor 停止 → worktree 削除 → `aborted` 遷移 → Conductor 再起動） |
+| `abort-task` | 実行中タスクの中止（sub-agent 停止 → Conductor 停止 → worktree 削除 → `aborted` 遷移 → Conductor 再起動）。**現状の経路**: SIGTERM 後に `cmux send` で spawn-conductor を再起動するため、relaunch 中の Conductor は `disconnected` を経由する。後続タスクが速やかに割り当たれば自然に `idle` に戻るが、相手レーンが idle のまま 300s 超過すると `forceCloseDisconnectedConductor` で `broken` へ落ちる可能性がある（`reset-conductor` の kill→`reserved` 同形シーケンスへの統合は別タスクで検討中） |
 | `delete-task` | draft/ready タスクの削除（`deleted` 遷移、journal 記録）。`assigned` のタスクは `abort-task` を使う |
 | `trace` | トレースDB 検索・表示（`--task`, `--search`, `--show`, `--conductor`, `--role`, `--limit`） |
 | `trace-hooks` | `hook_signals` テーブル検索・表示（`--type`, `--surface`, `--task-run`, `--limit`（デフォルト 50）, `--json`）。T217 |
@@ -240,7 +240,7 @@ cd '<PROJECT_ROOT>' && cmux-team spawn-{master,conductor} [args]
 | カテゴリ | 条件 | 表示 | アイコン | 色 |
 |---------|------|------|---------|-----|
 | error | disconnected Conductor あり | `! attention` | exclamationmark.triangle | 赤 |
-| throttled | 5h utilization ≥ 90% or rate_limited | `⏸ reset Xm` | pause.circle.fill | 赤 |
+| throttled | 5h utilization ≥ 90% or rate_limited | `⏸ throttled` | pause.circle.fill | 赤 |
 | running | Conductor 稼働中 | `N running` (+pending) | bolt.fill | 青 |
 | done | 全タスク完了（直前が idle/done 以外） | `done` | checkmark.circle.fill | 緑 |
 | idle | デフォルト | `idle` | pause.circle.fill | グレー |

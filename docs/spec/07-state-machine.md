@@ -7,7 +7,7 @@
 
 ## 0. 読み方
 
-- **状態** は Conductor (7 値) / Task (6 値) の 2 軸で独立管理する。
+- **状態** は Conductor (9 値) / Task (6 値) の 2 軸で独立管理する。
 - **イベント** は daemon への入力 (hook / CLI / timer) に対応する。
 - **reducer** (`conductor-fsm.ts` / `task-fsm.ts`) は純関数。`shadow.ts` が
   daemon の各ハンドラ末尾から reducer を呼び、期待次状態と実 state を比較して
@@ -263,7 +263,7 @@ cascade 発火経路は 8 本 (CLAUDE.md「依存タスクの cascade」参照):
 7. `handleConductorDone` unresolved 分岐 (T269)
 8. `reset_conductor` (T004、`reset-conductor` CLI で `assigned` レーンを強制 abort)
 
-`AbortReason` union (`task.ts`) は上記 8 本に対応する 7 値 (`user_clear` / `disconnect_timeout` / `resume_marked_aborted` / `assign_failed` / `judgment_pending` / `manual_abort` / `reset_conductor`)。`events-writer.ts:mapAbortReason` は `reset_conductor` を events stream の `other` カテゴリへマップする（CLI 起点の手動操作で、user 介入不要なため）。
+`AbortReason` union (`task.ts`) は上記 8 本に対応する 9 値 (`user_clear` / `judgment_pending` / `assign_failed` / `disconnect_timeout` / `abort_task` / `reset_conductor` / `resume_no_session_id` / `resume_no_task_run_id` / `resume_no_worktree`)。resume 系 3 値は `events-writer.ts:mapAbortReason` で events stream の `resume_marked_aborted` に集約される。`events-writer.ts:mapAbortReason` は `abort_task` / `reset_conductor` を events stream の `other` カテゴリへマップする（CLI 起点の手動操作で、user 介入不要なため）。
 
 ### 2.5 依存解決の意味論 (T002)
 
