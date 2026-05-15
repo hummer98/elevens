@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.0] - 2026-05-15
+
+### Added
+
+- **Epic カテゴリ (PoC)**: Task / Artifact と並ぶ第三のカテゴリ「達成したいゴール」単位。`.team/epics/E001-<slug>.md` の単一 markdown ファイル (frontmatter + body) で管理し、`elevens epic create / list / show / resume / abort` の CLI を提供。Task には `--epic-id E001` で親 Epic を紐づけ可能 (frontmatter に `epic_id` を追記、`epic show` で逆引き)。**Epic Planner** (`/loop` 自律エージェント) の role template (`skills/cmux-team/templates/ja/epic-planner.md`) を同梱、Master / Manager / Conductor / Agent の 4 層に上から覆いかぶさる orchestration layer として位置付け。status FSM は `active / blocked / closed / aborted` の 4 値、Hybrid done 判定 (evidence 必須) + budget (token / iteration / wall_clock_hours) + 超過時 `blocked` escalate。仕様: `docs/spec/14-epic.md`。Phase 1 PoC スコープ — daemon 統合 / abort cascade / hard enforcement は Phase 2
+- **artifact 一覧のデフォルト並び順を最新を上に** (T007): `elevens artifacts list` および dashboard 表示で `created` の降順 (新しいものが先頭) に変更。旧来は ID 昇順だったため作業中の Axxx を見つけにくかった
+
+### Fixed
+
+- **abort-task 経路を ABORT_TASK 集約に統一し broken 化を防ぐ** (T008): `cmdAbortTask` を SIGTERM + `cmux send` 再起動の 2 段階から daemon の `ABORT_TASK` イベント集約経路に統一。Conductor が一時的に `disconnected` を経由して 300s 超過で `broken` に倒れる race を構造的に解消 (`reset-conductor` (T004) と同形の kill→`reserved` シーケンス)
+
 ## [0.6.0] - 2026-05-12
 
 ### Added
