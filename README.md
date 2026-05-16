@@ -169,7 +169,7 @@ See `elevens --help` for the full list. Common commands:
 **Task management**
 | Command | What it does |
 |---------|-------------|
-| `elevens create-task --title <t> [--status ready] [--body <b>] [--depends-on <ids>] [--base-branch <branch>] [--run-after-all] [--exclusive]` | Create a task (`--base-branch`: worktree start-point & merge target, default: main; `--exclusive`: run alone after drain, implies `--run-after-all`) |
+| `elevens create-task --title <t> [--status ready] [--body <b>] [--depends-on <ids>] [--base-branch <branch>] [--run-after-all] [--exclusive] [--epic-id <Eid>]` | Create a task (`--base-branch`: worktree start-point & merge target, default: main; `--exclusive`: run alone after drain, implies `--run-after-all`; `--epic-id`: link to a parent Epic, e.g. `E001`) |
 | `elevens update-task --task-id <id> --status <s>` | Update task status |
 | `elevens close-task --task-id <id> --deliverable-kind <files|merged|pr|none> [kind-specific flags] [--journal <text>] [--force]` | Close a task. `--force` allows overriding an `aborted` task back to `closed` (rescue path for AI-judgment errors; recorded as `task_closed_from_aborted` with `prev_aborted_at`) |
 | `elevens abort-task --task-id <id>` | Abort a running task |
@@ -178,6 +178,20 @@ See `elevens --help` for the full list. Common commands:
 | `elevens await-task --task-id <id> [--timeout <sec>]` | Wait for task completion |
 
 > **Base branch (`--base-branch`)**: By default each task's worktree is cut from your `mainBranch` (resolved via env `CMUX_TEAM_MAIN_BRANCH` → `config.mainBranch` → `origin/HEAD`), and the Conductor treats it as the merge target. Pass `--base-branch develop` to cut from and merge back to `develop` instead — useful for hotfixes or feature branches that should not target main. Start-point resolution order: explicit `--base-branch` → local `<mainBranch>` ahead of origin → `origin/<mainBranch>` → local `<mainBranch>` → `HEAD` (see `docs/spec/05-install-and-infrastructure.md` for details).
+
+**Epic (PoC — Phase 1)**
+
+A third category alongside Task / Artifact. An Epic is a "goal you want to achieve" that an autonomous **Epic Planner** (run manually via `/loop` in Phase 1) decomposes into Tasks. See `docs/spec/14-epic.md` for the full spec.
+
+| Command | What it does |
+|---------|-------------|
+| `elevens epic create --title <t> [--body <intent>] [--budget-token <n>] [--budget-iteration <n>] [--budget-hours <h>]` | Create a new Epic (`status=active`) with optional budget caps |
+| `elevens epic list [--status active\|blocked\|closed\|aborted\|all]` | List Epics, filtered by status |
+| `elevens epic show <Eid>` | Show frontmatter + body + child Tasks (linked via `--epic-id`) |
+| `elevens epic resume <Eid> [--budget-token <n>] [--budget-iteration <n>] [--budget-hours <h>] [--journal <text>]` | `blocked → active` (optionally raise budget) |
+| `elevens epic abort <Eid> [--journal <text>]` | `active`/`blocked` → `aborted` |
+
+> Phase 1 PoC scope: CLI + epic.md + Planner template + manual `/loop`. Daemon integration / auto-spawn / abort cascade / hard budget enforcement are Phase 2.
 
 **Agent / Conductor**
 | Command | What it does |

@@ -156,4 +156,5 @@ npm install -g @hummer98/cmux-team
 | 07 | 07-state-machine.md | Conductor / Task FSM 仕様（T279、shadow observability 配線） |
 | 10 | 10-events-stream.md | 外向け event channel `.team/logs/events.jsonl` の schema 仕様（schema v2、17 event 種、T357） |
 | 12 | 12-web-dashboard.md | 内部 Web ダッシュボード（Manager daemon 同居 HTTP server + 5 ページ SPA、T414） |
+| 14 | 14-epic.md | Epic（PoC）— Task / Artifact と並ぶ第三カテゴリ。「達成したいゴール」を Epic Planner（`/loop`）に委譲する上位 orchestration layer（Phase 1 PoC） |
 | -- | glossary.md | 用語集（一次定義のインデックス、二次資料） |

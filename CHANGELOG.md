@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.7.1] - 2026-05-17
+
+### Docs
+
+- v0.6.0 / v0.7.0 で導入された Epic カテゴリへの追従漏れを修正: `README.md` / `README.ja.md` に `elevens epic create / list / show / resume / abort` の CLI 表と `--epic-id <Eid>` フラグを追記、**Epic (PoC — Phase 1)** セクションを新設。`docs/spec/00-project-overview.md` の仕様ドキュメント索引に `14-epic.md` を追加
+
 ## [0.7.0] - 2026-05-15
 
 ### Added

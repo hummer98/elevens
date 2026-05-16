@@ -169,7 +169,7 @@ Claude: → elevens create-task --title "..." --status ready
 **タスク管理**
 | コマンド | やること |
 |---------|---------|
-| `elevens create-task --title <t> [--status ready] [--body <b>] [--depends-on <ids>] [--base-branch <branch>] [--run-after-all] [--exclusive]` | タスク作成（`--base-branch`: worktree の起点・マージ先ブランチ、デフォルト: main。`--exclusive`: drain 後に単独実行、`--run-after-all` を含む） |
+| `elevens create-task --title <t> [--status ready] [--body <b>] [--depends-on <ids>] [--base-branch <branch>] [--run-after-all] [--exclusive] [--epic-id <Eid>]` | タスク作成（`--base-branch`: worktree の起点・マージ先ブランチ、デフォルト: main。`--exclusive`: drain 後に単独実行、`--run-after-all` を含む。`--epic-id`: 親 Epic とリンク、例 `E001`） |
 | `elevens update-task --task-id <id> --status <s>` | タスク状態更新 |
 | `elevens close-task --task-id <id> --deliverable-kind <files|merged|pr|none> [kind 別フラグ] [--journal <text>] [--force]` | タスク close。`--force` 指定時は `aborted` → `closed` の上書きを許可（AI 判定誤りを人間が救済する経路。reducer は `task_closed_from_aborted` を log し `prev_aborted_at` を残す） |
 | `elevens abort-task --task-id <id>` | 実行中タスクを中止 |
@@ -178,6 +178,20 @@ Claude: → elevens create-task --title "..." --status ready
 | `elevens await-task --task-id <id> [--timeout <sec>]` | タスク完了待ち |
 
 > **ベースブランチ (`--base-branch`)**: デフォルトでは各タスクの worktree は `mainBranch`（解決順: 環境変数 `CMUX_TEAM_MAIN_BRANCH` → `config.mainBranch` → `origin/HEAD`）から切られ、Conductor はそれをマージ先として扱います。`--base-branch develop` を渡すと代わりに `develop` から切って `develop` に戻します — hotfix や main 以外の feature ブランチに対する作業向け。起点の解決順位: 明示指定 `--base-branch` → local `<mainBranch>`（origin より ahead）→ `origin/<mainBranch>` → local `<mainBranch>` → `HEAD`（詳細は `docs/spec/05-install-and-infrastructure.md`）。
+
+**Epic（PoC — Phase 1）**
+
+Task / Artifact と並ぶ第三のカテゴリ。「達成したいゴール」を、自律エージェントである **Epic Planner**（Phase 1 では `/loop` で手動起動）が Task に分解して進めます。詳細は `docs/spec/14-epic.md` 参照。
+
+| コマンド | やること |
+|---------|---------|
+| `elevens epic create --title <t> [--body <intent>] [--budget-token <n>] [--budget-iteration <n>] [--budget-hours <h>]` | 新規 Epic を作成（`status=active`、budget 上限は任意） |
+| `elevens epic list [--status active\|blocked\|closed\|aborted\|all]` | Epic 一覧（status で filter 可） |
+| `elevens epic show <Eid>` | frontmatter + body + 配下 Task（`--epic-id` でリンクされた Task）を表示 |
+| `elevens epic resume <Eid> [--budget-token <n>] [--budget-iteration <n>] [--budget-hours <h>] [--journal <text>]` | `blocked → active`（必要なら budget 増額） |
+| `elevens epic abort <Eid> [--journal <text>]` | `active`/`blocked` → `aborted` |
+
+> Phase 1 PoC スコープ: CLI + epic.md + Planner template + 手動 `/loop`。daemon 統合 / 自動 spawn / abort cascade / budget hard enforcement は Phase 2。
 
 **Agent / Conductor**
 | コマンド | やること |
