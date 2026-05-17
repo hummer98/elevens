@@ -201,26 +201,32 @@ export async function releasePidFile(path: string): Promise<void> {
 }
 
 /**
- * T423 S3: uncaughtException / unhandledRejection / exit 時に pidfile を
- * PID-aware で cleanup する crash handler を install する。
+ * `'exit'` 経路で pidfile を PID-aware に cleanup する handler を install する。
  *
- * SIGINT / SIGTERM 経路は既存の `shutdown()` が `releasePidFile` を呼ぶが、
- * 異常終了 (uncaughtException / unhandledRejection) や normal exit 時には
- * pidfile が残置されていた。本 handler はそれらを補填する。
+ * T010 S2 改訂: 旧実装にあった `uncaughtException` / `unhandledRejection` listener は
+ * `fatal-handlers.ts` (`installFatalHandlers`) に責務を完全に移譲した。本関数は
+ * **pidfile cleanup のみ**を責務とし、handler の単一責務化と test の単純化を達成する。
  *
- * **PID-aware が必須**: S1 (reload) では親が `releasePidFile` → spawn 子 →
- * 子が `acquirePidFile` (子の PID で書く) → 親 `process.exit(0)` の順で
- * 動く。親の exit handler が pidfile を無条件 unlink すると子の正当な
- * pidfile を消してしまう (race)。content と self pid を比較して一致時のみ
- * unlink することで、reload sequence でも安全に動く。
+ * 設計理由 (plan §2.2 / D7):
+ *   - `process.exit()` は同期 terminate のため、複数 listener を順次走らせて
+ *     全部に副作用を持たせる設計は構造的に不可能。
+ *   - fatal trace の出力は fatal-handlers.ts に集約し、`process.exit(1)` の発火経路で
+ *     必ず走る `'exit'` listener にここの cleanup を任せる。これで「最初の listener が
+ *     exit(1) を呼んだ瞬間に後続 listener が走らない」順序問題を構造的に解消する。
  *
- * `process.on("exit")` は sync コンテキスト限定なので readFileSync /
- * unlinkSync を使う。async log は呼べないので、ENOENT 以外のエラーは
- * stderr にだけ出す。
+ * **PID-aware が必須**: T423 S1 (reload) では親が `releasePidFile` → spawn 子 →
+ * 子が `acquirePidFile` (子の PID で書く) → 親 `process.exit(0)` の順で動く。
+ * 親の exit handler が pidfile を無条件 unlink すると子の正当な pidfile を消してしまう
+ * (race)。content と self pid を比較して一致時のみ unlink することで、reload sequence
+ * でも安全に動く。
+ *
+ * `process.on("exit")` は sync コンテキスト限定なので readFileSync / unlinkSync を使う。
+ * async log は呼べないので、ENOENT 以外のエラーは stderr にだけ出す。
  *
  * @returns uninstall function — handler を `process.removeListener` する
  */
 export interface CrashHandlerOptions {
+  // exitImpl は legacy 互換のため残置するが、本関数では使用しない (fatal-handlers.ts 側で扱う)。
   exitImpl?: (code: number) => void;
   selfPid?: number;
 }
@@ -229,7 +235,6 @@ export function installCrashHandler(
   pidFilePath: string,
   opts?: CrashHandlerOptions,
 ): () => void {
-  const exitImpl = opts?.exitImpl ?? ((code: number) => process.exit(code));
   const selfPid = opts?.selfPid ?? process.pid;
   const selfPidStr = String(selfPid);
 
@@ -261,20 +266,11 @@ export function installCrashHandler(
   const exitHandler = (): void => {
     cleanup();
   };
-  const fatalHandler = (err: unknown): void => {
-    cleanup();
-    if (err) console.error(err);
-    exitImpl(1);
-  };
 
   process.on("exit", exitHandler);
-  process.on("uncaughtException", fatalHandler);
-  process.on("unhandledRejection", fatalHandler);
 
   return (): void => {
     process.removeListener("exit", exitHandler);
-    process.removeListener("uncaughtException", fatalHandler);
-    process.removeListener("unhandledRejection", fatalHandler);
   };
 }
 

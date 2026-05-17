@@ -1,7 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
-import { readFile } from "fs/promises";
+import { readFile, readFile as readFileAsync } from "fs/promises";
+import { readFileSync } from "fs";
 import { join } from "path";
-import { log, warn, error, formatSurface, formatPair } from "./logger";
+import { log, warn, error, logSync, warnSync, errorSync, formatSurface, formatPair } from "./logger";
 import { createDummyProject, type DummyProject } from "./test-project";
 
 const SENTINEL = `regression_sentinel_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -198,5 +199,80 @@ describe("logger - warn / error level", () => {
     expect(content).toMatch(new RegExp(`\\] ${event} from=info-compat`));
     expect(content).not.toMatch(new RegExp(`\\] \\[warn\\] ${event}`));
     expect(content).not.toMatch(new RegExp(`\\] \\[error\\] ${event}`));
+  });
+});
+
+// T010 S1: sync API (critical path 用)
+describe("logger - sync API (logSync / warnSync / errorSync)", () => {
+  test("logSync() は appendFileSync ベースで PROJECT_ROOT 配下の manager.log に append する", () => {
+    process.env.PROJECT_ROOT = tmpdirA;
+    const event = `${SENTINEL}_logsync_1`;
+    logSync(event, "from=logsync-test");
+
+    const content = readFileSync(join(tmpdirA, ".team/logs/manager.log"), "utf-8");
+    expect(content).toContain(event);
+    expect(content).toContain("from=logsync-test");
+    // info は prefix 無しの async 版と完全一致 format
+    expect(content).toMatch(new RegExp(`\\] ${event} from=logsync-test`));
+  });
+
+  test("warnSync() は [warn] prefix で sync append する", () => {
+    process.env.PROJECT_ROOT = tmpdirA;
+    const event = `${SENTINEL}_warnsync_1`;
+    warnSync(event, "from=warnsync-test");
+
+    const content = readFileSync(join(tmpdirA, ".team/logs/manager.log"), "utf-8");
+    expect(content).toContain(`[warn] ${event}`);
+    expect(content).toContain("from=warnsync-test");
+  });
+
+  test("errorSync() は [error] prefix で sync append する", () => {
+    process.env.PROJECT_ROOT = tmpdirA;
+    const event = `${SENTINEL}_errorsync_1`;
+    errorSync(event, "from=errorsync-test");
+
+    const content = readFileSync(join(tmpdirA, ".team/logs/manager.log"), "utf-8");
+    expect(content).toContain(`[error] ${event}`);
+    expect(content).toContain("from=errorsync-test");
+  });
+
+  test("logSync() は ログディレクトリ未作成でも recursive: true で作って append する", () => {
+    process.env.PROJECT_ROOT = tmpdirB; // 別ディレクトリ、未だ書いていない
+    const event = `${SENTINEL}_logsync_mkdirp`;
+    logSync(event);
+
+    const content = readFileSync(join(tmpdirB, ".team/logs/manager.log"), "utf-8");
+    expect(content).toContain(event);
+  });
+
+  test("CMUX_TEAM_LOGGER_STRICT=1 で PROJECT_ROOT 未設定なら logSync() は throw する", () => {
+    delete process.env.PROJECT_ROOT;
+    const prev = process.env.CMUX_TEAM_LOGGER_STRICT;
+    process.env.CMUX_TEAM_LOGGER_STRICT = "1";
+    try {
+      expect(() => logSync(`${SENTINEL}_strict`)).toThrow(
+        /PROJECT_ROOT is not set/,
+      );
+    } finally {
+      if (prev !== undefined) {
+        process.env.CMUX_TEAM_LOGGER_STRICT = prev;
+      } else {
+        delete process.env.CMUX_TEAM_LOGGER_STRICT;
+      }
+    }
+  });
+
+  test("logSync() / log() の出力 format が一致する (timestamp prefix 形式)", async () => {
+    process.env.PROJECT_ROOT = tmpdirA;
+    const event = `${SENTINEL}_format_parity`;
+    logSync(event, "k=v");
+    await log(event + "_async", "k=v");
+
+    const content = readFileSync(join(tmpdirA, ".team/logs/manager.log"), "utf-8");
+    // 両方 同じ format: `[<ts>] <event> <detail>\n`
+    const syncRe = new RegExp(`\\[\\d{4}-\\d{2}-\\d{2}T[^\\]]+\\] ${event} k=v\\n`);
+    const asyncRe = new RegExp(`\\[\\d{4}-\\d{2}-\\d{2}T[^\\]]+\\] ${event}_async k=v\\n`);
+    expect(content).toMatch(syncRe);
+    expect(content).toMatch(asyncRe);
   });
 });

@@ -22,6 +22,7 @@ import { spawn as realSpawn, type ChildProcess } from "child_process";
 import { resolve } from "path";
 import { releasePidFile as realReleasePidFile } from "./pidfile";
 import { log as realLog } from "./logger";
+import { POST_MORTEM_REDIRECTED_FLAG } from "./post-mortem-redirect";
 
 export interface PerformDaemonReloadOptions {
   pidFilePath: string;
@@ -52,9 +53,13 @@ export async function performDaemonReload(
 
   // detached: true で別プロセスグループにする。stdio: "inherit" で親の TTY を子に dup。
   // IPC channel は無いので disconnect() は no-op になる → 呼ばない。
+  //
+  // T010 S5.1: reload した子も親の stderr fd (manager.stderr.log) を継承するため、
+  // redirect 済み扱いとして起動する。flag を付けないと子の cmdStart で
+  // maybeRespawnWithStderrRedirect が再度子を spawn してしまい 2 段重ねになる。
   const child: ChildProcess = spawnImpl(
     "bun",
-    ["run", absoluteMainTs, "start"],
+    ["run", absoluteMainTs, "start", POST_MORTEM_REDIRECTED_FLAG],
     {
       stdio: "inherit",
       env: process.env,

@@ -458,6 +458,14 @@ e2e-results/
 
 **`team.json` の主要フィールド** (T414): `manager` / `masters[]` / `conductors[]` / `phase` / `layout` に加え、daemon が internal Web ダッシュボード起動時に `dashboardServer: { url: "http://127.0.0.1:<ephemeral>", schemaVersion: 1 }` を atomic write する（外部から read-only で参照する公開チャネル）。詳細は [`12-web-dashboard.md`](12-web-dashboard.md) §2.3。
 
+**Post-mortem evidence files** (T010): daemon は起動時から以下のファイルを書き始める。詳細は [`15-post-mortem-evidence.md`](15-post-mortem-evidence.md):
+
+| ファイル | 用途 | rotate |
+|---|---|---|
+| `.team/daemon.heartbeat` | 10s 間隔の sync write。daemon 死亡時刻 (±10s) を mtime + 内容で示す。clean exit で `clean exit: reason=<reason>` を追記してから unlink | なし |
+| `.team/logs/manager.stderr.log` | daemon の OS fd 2 を file に redirect (Bun runtime panic / Rust panic / libc abort も残る) | start 時に `.1` へ 1 世代 rotate |
+| `.team/logs/manager.telemetry.jsonl` | 30s 間隔で RSS / heap / event loop lag / open task 数を append | size base、`telemetryMaxBytes` 超過で `.1` へ rotate（default 5 MB）|
+
 `rate-limit.json` は T227 で追加された RateLimitInfo スナップショット（下記参照）。`initInfra` は既存 `.team/.gitignore` に `rate-limit.json` 行が無ければ自動で追記し（`team_gitignore_migrated` をログ）、二重追記は行わない（冪等）。
 
 追跡するもの:

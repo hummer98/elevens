@@ -15,6 +15,7 @@ import {
   resolveTokenPoolEnabled,
   resolveMetricsRefreshIntervalMs,
   resolveGcConfig,
+  resolvePostMortemConfig,
   loadGlobalConfig,
   type TeamConfig,
   type GlobalConfig,
@@ -506,5 +507,107 @@ describe("resolveGcConfig (T416)", () => {
     expect(r.retention.dbDays).toBe(7);
     expect(r.retention.bodiesDays).toBe(14);
     expect(r.retention.e2eResultsDays).toBe(7);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// resolvePostMortemConfig (T010 S7)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("resolvePostMortemConfig (T010)", () => {
+  test("postMortem 未指定 → 全 default", () => {
+    const r = resolvePostMortemConfig({});
+    expect(r.heartbeatIntervalMs).toBe(10_000);
+    expect(r.telemetryIntervalMs).toBe(30_000);
+    expect(r.telemetryMaxBytes).toBe(5_242_880);
+    expect(r.stderrRotateGenerations).toBe(1);
+  });
+
+  test("heartbeatIntervalMs override (範囲内) はそのまま", () => {
+    const r = resolvePostMortemConfig({ postMortem: { heartbeatIntervalMs: 30_000 } });
+    expect(r.heartbeatIntervalMs).toBe(30_000);
+    expect(r.telemetryIntervalMs).toBe(30_000); // default
+  });
+
+  test("heartbeatIntervalMs 範囲外 (999 / 600_001) → default", () => {
+    expect(
+      resolvePostMortemConfig({ postMortem: { heartbeatIntervalMs: 999 } })
+        .heartbeatIntervalMs,
+    ).toBe(10_000);
+    expect(
+      resolvePostMortemConfig({ postMortem: { heartbeatIntervalMs: 600_001 } })
+        .heartbeatIntervalMs,
+    ).toBe(10_000);
+  });
+
+  test("heartbeatIntervalMs 型違反 / NaN → default", () => {
+    // @ts-expect-error: 意図的に型違反
+    const r1 = resolvePostMortemConfig({ postMortem: { heartbeatIntervalMs: "5000" } });
+    expect(r1.heartbeatIntervalMs).toBe(10_000);
+    expect(
+      resolvePostMortemConfig({ postMortem: { heartbeatIntervalMs: NaN } })
+        .heartbeatIntervalMs,
+    ).toBe(10_000);
+  });
+
+  test("telemetryIntervalMs override (60_000) はそのまま", () => {
+    expect(
+      resolvePostMortemConfig({ postMortem: { telemetryIntervalMs: 60_000 } })
+        .telemetryIntervalMs,
+    ).toBe(60_000);
+  });
+
+  test("telemetryIntervalMs 下限未満 (1_000) → default", () => {
+    expect(
+      resolvePostMortemConfig({ postMortem: { telemetryIntervalMs: 1_000 } })
+        .telemetryIntervalMs,
+    ).toBe(30_000);
+  });
+
+  test("telemetryMaxBytes override (10MB) はそのまま", () => {
+    expect(
+      resolvePostMortemConfig({ postMortem: { telemetryMaxBytes: 10_485_760 } })
+        .telemetryMaxBytes,
+    ).toBe(10_485_760);
+  });
+
+  test("telemetryMaxBytes 範囲外 (100 / 1GB) → default", () => {
+    expect(
+      resolvePostMortemConfig({ postMortem: { telemetryMaxBytes: 100 } })
+        .telemetryMaxBytes,
+    ).toBe(5_242_880);
+    expect(
+      resolvePostMortemConfig({
+        postMortem: { telemetryMaxBytes: 1_073_741_824 },
+      }).telemetryMaxBytes,
+    ).toBe(5_242_880);
+  });
+
+  test("stderrRotateGenerations override (3) はそのまま", () => {
+    expect(
+      resolvePostMortemConfig({ postMortem: { stderrRotateGenerations: 3 } })
+        .stderrRotateGenerations,
+    ).toBe(3);
+  });
+
+  test("stderrRotateGenerations 範囲外 (0 / 6) → default", () => {
+    expect(
+      resolvePostMortemConfig({ postMortem: { stderrRotateGenerations: 0 } })
+        .stderrRotateGenerations,
+    ).toBe(1);
+    expect(
+      resolvePostMortemConfig({ postMortem: { stderrRotateGenerations: 6 } })
+        .stderrRotateGenerations,
+    ).toBe(1);
+  });
+
+  test("一部だけ指定でも残りは default で埋まる", () => {
+    const r = resolvePostMortemConfig({
+      postMortem: { heartbeatIntervalMs: 60_000 },
+    });
+    expect(r.heartbeatIntervalMs).toBe(60_000);
+    expect(r.telemetryIntervalMs).toBe(30_000);
+    expect(r.telemetryMaxBytes).toBe(5_242_880);
+    expect(r.stderrRotateGenerations).toBe(1);
   });
 });

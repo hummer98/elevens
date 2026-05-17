@@ -99,6 +99,26 @@ export interface TeamConfig {
    * 全フィールド optional — 未指定値は team-gc.ts の DEFAULTS で埋める。
    */
   gc?: GcConfig;
+  /**
+   * Post-mortem evidence capture の override（T010）。
+   * 全フィールド optional — 未指定値は resolvePostMortemConfig の DEFAULTS で埋める。
+   *
+   * - `heartbeatIntervalMs`: heartbeat 書き込み間隔（ms）。default 10_000、clamp [1_000, 600_000]
+   * - `telemetryIntervalMs`: telemetry jsonl append 間隔（ms）。default 30_000、clamp [5_000, 3_600_000]
+   * - `telemetryMaxBytes`: telemetry jsonl の rotation 閾値（bytes）。default 5_242_880、clamp [262_144, 268_435_456]
+   * - `stderrRotateGenerations`: stderr.log の rotate 世代数。default 1、clamp [1, 5]
+   */
+  postMortem?: PostMortemConfig;
+}
+
+/**
+ * Post-mortem evidence capture の設定（T010）。詳細は docs/spec/15-post-mortem-evidence.md。
+ */
+export interface PostMortemConfig {
+  heartbeatIntervalMs?: number;
+  telemetryIntervalMs?: number;
+  telemetryMaxBytes?: number;
+  stderrRotateGenerations?: number;
 }
 
 /**
@@ -544,6 +564,72 @@ export function resolveMetricsRefreshIntervalMs(
   if (typeof raw !== "number" || !Number.isFinite(raw)) return DEFAULT_MS;
   if (raw < MIN_MS || raw > MAX_MS) return DEFAULT_MS;
   return raw;
+}
+
+/**
+ * post-mortem evidence capture の設定値を default 込みで解決する（T010 S7）。
+ *
+ * 各フィールドは型違反 / 範囲外なら default に倒す（fail-fast せず silent fallback）。
+ * clamp ルールは plan §3.2 / D2 / D3 / D4 を参照。
+ */
+export function resolvePostMortemConfig(
+  config: Pick<TeamConfig, "postMortem">,
+): Required<PostMortemConfig> {
+  const DEFAULTS = {
+    heartbeatIntervalMs: 10_000,
+    telemetryIntervalMs: 30_000,
+    telemetryMaxBytes: 5_242_880, // 5 MB
+    stderrRotateGenerations: 1,
+  } as const;
+
+  const HEARTBEAT_MIN = 1_000;
+  const HEARTBEAT_MAX = 600_000;
+  const TELEMETRY_INTERVAL_MIN = 5_000;
+  const TELEMETRY_INTERVAL_MAX = 3_600_000;
+  const TELEMETRY_BYTES_MIN = 262_144; // 256 KB
+  const TELEMETRY_BYTES_MAX = 268_435_456; // 256 MB
+  const ROTATE_MIN = 1;
+  const ROTATE_MAX = 5;
+
+  const pm = config.postMortem ?? {};
+
+  const pickClampedInt = (
+    raw: unknown,
+    min: number,
+    max: number,
+    def: number,
+  ): number => {
+    if (typeof raw !== "number" || !Number.isFinite(raw)) return def;
+    if (raw < min || raw > max) return def;
+    return Math.floor(raw);
+  };
+
+  return {
+    heartbeatIntervalMs: pickClampedInt(
+      pm.heartbeatIntervalMs,
+      HEARTBEAT_MIN,
+      HEARTBEAT_MAX,
+      DEFAULTS.heartbeatIntervalMs,
+    ),
+    telemetryIntervalMs: pickClampedInt(
+      pm.telemetryIntervalMs,
+      TELEMETRY_INTERVAL_MIN,
+      TELEMETRY_INTERVAL_MAX,
+      DEFAULTS.telemetryIntervalMs,
+    ),
+    telemetryMaxBytes: pickClampedInt(
+      pm.telemetryMaxBytes,
+      TELEMETRY_BYTES_MIN,
+      TELEMETRY_BYTES_MAX,
+      DEFAULTS.telemetryMaxBytes,
+    ),
+    stderrRotateGenerations: pickClampedInt(
+      pm.stderrRotateGenerations,
+      ROTATE_MIN,
+      ROTATE_MAX,
+      DEFAULTS.stderrRotateGenerations,
+    ),
+  };
 }
 
 /**

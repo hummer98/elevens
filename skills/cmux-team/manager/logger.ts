@@ -1,4 +1,5 @@
 import { appendFile, mkdir } from "fs/promises";
+import { appendFileSync, mkdirSync } from "fs";
 import { join } from "path";
 
 // ローカルTZオフセット付きISO 8601タイムスタンプを生成
@@ -99,4 +100,38 @@ export async function warn(event: string, detail: string = ""): Promise<void> {
 
 export async function error(event: string, detail: string = ""): Promise<void> {
   return appendLine("error", event, detail);
+}
+
+// T010 S1: critical path 用 sync API。
+// fatal handler / signal handler / heartbeat clean exit など、
+// async I/O が flush される前に process が消える経路から呼ぶ。
+// async 版と format を一致させる（タイムスタンプ・level prefix）。
+function appendLineSync(level: LogLevel, event: string, detail: string): void {
+  const envRoot = process.env.PROJECT_ROOT;
+  if (!envRoot && process.env.CMUX_TEAM_LOGGER_STRICT === "1") {
+    throw new Error(
+      "logger: PROJECT_ROOT is not set but CMUX_TEAM_LOGGER_STRICT=1. " +
+        "Wrap tests with createDummyProject() from test-project.ts, or pass setProjectRootEnv: true.",
+    );
+  }
+  const projectRoot = envRoot || process.cwd();
+  const logDir = join(projectRoot, ".team/logs");
+  const logFile = join(logDir, "manager.log");
+  mkdirSync(logDir, { recursive: true });
+  const timestamp = localISOString();
+  const levelPrefix = level === "info" ? "" : `[${level}] `;
+  const line = `[${timestamp}] ${levelPrefix}${event} ${detail}`.trimEnd() + "\n";
+  appendFileSync(logFile, line);
+}
+
+export function logSync(event: string, detail: string = ""): void {
+  appendLineSync("info", event, detail);
+}
+
+export function warnSync(event: string, detail: string = ""): void {
+  appendLineSync("warn", event, detail);
+}
+
+export function errorSync(event: string, detail: string = ""): void {
+  appendLineSync("error", event, detail);
 }

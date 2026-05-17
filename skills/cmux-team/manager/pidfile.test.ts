@@ -481,15 +481,15 @@ describe("acquirePidFile - unlink failure logging (T425 minor #1)", () => {
 
 // --- 保守的な stale 判定: ps 取得失敗時は locked 扱い --------------------
 
-// --- T423 S3: installCrashHandler の PID-aware cleanup ----------------
+// --- T423 S3 / T010 S2: installCrashHandler は 'exit' listener のみ ------
+// (T010 S2 改訂で uncaughtException / unhandledRejection listener は fatal-handlers.ts に移譲)
 
 describe("installCrashHandler", () => {
   let uninstall: (() => void) | null = null;
   let errorSpy: ReturnType<typeof spyOn> | null = null;
 
   beforeEach(() => {
-    // fatalHandler は console.error(err) で fatal エラーを stderr に出すが、
-    // テスト内では意図的に投げているエラーなので mock で suppress する。
+    // 既存実装からの安全策として残置（'exit' listener 内の console.error 経路用）。
     errorSpy = spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -504,9 +504,7 @@ describe("installCrashHandler", () => {
 
   test("self pid が書いた pidfile は exit handler 発火時に削除する", async () => {
     await writeFile(pidFilePath, String(process.pid));
-    uninstall = installCrashHandler(pidFilePath, {
-      exitImpl: () => {},
-    });
+    uninstall = installCrashHandler(pidFilePath, {});
     process.emit("exit", 0);
     expect(existsSync(pidFilePath)).toBe(false);
   });
@@ -514,9 +512,7 @@ describe("installCrashHandler", () => {
   test("他 pid が書いた pidfile は handler 発火時に削除しない", async () => {
     const otherPid = process.pid + 1;
     await writeFile(pidFilePath, String(otherPid));
-    uninstall = installCrashHandler(pidFilePath, {
-      exitImpl: () => {},
-    });
+    uninstall = installCrashHandler(pidFilePath, {});
     process.emit("exit", 0);
     expect(existsSync(pidFilePath)).toBe(true);
     const content = await readFile(pidFilePath, "utf-8");
@@ -525,61 +521,31 @@ describe("installCrashHandler", () => {
 
   test("pidfile 不在時 (ENOENT) は no-op で例外も出さない", () => {
     expect(existsSync(pidFilePath)).toBe(false);
-    uninstall = installCrashHandler(pidFilePath, {
-      exitImpl: () => {},
-    });
+    uninstall = installCrashHandler(pidFilePath, {});
     expect(() => process.emit("exit", 0)).not.toThrow();
   });
 
-  test("uncaughtException 経路でも PID-aware ロジックで動き exit(1) する", async () => {
+  test("uncaughtException 経由でも 'exit' listener が走り PID-aware cleanup される (process.exit(1) 経由)", async () => {
+    // T010 S2: 直接 uncaughtException を捕捉する責務は fatal-handlers.ts に移譲したが、
+    // fatal-handlers が process.exit(1) を呼ぶと Node/Bun が 'exit' listener を発火させる。
+    // ここでは本機構が依存する不変条件 (`process.emit("exit", 1)` で cleanup が走る) を assert する。
     await writeFile(pidFilePath, String(process.pid));
-    const exitCalls: number[] = [];
-    uninstall = installCrashHandler(pidFilePath, {
-      exitImpl: (code) => {
-        exitCalls.push(code);
-      },
-    });
-    process.emit("uncaughtException", new Error("test-fatal"));
+    uninstall = installCrashHandler(pidFilePath, {});
+    process.emit("exit", 1);
     expect(existsSync(pidFilePath)).toBe(false);
-    expect(exitCalls).toEqual([1]);
   });
 
-  test("uncaughtException 経路で他 pid の pidfile は削除されない", async () => {
+  test("uncaughtException 経由 (exit code=1) でも 他 pid の pidfile は削除されない", async () => {
     const otherPid = process.pid + 1;
     await writeFile(pidFilePath, String(otherPid));
-    const exitCalls: number[] = [];
-    uninstall = installCrashHandler(pidFilePath, {
-      exitImpl: (code) => {
-        exitCalls.push(code);
-      },
-    });
-    process.emit("uncaughtException", new Error("test-fatal"));
+    uninstall = installCrashHandler(pidFilePath, {});
+    process.emit("exit", 1);
     expect(existsSync(pidFilePath)).toBe(true);
-    expect(exitCalls).toEqual([1]);
-  });
-
-  test("unhandledRejection 経路でも PID-aware ロジックで動き exit(1) する", async () => {
-    await writeFile(pidFilePath, String(process.pid));
-    const exitCalls: number[] = [];
-    uninstall = installCrashHandler(pidFilePath, {
-      exitImpl: (code) => {
-        exitCalls.push(code);
-      },
-    });
-    process.emit(
-      "unhandledRejection",
-      new Error("test-rejection"),
-      Promise.resolve(),
-    );
-    expect(existsSync(pidFilePath)).toBe(false);
-    expect(exitCalls).toEqual([1]);
   });
 
   test("uninstall で hook が解除され exit handler が発火しない", async () => {
     await writeFile(pidFilePath, String(process.pid));
-    uninstall = installCrashHandler(pidFilePath, {
-      exitImpl: () => {},
-    });
+    uninstall = installCrashHandler(pidFilePath, {});
     uninstall();
     uninstall = null;
     process.emit("exit", 0);

@@ -19,6 +19,7 @@ glossary には要約と一次リンクのみを置く方針を取る。
 9. [Worktree / start-point](#9-worktree--start-point-解決)
 10. [コミュニケーション系](#10-コミュニケーション系)
 11. [Metrics 関連](#11-metrics-関連)
+12. [Post-mortem evidence](#12-post-mortem-evidence)
 
 ---
 
@@ -192,3 +193,15 @@ glossary には要約と一次リンクのみを置く方針を取る。
 | Agent 戦略分類（暫定 6 値） | task ごとの agent 役割分布から `solo / research-only / plan-impl / parallel-impl / full-cycle / other` を自動分類する規則。`agent-strategy.ts` の純粋関数 `classifyStrategy`。 | [`12-web-dashboard.md#7-agent-戦略分類規則暫定`](12-web-dashboard.md#7-agent-戦略分類規則暫定) | Web ダッシュボード |
 
 **関連 spec**: [`11-metrics.md`](11-metrics.md) / [`12-web-dashboard.md`](12-web-dashboard.md)
+
+## 12. Post-mortem evidence
+
+| 用語 | 定義 | 一次リンク | 関連 |
+|------|------|-----------|------|
+| post-mortem evidence | Manager daemon が死亡した時に WHEN/WHAT/WHY を再構成するための 4 軸 file 出力（heartbeat / telemetry / stderr.log / fatal trace）。T010 で導入。 | [`15-post-mortem-evidence.md`](15-post-mortem-evidence.md) | heartbeat / telemetry / stderr.log / fatal-handlers |
+| heartbeat file | `.team/daemon.heartbeat`。10s 間隔の sync write、clean exit 時に reason 記録 + unlink。残存していれば異常終了の証拠で、mtime が死亡時刻 (±10s) を示す。 | [`15-post-mortem-evidence.md#3-heartbeat-schema`](15-post-mortem-evidence.md#3-heartbeat-schema) | post-mortem evidence |
+| telemetry jsonl | `.team/logs/manager.telemetry.jsonl`。30s 間隔 で RSS / heap / event loop lag / open task 数を append。size base rotation（default 5 MB で `.1` 退避）。 | [`15-post-mortem-evidence.md#4-telemetry-schema`](15-post-mortem-evidence.md#4-telemetry-schema) | post-mortem evidence |
+| stderr redirect | `.team/logs/manager.stderr.log` に OS fd 2 を向けるための自己再 spawn 方式。Bun runtime panic / Rust panic / libc abort も file に残せる。 | [`15-post-mortem-evidence.md#2-ファイル一覧`](15-post-mortem-evidence.md#2-ファイル一覧) | post-mortem evidence |
+| fatal-handlers | `uncaughtException` / `unhandledRejection` / `SIGTERM` / `SIGINT` / `SIGHUP` を 1 箇所に集約する handler。pidfile cleanup は別責務 (`'exit'` listener)。 | [`15-post-mortem-evidence.md#5-fatal-trace-の重複経路`](15-post-mortem-evidence.md#5-fatal-trace-の重複経路) | post-mortem evidence |
+
+**関連 spec**: [`15-post-mortem-evidence.md`](15-post-mortem-evidence.md)

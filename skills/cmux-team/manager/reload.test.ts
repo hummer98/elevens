@@ -6,6 +6,7 @@
 import { describe, test, expect } from "bun:test";
 import type { ChildProcess } from "child_process";
 import { performDaemonReload } from "./reload";
+import { POST_MORTEM_REDIRECTED_FLAG } from "./post-mortem-redirect";
 
 interface SpawnCall {
   cmd: string;
@@ -103,13 +104,28 @@ describe("performDaemonReload", () => {
     expect(h.spawnCalls.length).toBe(1);
     const call = h.spawnCalls[0]!;
     expect(call.cmd).toBe("bun");
-    expect(call.args).toEqual(["run", h.latestMainTs, "start"]);
+    // T010 S5.1: reload した子は redirect 済み扱いで起動する (2 段重ね防止)
+    expect(call.args).toEqual([
+      "run",
+      h.latestMainTs,
+      "start",
+      POST_MORTEM_REDIRECTED_FLAG,
+    ]);
     expect(call.options).toEqual({
       stdio: "inherit",
       env: process.env,
       cwd: process.cwd(),
       detached: true,
     });
+  });
+
+  // T010 S5.1: reload した子に必ず POST_MORTEM_REDIRECTED_FLAG が伝播する
+  test("spawn args の末尾に --__post-mortem-redirected が含まれる (S5.1)", async () => {
+    const h = makeHarness();
+    await h.run();
+    const call = h.spawnCalls[0]!;
+    expect(call.args).toContain(POST_MORTEM_REDIRECTED_FLAG);
+    expect(call.args[call.args.length - 1]).toBe(POST_MORTEM_REDIRECTED_FLAG);
   });
 
   test("exit は code=0 で 1 回だけ呼ばれる", async () => {

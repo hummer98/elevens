@@ -33,7 +33,7 @@ import { promisify } from "util";
 import { t } from "./i18n";
 import { createDaemon, initInfra, startMaster, initializeLayout, tick, updateTeamJson, updateSidebarStatus, initFileWatcher, sleepUntilWakeup, checkUpdateAndNotify, handleMessage, normalizeSurfaceForPath, loadVersion, stopDaemon, ccBackend, refreshPoolSnapshot } from "./daemon";
 import { resolveMarkdownViewer, startDashboard, unmountDashboard } from "./dashboard";
-import { log, warn, formatSurface } from "./logger";
+import { log, warn, formatSurface, logSync } from "./logger";
 import { collectSessionEnrichment } from "./session-enrichment";
 // T358: events.jsonl writer
 import { emitEvent } from "./events-writer";
@@ -78,6 +78,17 @@ import { loadArtifacts, searchArtifacts, validateArtifact, addArtifact } from ".
 import { loadEpics, readEpic, createEpic, updateEpicStatus, listEpicTasks, EPIC_STATUSES, type EpicStatus } from "./epic";
 import { runPreflight, printPreflightIssues } from "./preflight";
 import { acquireOrExit, installCrashHandler, releasePidFile } from "./pidfile";
+import { installFatalHandlers, type FatalSignal } from "./fatal-handlers";
+import { maybeRespawnWithStderrRedirect } from "./post-mortem-redirect";
+import { startHeartbeat, stopHeartbeat, type HeartbeatHandle } from "./heartbeat";
+import {
+  startSelfTelemetry,
+  stopSelfTelemetry,
+  startEventLoopLagMeter,
+  measureBasicSample,
+  type SelfTelemetryHandle,
+} from "./self-telemetry";
+import { resolvePostMortemConfig } from "./config";
 import { ensureEnvrcHookPrompt } from "./envrc-prompt";
 import { checkDirenvAllowed, formatDirenvNotAllowedMessage } from "./direnv-check";
 import type { QueueMessage, LayoutMode, AutoUpdateMode, SleepPreventionMode, SessionStartedMessage, SessionEndedMessage, NotificationMessage, StopFailureMessage, PreToolUseMessage, PostToolUseMessage, PreToolUseDeniedMessage, Deliverable } from "./schema";
@@ -756,6 +767,13 @@ export async function applyResumeTransitions(
 
 async function cmdStart(): Promise<void> {
   if (hasHelpFlag()) showHelp(t("help_start"));
+
+  // T010 S6: stderr redirect (post-mortem evidence)
+  // bun runtime panic / Rust crate panic / libc abort も含めて全 stderr を file に残すため、
+  // cmdStart の最冒頭で自己再 spawn する。flag 付き呼出し / 非 TTY (test 等) は no-op で続行する。
+  // help flag 後・他の副作用前 (env チェック含) で実行する: redirect 失敗を子側 stderr.log にも残せる。
+  await maybeRespawnWithStderrRedirect({ projectRoot: PROJECT_ROOT, args });
+
   // cmux 環境チェック
   if (!process.env.CMUX_SOCKET_PATH) {
     console.error(t("not_in_cmux"));
@@ -800,6 +818,16 @@ async function cmdStart(): Promise<void> {
   // crash handler を install。SIGINT / SIGTERM 経路は shutdown() が release を
   // 呼ぶため対象外。reload sequence で子の pidfile を誤削除しない PID-aware 設計。
   installCrashHandler(pidFilePath);
+
+  // T010 S6 (N1 採用 A): uncaughtException / unhandledRejection / SIGINT / SIGTERM / SIGHUP の
+  // listener を fatal-handlers.ts に集約。signal 経路は内部の shutdown() 関数 (まだ定義前) に
+  // 委譲する — closure 経由で前方参照する。shutdown 未定義の超早期 signal は no-op (default 動作で死ぬ)。
+  let shutdownForSignal: ((signal: FatalSignal) => Promise<void>) | null = null;
+  installFatalHandlers({
+    onShutdown: async (signal) => {
+      if (shutdownForSignal) await shutdownForSignal(signal);
+    },
+  });
 
   // Phase 3 prep (docs/seed.md): cmux backend を選択していると 1 度だけ
   // deprecation 通知を warn する。c11 backend では何もしない。
@@ -966,6 +994,39 @@ async function cmdStart(): Promise<void> {
   state.version = await loadVersion();
   // T353: daemon プロセスの起動時刻を記録。daemon_stopped emit 時の uptime 計算に使う。
   state.startedAt = new Date().toISOString();
+
+  // T010 S6: post-mortem heartbeat を即時起動する。daemon_started ログ前に開始することで、
+  // 起動中フェーズ (initInfra / Master 起動 / TUI 起動) で死亡しても heartbeat の mtime で
+  // 死亡時刻を再構成できる。
+  const postMortemConfig = resolvePostMortemConfig(startConfig);
+  let heartbeatHandle: HeartbeatHandle | null = null;
+  try {
+    heartbeatHandle = startHeartbeat({
+      path: join(PROJECT_ROOT, ".team/daemon.heartbeat"),
+      intervalMs: postMortemConfig.heartbeatIntervalMs,
+      getState: () => {
+        const mem = process.memoryUsage();
+        const conductorCounts = { idle: 0, running: 0, disconnected: 0, broken: 0 };
+        for (const [, c] of state.conductors) {
+          const st = (c as any).status as string | undefined;
+          if (st === "idle") conductorCounts.idle++;
+          else if (st === "running" || st === "running_master_to_conductor") conductorCounts.running++;
+          else if (st === "disconnected") conductorCounts.disconnected++;
+          else if (st === "broken") conductorCounts.broken++;
+        }
+        return {
+          pid: process.pid,
+          uptime_sec: Math.round(process.uptime()),
+          open_tasks: state.openTasks ?? 0,
+          conductors: conductorCounts,
+          rss_mb: Math.round(mem.rss / 1024 / 1024),
+          heap_mb: Math.round(mem.heapUsed / 1024 / 1024),
+        };
+      },
+    });
+  } catch (e: any) {
+    await log("heartbeat_start_failed", `error=${e?.message ?? e}`);
+  }
   await log(
     "daemon_started",
     formatDaemonStartedDetail({
@@ -1195,9 +1256,18 @@ async function cmdStart(): Promise<void> {
   // A031 follow-up: shutdown は SIGINT / SIGTERM / onQuit から複数呼ばれる経路
   // があり、`daemon_stopped` が 2 回 log されることがあった。idempotent guard で
   // 二重発火を抑止する。先着のみが副作用を実行し、後続は早期 return する。
+  //
+  // T010 S6 (N1 採用 A): signal 経路は fatal-handlers.ts の `installFatalHandlers` 経由で
+  // bind 済み (cmdStart 冒頭の installCrashHandler 直後)。main.ts 側で `process.on("SIGINT", ...)`
+  // を直接 bind すると二重 listener になるため撤去した。signal 名は fatal-handlers から
+  // shutdown(signal) として渡される。
+  // T010 S6: self-telemetry handle を後段 (startDashboard 後) で代入できるよう ref を先に置く。
+  const telemetryHandleRef: { handle: SelfTelemetryHandle | null } = { handle: null };
   const shutdownGuard = makeShutdownGuard();
-  const shutdown = async () => {
+  const shutdown = async (signal?: string): Promise<void> => {
     if (!shutdownGuard.claim()) return;
+    // T010 S6: shutdown 関数に入った事実を sync 記録 (signal 経路 / onQuit 経路の両方で残る)
+    logSync("signal_received", `signal=${signal ?? "none"}`);
     // T234: state.running = false + 全 pidWatcher 停止をまとめて実行
     stopDaemon(state);
     state.fileWatcherAbort?.abort();
@@ -1219,6 +1289,25 @@ async function cmdStart(): Promise<void> {
         await log("rate_limit_persist_failed", `shutdown: ${e.message}`);
       }
     }
+    // T010 S6: telemetry / heartbeat の停止を pidfile release より前にやる。
+    // heartbeat は clean exit reason を記録してから unlink (= 残っていれば異常終了の証拠)。
+    try {
+      if (telemetryHandleRef.handle) {
+        stopSelfTelemetry(telemetryHandleRef.handle);
+      }
+    } catch {
+      /* best-effort */
+    }
+    try {
+      if (heartbeatHandle) {
+        stopHeartbeat(heartbeatHandle, {
+          cleanExit: true,
+          reason: signal ?? "shutdown",
+        });
+      }
+    } catch {
+      /* best-effort */
+    }
     // T353: uptime_sec を detail に追加。state.startedAt が空（cmdStart 経由でない経路）なら 0 にフォールバック
     const uptimeSec = state.startedAt ? formatUptimeFromStartedAt(state.startedAt) : 0;
     await log("daemon_stopped", `uptime_sec=${uptimeSec}`);
@@ -1227,8 +1316,8 @@ async function cmdStart(): Promise<void> {
     await releasePidFile(pidFilePath);
     process.exit(0);
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  // fatal-handlers から signal で呼ばれる shutdown を closure 経由で繋ぐ (signal 引数を伝える)
+  shutdownForSignal = (signal: FatalSignal) => shutdown(signal);
 
   // --- TUI ダッシュボード早期表示 ---
   const { scheduleRefresh } = await startDashboard(() => state, {
@@ -1256,7 +1345,7 @@ async function cmdStart(): Promise<void> {
       const { performDaemonReload } = await import("./reload");
       await performDaemonReload({ pidFilePath, latestMainTs });
     },
-    onQuit: () => { shutdown(); },
+    onQuit: () => { shutdown("dashboard_quit"); },
     onFullQuit: async () => {
       await log("full_quit_requested");
 
@@ -1298,11 +1387,53 @@ async function cmdStart(): Promise<void> {
       state.fileWatcherAbort?.abort();
       state.fileWatcherAbort = null;
       await updateTeamJson(state);
+      // T010 S6: onFullQuit は shutdown() を通らない経路 — heartbeat / telemetry もここで清掃する
+      try {
+        if (telemetryHandleRef.handle) stopSelfTelemetry(telemetryHandleRef.handle);
+      } catch {
+        /* best-effort */
+      }
+      try {
+        if (heartbeatHandle) {
+          stopHeartbeat(heartbeatHandle, {
+            cleanExit: true,
+            reason: "dashboard_full_quit",
+          });
+        }
+      } catch {
+        /* best-effort */
+      }
       // T259: pidfile を release（onFullQuit は shutdown() を通らない経路）
       await releasePidFile(pidFilePath);
       process.exit(0);
     },
   });
+
+  // T010 S6: TUI 起動成功後に self-telemetry を開始する。event loop lag は持続測定。
+  const lagMeter = startEventLoopLagMeter();
+  try {
+    telemetryHandleRef.handle = startSelfTelemetry({
+      path: join(PROJECT_ROOT, ".team/logs/manager.telemetry.jsonl"),
+      intervalMs: postMortemConfig.telemetryIntervalMs,
+      maxBytes: postMortemConfig.telemetryMaxBytes,
+      getSample: () => {
+        let open_conductors = 0;
+        let open_agents = 0;
+        for (const [, c] of state.conductors) {
+          open_conductors++;
+          open_agents += (c as any).agents?.length ?? 0;
+        }
+        return measureBasicSample({
+          open_tasks: state.openTasks ?? 0,
+          open_conductors,
+          open_agents,
+          event_loop_lag_ms: lagMeter.read(),
+        });
+      },
+    });
+  } catch (e: any) {
+    await log("self_telemetry_start_failed", `error=${e?.message ?? e}`);
+  }
 
   // --- Conductor + Master 起動（TUI 上で進捗表示） ---
 

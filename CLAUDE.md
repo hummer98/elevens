@@ -161,6 +161,7 @@ TypeScript daemon（`skills/cmux-team/manager/main.ts`）として Bun で実行
 - **アイドル化**: open tasks ゼロで待機、`[TASK_CREATED]` 通知で起床
 - **多重起動防止**: `.team/daemon.pid` を `writeFile({ flag: "wx" })` で atomic に取得
 - **Sub-agent 共通 overlay (T413)**: `.team/agent-instructions/_common.md` に置くと、Master / Conductor / Agent 全 sub-agent prompt の `{{PROJECT_COMMON_INSTRUCTIONS}}` 位置に展開される（per-role overlay は引き続き `<role>.md`）
+- **Post-mortem evidence (T010)**: daemon は `.team/daemon.heartbeat` (10s sync write) / `.team/logs/manager.stderr.log` (OS fd 2 redirect、Bun runtime panic も残る) / `.team/logs/manager.telemetry.jsonl` (30s 間隔の self-telemetry) を書き続ける。死亡時の WHEN/WHAT/WHY 再構成に使う。詳細は `docs/spec/15-post-mortem-evidence.md`
 
 ### タスクの作成・更新は CLI 経由（直接ファイル操作禁止）
 
@@ -249,10 +250,11 @@ Planner は自身で `status=blocked` に書き換え `/loop` を抜ける。Mas
 ├── task-state.json    # タスク状態管理（status: draft/ready/assigned/closed）
 ├── artifacts/         # Axxx — 知見の記録（直接ファイル作成）
 ├── output/            # Conductor/Agent の出力（taskRunId 別）
-├── logs/              # manager.log + traces/bodies/
+├── logs/              # manager.log + manager.stderr.log + manager.telemetry.jsonl + traces/bodies/
 ├── traces/            # SQLite トレースDB（traces.db）
 ├── queue/             # メッセージキュー（incoming/ + processed/）
 ├── daemon.pid         # daemon 多重起動防止の pidfile
+├── daemon.heartbeat   # Manager daemon 死亡時刻検出用 (T010)
 └── team.json          # チーム構成（daemon が自動更新。直接書き込み禁止）
 ```
 
@@ -310,6 +312,19 @@ Manager daemon は外向け event channel として `.team/logs/events.jsonl` �
 | API レート制限 | 各層 | 待機して再試行、同時 Agent 数を削減 |
 
 state 遷移・cascade・CONDUCTOR_DONE 分岐・rebase conflict 自解決の詳細は `docs/spec/07-state-machine.md` を参照。
+
+## Post-mortem evidence (T010)
+
+Manager daemon が無言で死亡しても WHEN/WHAT/WHY を再構成できるよう、4 軸の永続 file を残す。
+
+| 知りたいこと | 媒体 | 取得方法 |
+|---|---|---|
+| WHEN (死亡時刻 ±10s) | `.team/daemon.heartbeat` | `stat .team/daemon.heartbeat` の mtime と JSON 内 `ts`。残存していれば異常終了の証拠 |
+| WHAT (RSS / heap / event loop / open task) | `.team/logs/manager.telemetry.jsonl` | `tail -20 ... | jq -c '{ts,rss_mb,heap_used_mb,event_loop_lag_ms,open_tasks}'` |
+| WHY (JS 例外 / signal) | `.team/logs/manager.log` の `fatal_uncaught` / `fatal_unhandled_rejection` / `signal_received` | `grep -E "fatal_uncaught\|signal_received" .team/logs/manager.log` |
+| WHY (Bun runtime panic / Rust panic / libc abort) | `.team/logs/manager.stderr.log` (+ `.1` rotate) | `tail -50 .team/logs/manager.stderr.log` |
+
+config override は `.team/config.json` の `postMortem.{heartbeatIntervalMs,telemetryIntervalMs,telemetryMaxBytes,stderrRotateGenerations}`。手動再現は `scripts/test-crash-evidence.sh` (開発者ローカル前提)。詳細仕様は `docs/spec/15-post-mortem-evidence.md`。
 
 ## 既知の注意点
 
