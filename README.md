@@ -384,6 +384,17 @@ elevens trace-task 035
 
 Traces are stored in `.team/traces/traces.db` with request/response bodies in `.team/logs/traces/bodies/`. Metadata headers (`x-cmux-task-id`, `x-cmux-conductor-surface`, `x-cmux-role`) are propagated so every API request can be correlated with its originating task.
 
+### Post-mortem evidence when the daemon dies silently (v0.8)
+
+If the daemon crashes without leaving a clear cause in `manager.log`, the following files under `.team/` let you reconstruct WHEN / WHAT / WHY after the fact:
+
+- `.team/daemon.heartbeat` — sync write every 10s. If it survives, the daemon died abnormally; its `mtime` marks the time of death (±10s).
+- `.team/logs/manager.telemetry.jsonl` — RSS / heap / event-loop lag sampled every 30s (look for monotonic growth = leak-style OOM).
+- `.team/logs/manager.stderr.log` — the daemon's OS fd 2 is redirected here, so Bun runtime panics / Rust panics / libc aborts all land in this file.
+- `fatal_uncaught` / `signal_received` events in `.team/logs/manager.log` — synchronous record of JS exceptions and signals (SIGTERM/SIGINT/SIGHUP).
+
+See `docs/spec/15-post-mortem-evidence.md` for the analysis cookbook (with example commands) and the `postMortem.*` config overrides in `.team/config.json`.
+
 ## Troubleshooting
 
 ### Daemon won't start

@@ -345,8 +345,13 @@ daemon は依存が解決されたタスクのみ Conductor に割り当てま�
 ├── prompts/           # プロンプト監査証跡（gitignore）
 ├── logs/              # manager.log + traces/bodies/（gitignore）
 ├── traces/            # SQLite FTS5 トレース DB
+├── daemon.heartbeat   # 10s 間隔の sync write（daemon 死亡時刻の証拠、v0.8）
+├── logs/manager.stderr.log     # daemon の stderr redirect（Bun panic も拾う、v0.8）
+├── logs/manager.telemetry.jsonl # 30s 間隔 RSS/heap/event loop trajectory（v0.8）
 └── proxy-port         # プロキシポート番号
 ```
+
+`daemon.heartbeat` と `logs/manager.{stderr,telemetry.jsonl,log}` は daemon が無言で死亡した時の事後分析用 evidence。詳細は `docs/spec/15-post-mortem-evidence.md` を参照。
 
 ## プロジェクト固有の追加指示
 
@@ -451,6 +456,17 @@ elevens trace-task 035
 ```
 
 トレースは `.team/traces/traces.db` に、リクエスト/レスポンス本文は `.team/logs/traces/bodies/` に保存されます。メタデータヘッダー（`x-cmux-task-id`, `x-cmux-conductor-surface`, `x-cmux-role`）が伝播されるため、API リクエストを起票元タスクと紐付けられます。
+
+### Daemon が無言で死んだときの事後分析（v0.8）
+
+daemon が原因不明でクラッシュした場合に WHEN/WHAT/WHY を再構成するための evidence が `.team/` 配下に残ります。
+
+- `.team/daemon.heartbeat` — 10s 間隔の sync write。残存していれば異常終了の証拠、mtime が死亡時刻 (±10s)
+- `.team/logs/manager.telemetry.jsonl` — 30s 間隔の RSS / heap / event loop lag の trajectory（leak 型 OOM 検出用）
+- `.team/logs/manager.stderr.log` — daemon の OS fd 2 redirect（Bun runtime panic / Rust panic / libc abort も残る）
+- `.team/logs/manager.log` の `fatal_uncaught` / `signal_received` event — JS 例外 / signal 受信の sync 記録
+
+事後分析 cookbook（コマンド例つき）と config override（`.team/config.json` の `postMortem.*`）は `docs/spec/15-post-mortem-evidence.md` を参照。
 
 ## トラブルシューティング
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.0] - 2026-05-18
+
+### Added
+
+- **Manager daemon の post-mortem evidence capture** (T010): daemon が無言で死亡したときに WHEN / WHAT / WHY を事後再構成できる 4 軸の evidence file 機構を導入。2026-05-17 Brainship/prototype インシデント (manager.log の最終行と外部検知の間に 29 分のギャップで死因不明) への構造的対策
+  - **WHEN**: `.team/daemon.heartbeat` を 10 秒間隔で sync write。`kill -9` 後も残存し、最終 mtime が daemon の死亡時刻を ±10 秒精度で示す
+  - **WHAT**: `.team/logs/manager.telemetry.jsonl` に 30 秒間隔で RSS / heap / external / event loop lag / uptime を追記。死亡直前のメモリ trajectory が見える
+  - **WHY (JS 例外 / signal)**: `uncaughtException` / `unhandledRejection` / `SIGTERM` / `SIGINT` / `SIGHUP` 受信時に `logSync` 経由で `fatal_uncaught` / `signal_received` を `manager.log` に同期書き込みしてから exit。Signal bind を `fatal-handlers.ts` に完全集約 (Design Review 採用) し、`pidfile.ts` の旧 listener は撤去
+  - **WHY (Bun runtime)**: OS file descriptor 2 を `.team/logs/manager.stderr.log` にリダイレクトし、Bun の Rust panic backtrace も漏らさず捕捉。reload 経路にも `--__post-mortem-redirected` flag を伝播し 2 段重ね spawn を防止
+  - 仕様: `docs/spec/15-post-mortem-evidence.md` + glossary §12
+
 ## [0.7.1] - 2026-05-17
 
 ### Docs

@@ -138,8 +138,13 @@ npm install -g @hummer98/cmux-team
 ├── traces/             # SQLite トレースDB（traces.db）
 ├── sessions/           # セッション情報
 ├── proxy-port          # プロキシポート番号
+├── daemon.heartbeat    # 10s 間隔の sync write — daemon 死亡時刻 (±10s) の証拠（T010）
+├── logs/manager.stderr.log     # daemon の OS fd 2 redirect（Bun panic も拾える、T010）
+├── logs/manager.telemetry.jsonl # 30s 間隔 RSS/heap/event loop の post-mortem 用 trajectory（T010）
 └── team.json           # チーム構成（daemon が自動更新）
 ```
+
+Post-mortem evidence file 群（heartbeat / telemetry / stderr.log + manager.log の `fatal_uncaught` / `signal_received` event）の詳細は [`15-post-mortem-evidence.md`](15-post-mortem-evidence.md) を参照。
 
 タスク実行に伴うプロンプト・成果物（旧 `.team/prompts/`、`.team/output/` 相当）は `tasks/TNNN-slug/runs/<taskRunId>/` 配下に集約される。Conductor／Agent の `OUTPUT_DIR` はこのディレクトリを指す。
 
