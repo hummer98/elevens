@@ -430,6 +430,24 @@ CLI 経路は新 Node プロセスで起動されるため in-process mutex で�
 CLI ↔ daemon 間の cross-process race は reducer noop (`ASSIGN_OK` / `CLOSE` / `ABORT`
 の guard) で観測的に吸収する方針で、24h 観測の結果次第で file lock 導入を別タスク化する。
 
+### 6.5 cleanup 経路の archive 化 (T011)
+
+worktree 物理削除は **`CONDUCTOR_DONE success=true` 経路 (`close-task`) のみ**。それ以外の遷移では `.team/worktrees-archive/<taskRunId>/` に mv で archive 化し、branch も保持する。
+
+| 遷移 | cleanup 動作 |
+|---|---|
+| `assigned → closed` (`CONDUCTOR_DONE success=true`) | **delete** (worktree remove + branch -d) |
+| `assigned → aborted` (`ABORT_TASK` / disconnect_timeout / resume) | **archive** (作業内容保全) |
+| `assigned → reserved` (`reset-conductor` / `clear-conductor`) | **archive** |
+| `running → reserved` (手動 `/clear`、SESSION_CLEAR) | **archive** [C1] |
+| `assigned → ready` (`restart-task` from assigned / aborted) | **archive** |
+| `judgment_pending` (success=false unresolved=true) | **preserve** (in-place 温存) |
+| terminal race (`applyAssignCommit`) | **archive** (保守側) |
+
+archive された worktree は `elevens worktree archive show <taskRunId>` で参照可能。再アサインされた Conductor の prompt に `{{ARCHIVED_WORKTREE_SECTION}}` として最新 1 件が埋め込まれる。
+
+詳細は `docs/spec/16-worktree-archive.md` を参照。
+
 ### 6.1 T302 脚注
 
 T302 は T220 の assign race (terminal 巻き戻し) を塞ぐ暫定ガードとして

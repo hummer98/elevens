@@ -41,3 +41,5 @@ Follow the completion procedures in `conductor-role.md` ("Completion Procedures"
 - Step 12: Display the completion report on the session.
 
 **Do not call `elevens send CONDUCTOR_DONE --success true` yourself** — close-task does that on your behalf. Use the `--success false` path in `conductor-role.md` Step 8 only when you need to abort without calling close-task (e.g. rebase conflict).
+
+{{ARCHIVED_WORKTREE_SECTION}}

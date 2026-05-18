@@ -18,6 +18,12 @@ import { resolveFetchBeforeWorktree } from "./config";
 import type { ConductorState, LayoutMode } from "./schema";
 import { ClaudeCodeBackend } from "./claude-code-backend";
 import { shellQuote, buildLaunchCommand } from "./util";
+import {
+  archiveWorktree,
+  buildArchivedWorktreeSection,
+  findArchivesForTaskId,
+  type ArchiveReason,
+} from "./worktree-archive";
 
 const execFile = promisify(execFileCb);
 
@@ -525,6 +531,19 @@ export async function assignTask(
     }
     await mkdir(join(projectRoot, outputDir), { recursive: true });
 
+    // T011: 同 taskId の最新 archive 情報を prompt に section として埋め込む。
+    //   archive 不在時 buildArchivedWorktreeSection は空文字を返し、template から section 全体が消える。
+    let archivedSection = "";
+    try {
+      const archives = await findArchivesForTaskId(projectRoot, taskId);
+      archivedSection = buildArchivedWorktreeSection(archives[0]);
+    } catch (e: any) {
+      await log(
+        "archive_section_lookup_failed",
+        `task_id=${taskId} ${formatExecError(e)}`,
+      );
+    }
+
     let promptFile: string;
     try {
       promptFile = await generateConductorTaskPrompt(
@@ -536,7 +555,8 @@ export async function assignTask(
         outputDir,
         baseBranch,
         taskDir,
-        mainBranch
+        mainBranch,
+        archivedSection,
       );
     } catch (e: any) {
       throw new AssignTaskError("task", `prompt generation failed: ${e.message}`, e);
@@ -684,6 +704,24 @@ export async function assignTask(
 // --- resetConductor ---
 
 /**
+ * T011 [M4]: cleanupMode discriminated union — 呼び出し側に「archive / delete / preserve」を
+ * 必ず選ばせる構造で、社会的契約 (`preserveWorktree?` flag) ではなく型レベルで選択を強制する。
+ *
+ *  - `{ kind: "archive", reason: ArchiveReason }` — `.team/worktrees-archive/<taskRunId>/` に
+ *    mv で退避し branch を保持。observatory への証拠保全。
+ *  - `{ kind: "delete", reason: string }` — 旧来の `git worktree remove --force` + branch -d 経路。
+ *    `reason="legacy_fallback"` は cleanupMode 未指定時の後方互換 fallback。
+ *  - `{ kind: "preserve" }` — worktree / branch を何も触らない (judgment_pending 等)。
+ *
+ * Phase 2 で `cleanupMode` を required に昇格させ、`preserveWorktree` opt と
+ * legacy_fallback path を削除する予定。新規呼び出しでは `cleanupMode` を必ず明示する。
+ */
+export type CleanupMode =
+  | { kind: "delete"; reason: string }
+  | { kind: "archive"; reason: ArchiveReason }
+  | { kind: "preserve" };
+
+/**
  * Conductor の cleanup を行い、指定された status に遷移させる。
  *
  * T250: `opts.targetStatus` で遷移先を制御する。
@@ -706,7 +744,10 @@ export async function resetConductor(
     // T263: success=false && task-state=assigned 経路で worktree/branch を温存する。
     //       in-memory の ConductorState (taskRunId 等) は preserveWorktree と
     //       無関係に必ずリセットされる（Decision D7）— さもないと次タスク割当が破綻する。
+    // DEPRECATED (T011): `cleanupMode: { kind: "preserve" }` と等価。Phase 2 で削除。
     preserveWorktree?: boolean;
+    // T011 [M4]: cleanup の挙動を明示的に選ばせる。未指定時は legacy_fallback (delete) 相当。
+    cleanupMode?: CleanupMode;
     // T421/D5: true なら conductor.pid に対して claude プロセスを kill する
     //          （pane は保持）。reserved 復帰経路 (user_clear) で使う。
     killClaudeProcess?: boolean;
@@ -760,18 +801,58 @@ export async function resetConductor(
       }
     }
 
-    // 2. worktree 削除（冪等: 既に削除済みでもエラーにしない）
-    //    T263: preserveWorktree=true の場合は worktree/branch を温存する。
-    //    rebase 衝突など「人間判断待ち」状態で Conductor が `cd <worktree>` して
-    //    手動 rebase/diff できるようにするため。
-    if (!opts?.preserveWorktree) {
+    // 2. worktree cleanup — T011 [M4] cleanupMode で「archive / delete / preserve」を必ず選ばせる
+    //    - preserve: 何もしない (judgment_pending 等)
+    //    - archive: `.team/worktrees-archive/<taskRunId>/` に mv (証拠保全)
+    //    - delete: `git worktree remove --force` + branch -d (旧来挙動 / legacy_fallback)
+    //    cleanupMode 未指定時は preserveWorktree フラグから合成する後方互換 fallback。
+    // TODO(T011-phase2): cleanupMode を required に昇格させ、preserveWorktree opt と
+    //                    legacy_fallback path を削除する。
+    const cleanupMode: CleanupMode =
+      opts?.cleanupMode
+      ?? (opts?.preserveWorktree
+        ? { kind: "preserve" }
+        : { kind: "delete", reason: "legacy_fallback" });
+
+    if (cleanupMode.kind === "preserve") {
+      // 温存: 何もしない
+    } else if (
+      cleanupMode.kind === "archive"
+      && conductor.worktreePath
+      && existsSync(conductor.worktreePath)
+      && conductor.taskRunId
+      && conductor.taskId
+    ) {
+      try {
+        await archiveWorktree({
+          projectRoot,
+          worktreePath: conductor.worktreePath,
+          taskRunId: conductor.taskRunId,
+          taskId: conductor.taskId,
+          branch: `${conductor.taskRunId}/task`,
+          reason: cleanupMode.reason,
+          conductorSurface: conductor.surface,
+          sessionId: conductor.sessionId,
+        });
+      } catch (e: any) {
+        // archive 失敗時は削除にフォールバックせず、worktree は元場所に残す
+        // (user に判断委ねる方針 — R2)
+        await log(
+          "cleanup_failed",
+          `resetConductor archive failed: ${formatExecError(e)}`,
+        );
+      }
+    } else if (cleanupMode.kind === "delete") {
       if (conductor.worktreePath && existsSync(conductor.worktreePath)) {
         try {
           await execFile("git", ["worktree", "remove", conductor.worktreePath, "--force"], {
             cwd: projectRoot,
           });
         } catch (e: any) {
-          await log("cleanup_failed", `resetConductor worktree remove: path=${conductor.worktreePath} ${formatExecError(e)}`);
+          await log(
+            "cleanup_failed",
+            `resetConductor worktree remove (cleanup_reason=${cleanupMode.reason}): path=${conductor.worktreePath} ${formatExecError(e)}`,
+          );
         }
         // ブランチ削除（冪等: 既に削除済みでもエラーにしない）
         if (conductor.taskRunId) {
@@ -779,8 +860,18 @@ export async function resetConductor(
           try {
             await execFile("git", ["branch", "-d", branch], { cwd: projectRoot });
           } catch (e: any) {
-            await log("cleanup_failed", `resetConductor branch delete: branch=${branch} ${formatExecError(e)}`);
+            await log(
+              "cleanup_failed",
+              `resetConductor branch delete (cleanup_reason=${cleanupMode.reason}): branch=${branch} ${formatExecError(e)}`,
+            );
           }
+        }
+        // T011 [v2-m1]: legacy_fallback を log で identify 可能にする (observatory)
+        if (cleanupMode.reason === "legacy_fallback") {
+          await log(
+            "worktree_delete_legacy_fallback",
+            `surface=${conductor.surface} task_run_id=${conductor.taskRunId ?? ""}`,
+          );
         }
       }
     }
@@ -820,7 +911,8 @@ export async function resetConductor(
     const reasonSuffix = effectiveReason ? ` reason=${effectiveReason}` : "";
     // T263: preserveWorktree=true の場合は grep 可能な suffix を付与し、
     //       `grep 'worktree_preserved=true' manager.log` で温存された worktree を列挙可能にする。
-    const preservedSuffix = opts?.preserveWorktree ? ` worktree_preserved=true` : "";
+    // T011: cleanupMode.kind="preserve" 経由も同じ suffix で識別可能にする。
+    const preservedSuffix = cleanupMode.kind === "preserve" ? ` worktree_preserved=true` : "";
     // broken 時は「本当に死んでいるか」を snapshot 側と対称に示す（pid/alive を明示）。
     // idle 経路では pane 生存確認済みで自明なので出さない。
     const aliveSuffix =

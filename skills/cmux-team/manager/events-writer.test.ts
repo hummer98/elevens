@@ -251,6 +251,52 @@ describe("emitEvent: payload type 動作", () => {
     expect(rec.artifact_id).toBe("A046");
     expect("task_id" in rec).toBe(false);
   });
+
+  // T011: worktree_archived
+  test("T011: worktree_archived は task_id/task_run_id/reason/archive_path/archived_at/branch/uncommitted_changes/last_commit_sha を含む", async () => {
+    await emitEvent({
+      event: "worktree_archived",
+      task_id: "094",
+      task_run_id: "task-094-1700000000",
+      reason: "disconnect_timeout",
+      archive_path: ".team/worktrees-archive/task-094-1700000000",
+      archived_at: "2026-05-17T17:02:36.000Z",
+      branch: "task-094-1700000000/task",
+      uncommitted_changes: true,
+      last_commit_sha: "abcdef1234567",
+    });
+    const [rec] = (await readJsonl()) as [Record<string, unknown>];
+    expect(rec.event).toBe("worktree_archived");
+    expect(rec.task_id).toBe("094");
+    expect(rec.task_run_id).toBe("task-094-1700000000");
+    expect(rec.reason).toBe("disconnect_timeout");
+    expect(rec.archive_path).toBe(".team/worktrees-archive/task-094-1700000000");
+    expect(rec.archived_at).toBe("2026-05-17T17:02:36.000Z");
+    expect(rec.branch).toBe("task-094-1700000000/task");
+    expect(rec.uncommitted_changes).toBe(true);
+    expect(rec.last_commit_sha).toBe("abcdef1234567");
+    // ts と archived_at は別フィールドとして並ぶ [M1]
+    expect(typeof rec.ts).toBe("string");
+    expect(rec.ts).not.toBe(rec.archived_at);
+    // schema_version は現行のまま
+    expect(rec.schema_version).toBe(EVENTS_SCHEMA_VERSION);
+  });
+
+  test("T011: worktree_archived: last_commit_sha 省略可", async () => {
+    await emitEvent({
+      event: "worktree_archived",
+      task_id: "094",
+      task_run_id: "task-094-1700000000",
+      reason: "user_clear",
+      archive_path: ".team/worktrees-archive/task-094-1700000000",
+      archived_at: "2026-05-17T17:02:36.000Z",
+      branch: "task-094-1700000000/task",
+      uncommitted_changes: false,
+    });
+    const [rec] = (await readJsonl()) as [Record<string, unknown>];
+    expect(rec.event).toBe("worktree_archived");
+    expect("last_commit_sha" in rec).toBe(false);
+  });
 });
 
 describe("mapAbortReason: 9 値 → 6 値マップ全網羅", () => {

@@ -17,6 +17,7 @@ import {
   expandProjectCommonInstructions,
   expandPromptOverlays,
   generateConductorRolePrompt,
+  generateConductorTaskPrompt,
   generateMasterPrompt,
 } from "./template";
 import { createDummyProject, type DummyProject } from "./test-project";
@@ -238,6 +239,47 @@ describe("generateMasterPrompt common overlay (T413)", () => {
     await generateMasterPrompt(projectRoot);
     const out = await readFile(join(projectRoot, ".team/prompts/master.md"), "utf-8");
     expect(out).not.toContain("{{PROJECT_COMMON_INSTRUCTIONS}}");
+  });
+});
+
+// --- T011: generateConductorTaskPrompt の archivedWorktreeSection ---
+
+describe("generateConductorTaskPrompt archivedWorktreeSection (T011)", () => {
+  test("archivedWorktreeSection 指定時は template に展開される", async () => {
+    const section = "## 前回 attempt の archive について\n本文ダミー\n";
+    const promptFile = await generateConductorTaskPrompt(
+      projectRoot,
+      "task-100-1700000000",
+      "100",
+      "TASK CONTENT",
+      "/tmp/wt",
+      ".team/output/conductor-0",
+      "main",
+      undefined,
+      "main",
+      section,
+    );
+    const out = await readFile(promptFile, "utf-8");
+    expect(out).toContain("前回 attempt の archive について");
+    expect(out).toContain("本文ダミー");
+    expect(out).not.toContain("{{ARCHIVED_WORKTREE_SECTION}}");
+  });
+
+  test("archivedWorktreeSection 省略時は placeholder が消える (空文字に置換)", async () => {
+    const promptFile = await generateConductorTaskPrompt(
+      projectRoot,
+      "task-101-1700000001",
+      "101",
+      "TASK CONTENT",
+      "/tmp/wt",
+      ".team/output/conductor-0",
+      "main",
+      undefined,
+      "main",
+    );
+    const out = await readFile(promptFile, "utf-8");
+    expect(out).not.toContain("{{ARCHIVED_WORKTREE_SECTION}}");
+    expect(out).not.toContain("前回 attempt の archive について");
   });
 });
 

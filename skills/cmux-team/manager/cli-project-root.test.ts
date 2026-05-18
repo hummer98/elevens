@@ -11,7 +11,7 @@ import { spawn } from "child_process";
 import { mkdtemp, mkdir, rm, writeFile, symlink } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import { runWriteGate } from "./main";
+import { runWriteGate, isWriteCommand } from "./main";
 
 const MAIN_TS = join(import.meta.dir, "main.ts");
 
@@ -328,6 +328,27 @@ describe("CLI --project-root flag (subprocess)", () => {
       await projB.dispose();
     }
   }, 30000);
+});
+
+// ---------- T011: worktree archive CLI の write gate ----------
+
+describe("T011: isWriteCommand worktree archive アダプタ (§9.6.1)", () => {
+  test("worktree archive list は read 扱い", () => {
+    expect(isWriteCommand("worktree", "archive-list")).toBe(false);
+  });
+  test("worktree archive show は read 扱い", () => {
+    expect(isWriteCommand("worktree", "archive-show")).toBe(false);
+  });
+  test("worktree archive remove は write 扱い", () => {
+    expect(isWriteCommand("worktree", "archive-remove")).toBe(true);
+  });
+  test("worktree archive prune は write 扱い", () => {
+    expect(isWriteCommand("worktree", "archive-prune")).toBe(true);
+  });
+  test("worktree (subCmd 不正) は write 扱いにならない", () => {
+    expect(isWriteCommand("worktree", "archive-unknown")).toBe(false);
+    expect(isWriteCommand("worktree", undefined)).toBe(false);
+  });
 });
 
 // ---------- read 系 / エラーケース ----------

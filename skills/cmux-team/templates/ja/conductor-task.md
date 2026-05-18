@@ -41,3 +41,5 @@ worktree は tracked files のみ含む。作業開始前に以下を確認す�
 - Step 12: 完了レポートをセッション上に表示する
 
 **`elevens send CONDUCTOR_DONE --success true` を自分で呼び出さない** — close-task がその役割を果たす。rebase 衝突等で close-task を呼ばず abort したい場合のみ `conductor-role.md` Step 8 の `--success false` 経路を使う。
+
+{{ARCHIVED_WORKTREE_SECTION}}

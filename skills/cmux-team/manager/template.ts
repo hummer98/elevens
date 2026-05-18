@@ -259,7 +259,9 @@ export async function generateConductorTaskPrompt(
   outputDir: string,
   baseBranch: string | undefined,
   taskDir: string | undefined,
-  mainBranch: string
+  mainBranch: string,
+  // T011 [M2]: 同 task ID の最新 archive 情報。archive 不在時は空文字を渡す（または省略）。
+  archivedWorktreeSection: string = "",
 ): Promise<string> {
   // T253: mainBranch は required。空文字なら fail-stop（silent failure 防止）
   if (!mainBranch.trim()) {
@@ -295,7 +297,8 @@ export async function generateConductorTaskPrompt(
     .replace(/\{\{PROJECT_ROOT\}\}/g, projectRoot)
     .replace(/\{\{CONDUCTOR_ID\}\}/g, taskRunId)
     .replace(/\{\{MAIN_BRANCH\}\}/g, mainBranch)
-    .replace(/\{\{BASE_BRANCH\}\}/g, baseBranch || mainBranch);
+    .replace(/\{\{BASE_BRANCH\}\}/g, baseBranch || mainBranch)
+    .replace(/\{\{ARCHIVED_WORKTREE_SECTION\}\}/g, archivedWorktreeSection);
 
   await writeFile(promptFile, content);
   await log("conductor_task_prompt_generated", `taskRunId=${taskRunId} path=${promptFile}`);

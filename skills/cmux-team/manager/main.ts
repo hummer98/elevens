@@ -50,6 +50,16 @@ import { start as startProxy } from "./proxy";
 import { startDashboardServer } from "./dashboard-server";
 import { getDashboardHtml } from "./dashboard-web-bundle";
 import { launchConductor, resetConductor } from "./conductor";
+import {
+  archiveWorktree,
+  findArchivesForTaskId,
+  removeArchive,
+  pruneArchives,
+  parseDuration,
+  ARCHIVE_DIR_REL,
+  type ArchiveMeta,
+  type ArchiveSummary,
+} from "./worktree-archive";
 import { buildLaunchCommand } from "./util";
 import { ClaudeCodeBackend } from "./claude-code-backend";
 import { OpenCodeBackend } from "./opencode-backend";
@@ -316,9 +326,12 @@ const WRITE_COMMANDS: Record<string, true | Set<string>> = {
   artifacts: new Set(["add"]),
   token: new Set(["add", "remove", "rotate", "set-plan", "promote", "migrate-subscription"]),
   epic: new Set(["create", "resume", "abort"]),
+  // T011 [M3]: `worktree archive remove` / `prune` のみ write 扱い。`list` / `show` は read。
+  // 2 階層 (worktree → archive → sub) を flat に展開して既存 isWriteCommand 構造に適合させる。
+  worktree: new Set(["archive-remove", "archive-prune"]),
 };
 
-function isWriteCommand(command: string | undefined, subCmd: string | undefined): boolean {
+export function isWriteCommand(command: string | undefined, subCmd: string | undefined): boolean {
   if (!command) return false;
   const v = WRITE_COMMANDS[command];
   if (v === true) return true;
@@ -1617,9 +1630,11 @@ async function cmdStart(): Promise<void> {
     for (const surface of violationSurfaces) {
       const c = state.conductors.get(surface);
       if (!c) continue;  // A経路で除外された / D経路で新規作成されなかった
+      // T011 [M4]: resume 起動時の violation 経路は archive (作業を保全して人間判断を仰ぐ)
       await resetConductor(c, state.projectRoot, state.workspace ?? undefined, {
         targetStatus: "broken",
         reason: "unique_violation",
+        cleanupMode: { kind: "archive", reason: "resume" },
       }, ccBackend(state.backend));
     }
   }
@@ -5092,28 +5107,59 @@ async function cleanupAssignedTask(conductor: any): Promise<CleanupResult> {
     } catch {}
   }
 
-  // worktree 削除
+  // T011: worktree archive 化 (restart-task 経路。旧来は git worktree remove --force)
+  //   archive により作業内容を保全し、再アサインされた Conductor が前回 attempt を参照可能になる。
   if (conductor.worktreePath && existsSync(conductor.worktreePath)) {
-    try {
-      const { execFile: execFileCb } = require("child_process");
-      const { promisify } = require("util");
-      const execFileAsync = promisify(execFileCb);
-      await execFileAsync("git", ["worktree", "remove", conductor.worktreePath, "--force"], {
-        cwd: PROJECT_ROOT,
-      });
-    } catch (e: any) {
-      await log("cleanup_failed", `abort-task worktree remove: path=${conductor.worktreePath} ${formatExecError(e)}`);
-    }
-    // ブランチ削除
-    if (conductor.taskRunId) {
-      const branch = `${conductor.taskRunId}/task`;
+    if (conductor.taskRunId && conductor.taskId) {
+      try {
+        await archiveWorktree({
+          projectRoot: PROJECT_ROOT,
+          worktreePath: conductor.worktreePath,
+          taskRunId: conductor.taskRunId,
+          taskId: conductor.taskId,
+          branch: `${conductor.taskRunId}/task`,
+          reason: "restart",
+          conductorSurface: conductor.surface,
+          sessionId: conductor.sessionId,
+        });
+      } catch (e: any) {
+        await log(
+          "cleanup_failed",
+          `restart-task archive: path=${conductor.worktreePath} ${formatExecError(e)}`,
+        );
+      }
+    } else {
+      // taskRunId / taskId 不明 (基本起きない) → 既存挙動 (remove + branch -D) にフォールバック
       try {
         const { execFile: execFileCb } = require("child_process");
         const { promisify } = require("util");
         const execFileAsync = promisify(execFileCb);
-        await execFileAsync("git", ["branch", "-D", branch], { cwd: PROJECT_ROOT });
+        await execFileAsync(
+          "git",
+          ["worktree", "remove", conductor.worktreePath, "--force"],
+          { cwd: PROJECT_ROOT },
+        );
       } catch (e: any) {
-        await log("cleanup_failed", `abort-task branch delete: branch=${branch} ${formatExecError(e)}`);
+        await log(
+          "cleanup_failed",
+          `restart-task worktree remove (no taskRunId/taskId): path=${conductor.worktreePath} ${formatExecError(e)}`,
+        );
+      }
+      if (conductor.taskRunId) {
+        const branch = `${conductor.taskRunId}/task`;
+        try {
+          const { execFile: execFileCb } = require("child_process");
+          const { promisify } = require("util");
+          const execFileAsync = promisify(execFileCb);
+          await execFileAsync("git", ["branch", "-D", branch], {
+            cwd: PROJECT_ROOT,
+          });
+        } catch (e: any) {
+          await log(
+            "cleanup_failed",
+            `restart-task branch delete (no taskId): branch=${branch} ${formatExecError(e)}`,
+          );
+        }
       }
     }
   }
@@ -5318,29 +5364,40 @@ async function restartFromAborted(
   journal: string,
   taskFile: string | undefined,
 ): Promise<void> {
+  // T011: aborted → ready の restart 経路でも archive 化 (作業内容の保全)。
+  //   stale.taskRunId が無い場合は fallback で削除する。
   if (stale.worktreePath && existsSync(stale.worktreePath)) {
-    try {
-      await execFileAsync(
-        "git",
-        ["worktree", "remove", stale.worktreePath, "--force"],
-        { cwd: PROJECT_ROOT },
-      );
-    } catch (e) {
-      await log(
-        "cleanup_failed",
-        `restart-task aborted worktree remove: path=${stale.worktreePath} ${formatExecError(e)}`,
-      );
-    }
-  }
-  if (stale.taskRunId) {
-    const branch = `${stale.taskRunId}/task`;
-    try {
-      await execFileAsync("git", ["branch", "-D", branch], { cwd: PROJECT_ROOT });
-    } catch (e) {
-      await log(
-        "cleanup_failed",
-        `restart-task aborted branch delete: branch=${branch} ${formatExecError(e)}`,
-      );
+    if (stale.taskRunId) {
+      try {
+        await archiveWorktree({
+          projectRoot: PROJECT_ROOT,
+          worktreePath: stale.worktreePath,
+          taskRunId: stale.taskRunId,
+          taskId,
+          branch: `${stale.taskRunId}/task`,
+          reason: "restart",
+        });
+      } catch (e) {
+        await log(
+          "cleanup_failed",
+          `restart-task aborted archive: path=${stale.worktreePath} ${formatExecError(e)}`,
+        );
+      }
+      // archive 経路では branch は意図的に残す (`elevens worktree archive show` で参照可能にするため)。
+    } else {
+      // taskRunId 不明な edge case → 既存挙動 (remove) にフォールバック
+      try {
+        await execFileAsync(
+          "git",
+          ["worktree", "remove", stale.worktreePath, "--force"],
+          { cwd: PROJECT_ROOT },
+        );
+      } catch (e) {
+        await log(
+          "cleanup_failed",
+          `restart-task aborted worktree remove (no taskRunId): path=${stale.worktreePath} ${formatExecError(e)}`,
+        );
+      }
     }
   }
 
@@ -6534,6 +6591,216 @@ async function cmdArtifacts(): Promise<void> {
 }
 
 /**
+ * T011: worktree archive サブコマンド本体。spec: docs/spec/16-worktree-archive.md。
+ *
+ *   list [--task-id N] [--format json|text]
+ *   show <taskRunId>
+ *   remove <taskRunId> [--delete-branch]
+ *   prune --older-than <duration> [--dry-run] [--yes]
+ *
+ * write 系は `WRITE_COMMANDS.worktree = Set(["archive-remove", "archive-prune"])` で登録。
+ */
+async function cmdWorktree(): Promise<void> {
+  const sub = args[1];
+  if (sub !== "archive" || hasHelpFlag()) {
+    showWorktreeUsage();
+    return;
+  }
+  const archiveSub = args[2];
+  switch (archiveSub) {
+    case "list":
+      await cmdWorktreeArchiveList();
+      break;
+    case "show":
+      await cmdWorktreeArchiveShow();
+      break;
+    case "remove":
+      await cmdWorktreeArchiveRemove();
+      break;
+    case "prune":
+      await cmdWorktreeArchivePrune();
+      break;
+    default:
+      console.error(`Unknown worktree archive subcommand: ${archiveSub ?? "(none)"}`);
+      showWorktreeUsage();
+      process.exit(1);
+  }
+}
+
+function showWorktreeUsage(): void {
+  console.log(`Usage: elevens worktree archive <subcommand>
+
+Subcommands:
+  list [--task-id N] [--format json|text]
+                          archive 一覧。--task-id で同 task の archive 群に絞り込み。
+  show <taskRunId>        archive の meta.json + git log -10 を表示。
+  remove <taskRunId> [--delete-branch]
+                          archive を削除。--delete-branch で branch (-D) も削除。
+  prune --older-than <duration> [--dry-run] [--yes]
+                          duration (例: 30d, 12h) より古い archive を一括削除。
+                          --dry-run 指定時は削除候補のみ表示 (--yes より優先)。
+
+詳細仕様: docs/spec/16-worktree-archive.md`);
+}
+
+async function cmdWorktreeArchiveList(): Promise<void> {
+  const taskIdFilter = getArg("task-id");
+  const format = getArg("format") ?? "text";
+  if (format !== "text" && format !== "json") {
+    console.error(`Error: --format must be 'text' or 'json' (got: ${format})`);
+    process.exit(1);
+  }
+
+  // findArchivesForTaskId は task_id filter を取るが、全件取得もサポートしたい。
+  // 直接 .team/worktrees-archive/ を読みで全 entry を返す。
+  const archiveDirAbs = join(PROJECT_ROOT, ARCHIVE_DIR_REL);
+  let entries: string[] = [];
+  if (existsSync(archiveDirAbs)) {
+    try {
+      entries = await readdir(archiveDirAbs);
+    } catch {
+      entries = [];
+    }
+  }
+
+  const all: ArchiveSummary[] = [];
+  for (const entry of entries) {
+    const metaPath = join(archiveDirAbs, entry, ".archive-meta.json");
+    if (!existsSync(metaPath)) continue;
+    try {
+      const raw = await readFile(metaPath, "utf-8");
+      const meta = JSON.parse(raw) as ArchiveMeta;
+      all.push({
+        archivePath: join(ARCHIVE_DIR_REL, entry),
+        taskRunId: meta.task_run_id,
+        taskId: meta.task_id,
+        archivedAt: meta.archived_at,
+        reason: meta.reason,
+        branch: meta.branch,
+        uncommittedChanges: !!meta.uncommitted_changes,
+        lastCommitSha: meta.last_commit_sha,
+      });
+    } catch {
+      // 不正 entry は skip
+    }
+  }
+
+  const filtered = taskIdFilter ? all.filter((a) => a.taskId === taskIdFilter) : all;
+  filtered.sort((a, b) => b.archivedAt.localeCompare(a.archivedAt));
+
+  if (format === "json") {
+    console.log(JSON.stringify(filtered, null, 2));
+    return;
+  }
+  if (filtered.length === 0) {
+    console.log("(no archives)");
+    return;
+  }
+  console.log(
+    "taskRunId\tarchived_at\treason\tbranch\tuncommitted",
+  );
+  for (const a of filtered) {
+    console.log(
+      `${a.taskRunId}\t${a.archivedAt}\t${a.reason}\t${a.branch}\t${a.uncommittedChanges ? "yes" : "no"}`,
+    );
+  }
+}
+
+async function cmdWorktreeArchiveShow(): Promise<void> {
+  const taskRunId = args[3];
+  if (!taskRunId) {
+    console.error("Error: taskRunId required (usage: elevens worktree archive show <taskRunId>)");
+    process.exit(1);
+  }
+  const archiveAbs = join(PROJECT_ROOT, ARCHIVE_DIR_REL, taskRunId);
+  if (!existsSync(archiveAbs)) {
+    console.error(`Error: archive not found: ${taskRunId}`);
+    process.exit(1);
+  }
+  const metaPath = join(archiveAbs, ".archive-meta.json");
+  let meta: ArchiveMeta | undefined;
+  try {
+    const raw = await readFile(metaPath, "utf-8");
+    meta = JSON.parse(raw) as ArchiveMeta;
+  } catch (e) {
+    console.error(`Error: meta.json unreadable: ${(e as Error)?.message ?? e}`);
+    process.exit(1);
+  }
+  console.log(`archive_path: ${join(ARCHIVE_DIR_REL, taskRunId)}`);
+  console.log(JSON.stringify(meta, null, 2));
+  // git log -10 を試行 (失敗しても表示自体は出す)
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["log", "--oneline", meta.branch, "-10"],
+      { cwd: PROJECT_ROOT },
+    );
+    console.log("\n--- git log --oneline " + meta.branch + " -10 ---");
+    console.log(stdout);
+  } catch (e) {
+    console.log(`\n(git log failed: ${(e as Error)?.message ?? e})`);
+  }
+}
+
+async function cmdWorktreeArchiveRemove(): Promise<void> {
+  const taskRunId = args[3];
+  if (!taskRunId) {
+    console.error("Error: taskRunId required (usage: elevens worktree archive remove <taskRunId> [--delete-branch])");
+    process.exit(1);
+  }
+  const deleteBranch = hasFlag("delete-branch");
+  const archiveAbs = join(PROJECT_ROOT, ARCHIVE_DIR_REL, taskRunId);
+  if (!existsSync(archiveAbs)) {
+    console.log(`OK noop ${taskRunId} (not found)`);
+    return;
+  }
+  await removeArchive(PROJECT_ROOT, taskRunId, { deleteBranch });
+  console.log(`OK removed ${taskRunId}${deleteBranch ? " (with branch)" : ""}`);
+}
+
+async function cmdWorktreeArchivePrune(): Promise<void> {
+  const olderThan = getArg("older-than");
+  if (!olderThan) {
+    console.error("Error: --older-than required (e.g. --older-than 30d)");
+    process.exit(1);
+  }
+  let olderThanMs: number;
+  try {
+    olderThanMs = parseDuration(olderThan);
+  } catch (e) {
+    console.error(`Error: ${(e as Error).message}`);
+    process.exit(1);
+  }
+  const dryRun = hasFlag("dry-run");
+  // [m9]: --dry-run は --yes より優先する (削除前確認に倒す)
+  const yes = hasFlag("yes") && !dryRun;
+  const deleteBranches = hasFlag("delete-branches");
+
+  // dry-run でも yes でもないときは確認 prompt が必要だが、CLI として実用最小限の
+  // 形にする: --yes 省略時は dry-run 強制 + 「--yes で確定」案内を出す。
+  if (!dryRun && !yes) {
+    console.error("Error: confirm with --yes or use --dry-run to preview");
+    process.exit(1);
+  }
+
+  const result = await pruneArchives(PROJECT_ROOT, {
+    olderThanMs,
+    deleteBranches,
+    dryRun,
+  });
+  if (dryRun) {
+    console.log(`(dry-run) would prune ${result.pruned.length} archive(s):`);
+    for (const id of result.pruned) console.log(`  - ${id}`);
+    if (result.skipped.length > 0) {
+      console.log(`skipped: ${result.skipped.length}`);
+    }
+    return;
+  }
+  console.log(`OK pruned ${result.pruned.length} archive(s)`);
+  for (const id of result.pruned) console.log(`  - ${id}`);
+}
+
+/**
  * Epic（PoC）サブコマンド本体。spec: docs/spec/14-epic.md。
  * create / list / show / resume / abort をサポート。start は Phase 2 で daemon 統合。
  */
@@ -6755,7 +7022,13 @@ if (args[0] === "--version" || args[0] === "-v") {
 {
   const flagRoot = getArg("project-root");
   if (flagRoot !== undefined && CWD_ROOT_FOR_GATE !== undefined) {
-    if (isWriteCommand(command, args[1])) {
+    // T011 [M3]: `worktree` は 2 階層 (worktree archive {sub}) なので
+    // args[1] + "-" + args[2] で subCmd を組み立てる。
+    const subCmd =
+      command === "worktree" && args[1] && args[2]
+        ? `${args[1]}-${args[2]}`
+        : args[1];
+    if (isWriteCommand(command, subCmd)) {
       await runWriteGate(PROJECT_ROOT, CWD_ROOT_FOR_GATE);
     }
   }
@@ -6893,6 +7166,9 @@ switch (command) {
   }
   case "epic":
     await cmdEpic();
+    break;
+  case "worktree":
+    await cmdWorktree();
     break;
   case "gh":
     await cmdGh();

@@ -13,6 +13,7 @@ import {
   AssignTaskError,
   type ResumePlanItem,
   type ResumeAssignment,
+  type CleanupMode,
 } from "./conductor";
 import { ClaudeCodeBackend } from "./claude-code-backend";
 import type { RuntimeBackend, RuntimeEvent } from "./runtime-backend";
@@ -1634,9 +1635,11 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
       }
       // cleanup は broken 遷移時点で既に済んでいるが、resetConductor は冪等なので
       // 再度呼んでも worktree 不在時は no-op 的に振る舞う。
+      // T011 [M4]: 念のため archive を指定（既に archive 済みでも target_exists で skip される）。
       await resetConductor(conductor, state.projectRoot, state.workspace ?? undefined, {
         targetStatus: "idle",
         reason: message.reason ?? "cleared",
+        cleanupMode: { kind: "archive", reason: "clear_conductor" },
       }, ccBackend(state.backend));
       // 即時 tick を発火し、次の scanTasks で新タスクを拾えるようにする
       requestWakeup(state);
@@ -1746,9 +1749,11 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
           }
         }
       }
+      // T011 [M4]: RESET_CONDUCTOR は archive 経路。worktree を `.team/worktrees-archive/` に保全。
       await resetConductor(conductor, state.projectRoot, state.workspace ?? undefined, {
         targetStatus: "reserved",
         reason: message.reason ?? "user_reset",
+        cleanupMode: { kind: "archive", reason: "reset_conductor" },
       }, ccBackend(state.backend));
       // 即時 tick を発火し、次の scanTasks で reserved を拾えるようにする
       requestWakeup(state);
@@ -1853,9 +1858,11 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
 
       // R5: resetConductor(reserved) — RESET_CONDUCTOR と同形。
       //     `reason` は ConductorState 用のフリーテキスト（AbortReason 型ではない）。
+      // T011 [M4]: abort_task は archive 経路 (作業内容の保全)。
       await resetConductor(conductor, state.projectRoot, state.workspace ?? undefined, {
         targetStatus: "reserved",
         reason: "abort_task",
+        cleanupMode: { kind: "archive", reason: "abort_task" },
       }, ccBackend(state.backend));
 
       // 次 tick で reserved → assigning 経路（findIdleConductor）を起動
@@ -3031,9 +3038,12 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
             }
           }
         }
+        // T011 [C1]: SESSION_CLEAR running (手動 /clear) は archive 経路。
+        //  従来は無言で worktree が消えていた既知バグの修正。
         await resetConductor(conductor, state.projectRoot, state.workspace ?? undefined, {
           targetStatus: "reserved",
           reason: "user_clear",
+          cleanupMode: { kind: "archive", reason: "user_clear" },
         }, ccBackend(state.backend));
       }
       // idle 時は何もしない（TUI チラつき防止）
@@ -3697,7 +3707,15 @@ async function applyAssignCommit(
       "assign_skipped",
       `${formatSurface(updated.surface, "C")} task_id=${taskId} reason=terminal prev=${prev} taskRunId=${updated.taskRunId ?? "-"}`,
     );
-    await resetConductor(updated, state.projectRoot, state.workspace ?? undefined, undefined, ccBackend(state.backend));
+    // T011 [M4]: applyAssignCommit terminal race。task は既に closed/aborted/deleted。
+    //   作業内容は通常空だが、保守側に倒して archive。
+    await resetConductor(
+      updated,
+      state.projectRoot,
+      state.workspace ?? undefined,
+      { cleanupMode: { kind: "archive", reason: "assign_terminal_race" } },
+      ccBackend(state.backend),
+    );
     return { committed: false, reason: "terminal", currentStatus: prev };
   }
 
@@ -4412,9 +4430,11 @@ async function forceCloseDisconnectedConductor(
 
   // 3. resetConductor で worktree/branch/タブ名をクリーンアップし broken 状態に遷移
   //    ログ（conductor_broken）は resetConductor 内で発行される（集約ポリシー D12）。
+  // T011 [M4]: disconnect_timeout は archive 経路 (作業内容の保全 — Brainship 事例の主要対象)。
   await resetConductor(conductor, state.projectRoot, state.workspace ?? undefined, {
     targetStatus: "broken",
     reason: "disconnect_timeout",
+    cleanupMode: { kind: "archive", reason: "disconnect_timeout" },
   }, ccBackend(state.backend));
 }
 
@@ -4605,9 +4625,18 @@ async function handleConductorDone(
     }
   }
 
-  // Conductor をリセットして idle に戻す（unresolved 時は worktree/branch を温存）
+  // Conductor をリセットして idle に戻す
+  // T011 [M4] / F 経路: success/unresolved の組み合わせで cleanupMode を決める。
+  //  - success=true: worktree は削除（task_completed の正常経路）
+  //  - success=false && unresolved=true: judgment_pending → preserve (in-place 温存)
+  //  - success=false && unresolved=false: 異常終了系 → archive (done_unresolved reason)
+  const doneCleanupMode: CleanupMode = success
+    ? { kind: "delete", reason: "done_success" }
+    : unresolved
+      ? { kind: "preserve" }
+      : { kind: "archive", reason: "done_unresolved" };
   await resetConductor(conductor, state.projectRoot, state.workspace ?? undefined, {
-    preserveWorktree: unresolved,
+    cleanupMode: doneCleanupMode,
   }, ccBackend(state.backend));
 
   // T279 shadow: handleConductorDone 完了後に reducer と比較する。

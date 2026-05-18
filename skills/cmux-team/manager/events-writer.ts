@@ -158,6 +158,32 @@ export type EventStreamRecord =
       title: string;
       author: string;
       task_id?: string;
+    }
+  | {
+      // T011: worktree archive 化 event。`archiveWorktree()` の末尾で emit。
+      // observatory として「いつ・どの reason で worktree が archive されたか」を
+      // retrospective に追えるようにする。`archived_at` は mv 完了時刻のドメイン値で、
+      // writer 自動付与の `ts` (event flush 時刻) とは別フィールド。
+      // schema_version は bump しない（add-only）。
+      event: "worktree_archived";
+      task_id: string;
+      task_run_id: string;
+      reason:
+        | "disconnect_timeout"
+        | "abort_task"
+        | "reset_conductor"
+        | "clear_conductor"
+        | "user_clear"
+        | "restart"
+        | "assign_terminal_race"
+        | "resume"
+        | "done_unresolved"
+        | "other";
+      archive_path: string;
+      archived_at: string;
+      branch: string;
+      uncommitted_changes: boolean;
+      last_commit_sha?: string;
     };
 
 /**

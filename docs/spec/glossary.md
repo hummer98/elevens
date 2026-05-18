@@ -157,15 +157,16 @@ glossary には要約と一次リンクのみを置く方針を取る。
 | config-local | local `<mainBranch>` のみ存在する場合に採用。 | [`05-install-and-infrastructure.md#teamconfigjson初回起動時に自動生成`](05-install-and-infrastructure.md#teamconfigjson初回起動時に自動生成) | mainBranch |
 | head-fallback | 上記すべてが解決できない場合の HEAD フォールバック。最終手段。 | [`05-install-and-infrastructure.md#teamconfigjson初回起動時に自動生成`](05-install-and-infrastructure.md#teamconfigjson初回起動時に自動生成) | (なし) |
 | `CMUX_TEAM_FETCH_BEFORE_WORKTREE` | worktree 作成前に `git fetch --quiet origin <mainBranch>` を行うかの環境変数。T283 でデフォルト ON に反転。 | [`05-install-and-infrastructure.md#teamconfigjson初回起動時に自動生成`](05-install-and-infrastructure.md#teamconfigjson初回起動時に自動生成) | config-local-ahead / config-origin |
+| worktree archive | T011 で導入。「正常完了以外」の cleanup 経路で worktree を `.team/worktrees-archive/<taskRunId>/` に物理 `mv` で退避し、`.archive-meta.json` + branch を保持する仕組み。`elevens worktree archive {list,show,remove,prune}` で操作。 | [`16-worktree-archive.md`](16-worktree-archive.md) | cleanupMode / worktree_archived event |
 
-**関連 spec**: [`05-install-and-infrastructure.md`](05-install-and-infrastructure.md)
+**関連 spec**: [`05-install-and-infrastructure.md`](05-install-and-infrastructure.md) / [`16-worktree-archive.md`](16-worktree-archive.md)
 
 ## 10. コミュニケーション系
 
 | 用語 | 定義 | 一次リンク | 関連 |
 |------|------|-----------|------|
 | Trace DB | `.team/traces/traces.db`（SQLite + FTS5）。Anthropic API リクエスト/レスポンス・hook signal・api_usage を記録。検索は `cmux-team trace` / `trace-task` / `trace-hooks`。 | [`05-install-and-infrastructure.md#プロキシサーバー`](05-install-and-infrastructure.md#プロキシサーバー), [`../../CLAUDE.md#通信プロトコル`](../../CLAUDE.md#通信プロトコル) | proxy / hook_signals |
-| events stream | 外向け event channel。Manager daemon が `.team/logs/events.jsonl` に JSONL で append し、Master watch mode や `cmux-team events` CLI が購読する。schema v2、17 event 種、append-only（rotate なし）。 | [`10-events-stream.md`](10-events-stream.md) | event channel / EventBus / Trace DB |
+| events stream | 外向け event channel。Manager daemon が `.team/logs/events.jsonl` に JSONL で append し、Master watch mode や `cmux-team events` CLI が購読する。schema v2、18 event 種、append-only（rotate なし）。 | [`10-events-stream.md`](10-events-stream.md) | event channel / EventBus / Trace DB |
 | event channel | Manager daemon が外向けに公開する event の論理チャネル。`.team/logs/events.jsonl`（events stream）として実装される。daemon プロセス内 EventBus（`notifyStateChanged`）とは別レイヤー。 | [`10-events-stream.md#1-概要`](10-events-stream.md#1-概要) | events stream / EventBus |
 | watch mode | Master が `/cmux-team:watch` を能動 invoke した時のみ起動する opt-in な events stream 監視モード。`task_completed` の自動 PR merge / conflict resolve / `git pull --ff-only` までを Master が自走し、判断が必要な event は escalate する。default 無効。 | [`../../commands/watch.md`](../../commands/watch.md), [`10-events-stream.md`](10-events-stream.md) | events stream / event channel |
 | hook | Claude Code が発行する SessionStart / Stop / StopFailure / Notification / PreToolUse / PostToolUse / SessionEnd 等のイベント。hook shell には分岐ロジックを持たせず、全イベントを daemon に転送する。 | [`../../CLAUDE.md#実装ルールガードレール`](../../CLAUDE.md#実装ルールガードレール), [`05-install-and-infrastructure.md#メッセージング`](05-install-and-infrastructure.md#メッセージング) | hook_signals / Trace DB |

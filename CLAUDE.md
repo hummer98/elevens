@@ -300,6 +300,7 @@ Manager daemon は外向け event channel として `.team/logs/events.jsonl` �
 すべての作業は `.worktrees/<taskRunId>/` 内で行う。main ブランチは常に無傷。
 
 - start-point 優先順位: `explicit`（`base_branch:` 明示）→ `config-local-ahead` → `config-origin` → `config-local` → `head-fallback`
+- 正常完了以外の cleanup 経路（abort / reset / disconnect / restart / 手動 `/clear`）では `.team/worktrees-archive/<taskRunId>/` に退避（archive 化）し、branch を残す。詳細は `docs/spec/16-worktree-archive.md`
 - 詳細は `docs/spec/05-install-and-infrastructure.md` を参照
 
 ## エラーリカバリ

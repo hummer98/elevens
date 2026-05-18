@@ -60,7 +60,7 @@ EventBus が「**実 state mutation → TUI refresh**」の疎結合接続を担
 | field | type | required | description |
 |-------|------|----------|-------------|
 | `ts` | string (ISO 8601 with ms + `Z`) | ✓ | event 発火時刻。例: `"2026-04-27T12:34:56.789Z"`（UTC、ミリ秒精度） |
-| `event` | string (snake_case) | ✓ | event 種別。§5 の 17 種のいずれか。reader は unknown 値を受信しても skip して継続する |
+| `event` | string (snake_case) | ✓ | event 種別。§5 の 18 種のいずれか。reader は unknown 値を受信しても skip して継続する |
 | `schema_version` | integer | ✓ | 現行値 `2`。breaking change 時に bump。詳細は §4 |
 
 レコード例:
@@ -89,7 +89,7 @@ EventBus が「**実 state mutation → TUI refresh**」の疎結合接続を担
 
 ## 5. Event 一覧
 
-合計 **17 event 種**。Task lifecycle 8 種 + Conductor lifecycle 8 種 + Artifact lifecycle 1 種。
+合計 **18 event 種**。Task lifecycle 8 種 + Conductor lifecycle 8 種 + Artifact lifecycle 1 種 + Worktree lifecycle 1 種。
 
 ### 5.1 Task lifecycle（8 event）
 
@@ -122,6 +122,12 @@ EventBus が「**実 state mutation → TUI refresh**」の疎結合接続を担
 | # | event | 概要 | 主な reader 用途 |
 |---|-------|------|------------------|
 | 6.17 | `artifact_added` | artifact が追加された | observatory での知見追跡 |
+
+### 5.4 Worktree lifecycle（1 event）
+
+| # | event | 概要 | 主な reader 用途 |
+|---|-------|------|------------------|
+| 6.18 | `worktree_archived` | cleanup 経路で worktree が `.team/worktrees-archive/` に archive された (T011) | 作業内容の保全観測・retrospective 分析 |
 
 ---
 
@@ -310,6 +316,23 @@ Conductor が `assigning → running` に進んだ時、または `disconnected 
 | `title` | string | ✓ | frontmatter `title:` |
 | `author` | string | ✓ | surface ID（例: `surface:100`）または `"unknown"` |
 | `task_id` | string | optional | frontmatter `task:` が指定された場合のみ（例: `T038`） |
+
+### 6.18 `worktree_archived`
+
+T011: 「正常完了以外」の cleanup 経路で worktree が `.team/worktrees-archive/<taskRunId>/` に物理 `mv` で archive された時に emit。`archiveWorktree()` (`skills/cmux-team/manager/worktree-archive.ts`) の末尾で `events-writer` 経由に書き出す。
+
+| field | type | required | description |
+|-------|------|----------|-------------|
+| `task_id` | string | ✓ | canonical task id (数字のみ、例: `"094"`) |
+| `task_run_id` | string | ✓ | 例: `"task-094-1778998001"` |
+| `reason` | string | ✓ | `disconnect_timeout` / `abort_task` / `reset_conductor` / `clear_conductor` / `user_clear` / `restart` / `assign_terminal_race` / `resume` / `done_unresolved` / `other` |
+| `archive_path` | string | ✓ | projectRoot 相対。例: `".team/worktrees-archive/task-094-1778998001"` |
+| `archived_at` | string | ✓ | ISO 8601 UTC。`mv` 完了時刻のドメイン値で、meta.json `archived_at` と同値。`ts` (writer 自動付与の event flush 時刻) とは概念分離 [M1] |
+| `branch` | string | ✓ | 例: `"task-094-1778998001/task"` (archive 後も main repo に残る) |
+| `uncommitted_changes` | boolean | ✓ | mv 前の `git status --porcelain` 行数 > 0 |
+| `last_commit_sha` | string | optional | mv 前の `git rev-parse HEAD`。取得失敗時は省略 |
+
+詳細は `docs/spec/16-worktree-archive.md` を参照。
 
 ---
 
