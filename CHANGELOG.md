@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.1] - 2026-05-19
+
+### Fixed
+
+- **`elevens start` が TTY 環境で silent exit する UX regression を hotfix** (v0.8.0 で混入): post-mortem stderr の OS fd redirect を実現していた `cmdStart` 冒頭の自己再 spawn ロジックが、TTY 親プロセスを spawn 直後に `exit(0)` させていたため、user の TTY には何も表示されないまま shell prompt が即座に戻る挙動になっていた。child が `daemon already running` 等のエラーで失敗した場合も stderr が file (`manager.stderr.log`) にリダイレクトされており、user からは「elevens start が無言で消える」ように見える事故が KDG-lab で発生 (2026-05-19)
+  - 暫定対応: TTY auto-respawn を **default disable** にし、`CMUX_TEAM_POST_MORTEM_REDIRECT=1` で opt-in 化
+  - Bun runtime panic の file 捕捉は disable 状態だが、heartbeat / telemetry / fatal_uncaught の 3 軸の post-mortem evidence は引き続き有効
+  - parent が child の stderr を tee する proper な実装は follow-up タスクで対応予定
+
 ## [0.8.0] - 2026-05-18
 
 ### Added

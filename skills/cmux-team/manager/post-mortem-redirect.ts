@@ -80,6 +80,15 @@ export async function maybeRespawnWithStderrRedirect(
     return { skipped: true, reason: "already-redirected" };
   }
 
+  // v0.8.1 hotfix: TTY mode の auto-respawn が UX regression を起こすため default disable。
+  // 親 process が exit(0) で即抜けるため、child 側の起動失敗 (daemon already running 等) が
+  // file に消えて user に見えなくなる事故 (KDG-lab 2026-05-19) を受けた措置。
+  // proper な tee 実装は task で別途対応する。
+  // opt-in: `CMUX_TEAM_POST_MORTEM_REDIRECT=1` で従来挙動を有効化できる。
+  if (process.env.CMUX_TEAM_POST_MORTEM_REDIRECT !== "1") {
+    return { skipped: true, reason: "non-tty" };
+  }
+
   // TTY でないなら redirect skip (test / pipe 経路)
   if (!isTTY()) {
     return { skipped: true, reason: "non-tty" };

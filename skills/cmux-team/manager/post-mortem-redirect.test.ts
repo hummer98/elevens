@@ -79,6 +79,14 @@ describe("maybeRespawnWithStderrRedirect - skip 経路", () => {
 });
 
 describe("maybeRespawnWithStderrRedirect - redirect 経路", () => {
+  // v0.8.1 hotfix: auto-respawn は default disable。redirect 経路の test は opt-in env を立てる。
+  beforeEach(() => {
+    process.env.CMUX_TEAM_POST_MORTEM_REDIRECT = "1";
+  });
+  afterEach(() => {
+    delete process.env.CMUX_TEAM_POST_MORTEM_REDIRECT;
+  });
+
   test("TTY + flag 無し → spawn + exit(0) し stderr.log を作成する", async () => {
     const exitCalls: number[] = [];
     const spawnCalls: Array<{ cmd: string; args: string[]; opts: any }> = [];
