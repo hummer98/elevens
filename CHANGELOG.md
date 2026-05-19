@@ -1,9 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [0.8.2] - 2026-05-20
 
 ### Fixed
 
+- **Manager 再起動を跨いだ asking 状態と askQuestion の喪失を修正** (T014): Conductor が AskUserQuestion で停止中に Manager を再起動 (`elevens start`) すると、`team.json` 上の `status="asking"` / `askQuestion` が永続化されず、復元時に `idle` に倒れて質問文も消えていた。`updateTeamJson` で `askQuestion` を書き出し、`restoreConductorState` の status 分岐に `asking`（`askQuestion` 非空時のみ）を追加して構造的に保持する。ask 中の Conductor は PID が生きているため A 経路 (keep-alive) で復元されるが、status のみ落ちて Master / dashboard / 将来の await-task ask 検知から見えなくなる observatory 原則違反を解消
 - **post-mortem stderr redirect を parent tee に proper 化** (T013): v0.8.0 で導入した自己再 spawn 方式の TTY visibility regression (v0.8.1 で env opt-in による暫定回避) を構造的に解決。`maybeRespawnWithStderrRedirect` を「親プロセスが child の stderr を pipe で受け取り file と TTY 両方に同時 write (tee)」する設計に置換した
   - 親は SIGINT / SIGTERM を **forward しない** no-op listener で自殺抑止のみ行い、kernel pgroup broadcast で child 側の `fatal-handlers` が 1 回だけ受け取る (`fatal-handlers.ts` に dedup が無いため二重 shutdown を構造的に回避)。SIGHUP は listener を bind せず default の terminate を許容
   - `detached: false` + atomic listener bind invariant (spawn 戻り値受取りから `data` / `end` / `exit` の 3 listener bind まで同期一連) で初回 chunk・早期 exit を取りこぼさない

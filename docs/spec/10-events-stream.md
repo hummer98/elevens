@@ -89,7 +89,7 @@ EventBus が「**実 state mutation → TUI refresh**」の疎結合接続を担
 
 ## 5. Event 一覧
 
-合計 **18 event 種**。Task lifecycle 8 種 + Conductor lifecycle 8 種 + Artifact lifecycle 1 種 + Worktree lifecycle 1 種。
+合計 **19 event 種**。Task lifecycle 8 種 + Conductor lifecycle 8 種 + Artifact lifecycle 1 種 + Worktree lifecycle 1 種 + Daemon lifecycle 1 種。
 
 ### 5.1 Task lifecycle（8 event）
 
@@ -128,6 +128,12 @@ EventBus が「**実 state mutation → TUI refresh**」の疎結合接続を担
 | # | event | 概要 | 主な reader 用途 |
 |---|-------|------|------------------|
 | 6.18 | `worktree_archived` | cleanup 経路で worktree が `.team/worktrees-archive/` に archive された (T011) | 作業内容の保全観測・retrospective 分析 |
+
+### 5.5 Daemon lifecycle（1 event）
+
+| # | event | 概要 | 主な reader 用途 |
+|---|-------|------|------------------|
+| 6.19 | `reload_failed` | TUI `r` reload で child の spawn が失敗した (T013) | Master / TUI の異常検知（3 経路通知のうち events.jsonl 担当、spec §15.5.1） |
 
 ---
 
@@ -333,6 +339,15 @@ T011: 「正常完了以外」の cleanup 経路で worktree が `.team/worktree
 | `last_commit_sha` | string | optional | mv 前の `git rev-parse HEAD`。取得失敗時は省略 |
 
 詳細は `docs/spec/16-worktree-archive.md` を参照。
+
+### 6.19 `reload_failed`
+
+T013: TUI `r` キー reload で `performDaemonReload` (`skills/cmux-team/manager/reload.ts`) が child の spawn に失敗した時に emit。reload 失敗は (i) `manager.log` の `daemon_reload_*` event、(ii) `daemon.heartbeat` の mtime 停止、(iii) 本 event の **3 経路** で並列通知される（`docs/spec/15-post-mortem-evidence.md` §5.1 参照）。schema_version は bump しない（add-only）。
+
+| field | type | required | description |
+|-------|------|----------|-------------|
+| `reason` | string enum | ✓ | `child_pid_undefined` / `stderr_log_open_failed` / `spawn_threw` |
+| `detail` | string | ✓ | 詳細メッセージ（spawn error message / errno 等） |
 
 ---
 
