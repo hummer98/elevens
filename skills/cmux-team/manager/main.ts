@@ -1356,7 +1356,11 @@ async function cmdStart(): Promise<void> {
       //   親をブロックし、reload chain で bun ランタイム 1.2GB × N が累積する事故あり）。
       //   release / spawn / log / unref / exit の順序は performDaemonReload に集約。
       const { performDaemonReload } = await import("./reload");
-      await performDaemonReload({ pidFilePath, latestMainTs });
+      await performDaemonReload({
+        pidFilePath,
+        latestMainTs,
+        projectRoot: PROJECT_ROOT,
+      });
     },
     onQuit: () => { shutdown("dashboard_quit"); },
     onFullQuit: async () => {

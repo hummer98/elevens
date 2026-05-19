@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **post-mortem stderr redirect を parent tee に proper 化** (T013): v0.8.0 で導入した自己再 spawn 方式の TTY visibility regression (v0.8.1 で env opt-in による暫定回避) を構造的に解決。`maybeRespawnWithStderrRedirect` を「親プロセスが child の stderr を pipe で受け取り file と TTY 両方に同時 write (tee)」する設計に置換した
+  - 親は SIGINT / SIGTERM を **forward しない** no-op listener で自殺抑止のみ行い、kernel pgroup broadcast で child 側の `fatal-handlers` が 1 回だけ受け取る (`fatal-handlers.ts` に dedup が無いため二重 shutdown を構造的に回避)。SIGHUP は listener を bind せず default の terminate を許容
+  - `detached: false` + atomic listener bind invariant (spawn 戻り値受取りから `data` / `end` / `exit` の 3 listener bind まで同期一連) で初回 chunk・早期 exit を取りこぼさない
+  - 親 exit code は `code ?? 128+signo ?? 1` で child から導出 (signal 番号は `os.constants.signals` を一次ソースに POSIX fallback)
+  - backpressure: log stream が drain しなくなったら `child.stderr.pause()` し `once("drain")` で `resume()`
+  - spawn 失敗時はメッセージを TTY と file の **両方** に書いて `exit(1)`
+  - reload 経路 (`performDaemonReload`) は親 TTY が exit するため pipe では SIGPIPE するリスクがある。`openSync(stderr.log, "a")` で直接 fd を open し child の `stdio[2]` に注入する (rotate せず append only、§5.1)。reload 失敗時は **3 経路** (`logger.log` + `.team/daemon.heartbeat` mtime 停止 + `.team/logs/events.jsonl` の `reload_failed` event) で Master / TUI が検知できる
+  - v0.8.1 の `CMUX_TEAM_POST_MORTEM_REDIRECT` env opt-in は本実装で不要化し、再 default 有効化 (TTY 親プロセスから起動した場合のみ)
+  - `events.jsonl` schema に `reload_failed` event を add-only で追加 (`reason`: `child_pid_undefined` / `stderr_log_open_failed` / `spawn_threw`)
+  - 仕様更新: `docs/spec/15-post-mortem-evidence.md` §5.1 (reload feedback 責務) / §9 D1 (parent tee 方式へ改訂)
+
 ## [0.8.1] - 2026-05-19
 
 ### Fixed

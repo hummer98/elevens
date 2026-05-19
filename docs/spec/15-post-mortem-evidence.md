@@ -20,7 +20,7 @@ Manager daemon が死亡した時に **WHEN / WHAT / WHY** の 3 軸で原因究
 |---|---|---|---|
 | `.team/daemon.heartbeat` | JSON 1 オブジェクト | 10s 間隔の sync write (truncate 上書き) | なし — clean exit 時に reason 追記 + unlink |
 | `.team/logs/manager.telemetry.jsonl` | JSONL (1 行 1 sample) | 30s 間隔の sync append | size base — 既存が `telemetryMaxBytes` (default 5 MB) を超えていたら `.1` に rename |
-| `.team/logs/manager.stderr.log` | raw text (OS fd 2) | `start` 時に自己再 spawn、子の fd 2 を file に redirect | start 時に既存があれば `.1` に rename (1 世代) |
+| `.team/logs/manager.stderr.log` | raw text (OS fd 2) | `start` 時に親プロセスが child を spawn し、stderr を **tee** (file + TTY 同時 write)。reload 時は親が直接 file fd を open して child の stdio[2] に注入 (append, rotate せず) | `elevens start` (TTY 親) 起動時のみ既存を `.1` に rename (1 世代)。reload 経路は append only |
 | `.team/logs/manager.log` | text (既存 logger) | fatal handler 経由で sync append (`logSync` / `errorSync`) | 既存の team-gc rotation に従う |
 
 ## 3. heartbeat schema
@@ -67,11 +67,25 @@ Manager daemon が死亡した時に **WHEN / WHAT / WHY** の 3 軸で原因究
 
 | 経路 | 媒体 | 出所 | T010 改訂後の状況 |
 |---|---|---|---|
-| (a) | `.team/logs/manager.stderr.log` | OS fd 2 経由 (Bun runtime backtrace / `console.error` / Rust panic / libc abort) | Bun runtime panic / Rust panic / libc abort のように JS 層に来ない fatal の取得に限定して使う |
+| (a) | `.team/logs/manager.stderr.log` | OS fd 2 経由 (Bun runtime backtrace / `console.error` / Rust panic / libc abort) | Bun runtime panic / Rust panic / libc abort のように JS 層に来ない fatal の取得に限定して使う。**`elevens start` を TTY 親プロセスから起動した場合のみ** redirect が成立する (CI / systemd / nohup 等 non-TTY 経路は inline 起動になり本ファイルは更新されない、§9 D5 参照) |
 | (b) | `.team/logs/manager.log` の `[error]` 行 | `installDashboardConsoleRedirect` 経由 (TUI 描画中の `console.error`) | T010 R1 改訂で `installCrashHandler` 内の `console.error(err)` 経路は撤去されたため基本的に空 |
 | (c) | `.team/logs/manager.log` の `fatal_uncaught` / `fatal_unhandled_rejection` / `fatal_stack` event | `fatal-handlers.ts` の `logSync` / `errorSync` 由来 | **primary source** |
 
 整合性のため、同一 fatal err を **重複カウントしない**こと。
+
+## 5.1. reload 経路の失敗通知責務
+
+TUI から `r` キーで daemon を reload した際、新 child の spawn が失敗すると旧 daemon は exit してしまうため、Master / TUI 側で異常を検知できる必要がある。`performDaemonReload` (`skills/cmux-team/manager/reload.ts`) は以下の **3 経路** で並列に通知する:
+
+| 経路 | 媒体 | 検知方法 | reason 値 |
+|---|---|---|---|
+| (i) | `.team/logs/manager.log` | `daemon_reload_stderr_log_open_failed` / `daemon_reload_spawn_threw` / `daemon_reload_spawn_failed` event を grep | `child_pid_undefined` / `stderr_log_open_failed` / `spawn_threw` |
+| (ii) | `.team/daemon.heartbeat` の mtime 停止 | `stat` の mtime が >10s 更新されていなければ daemon が死亡 (heartbeat interval 既定 10s) | — |
+| (iii) | `.team/logs/events.jsonl` の `reload_failed` event | `jq 'select(.event=="reload_failed")'` で抽出 (spec §10) | `child_pid_undefined` / `stderr_log_open_failed` / `spawn_threw` |
+
+3 経路は **best-effort で全て emit** されるが、最低 1 つでも届けば検知可能。例えば events.jsonl 書き込み自体が失敗しても logger.log + heartbeat 停止で検知できる。
+
+reload 経路の stderr.log は **rotate しない**: `elevens start` で既に 1 世代 rotate されているため、reload で更に rotate すると初回起動の crash log が消える (R4)。append only で旧世代を保護する。
 
 ## 6. fatal event 名
 
@@ -171,7 +185,7 @@ tail -50 .team/logs/manager.stderr.log.1
 
 ## 9. 設計判断 (関連)
 
-- **stderr redirect は wrapper subcommand 方式 (D1 = (b))**: `Bun.spawn(stdio:["inherit","inherit",fd], detached:true)` で子プロセスの OS fd 2 を file に向ける。Bun の `process.dup2` 相当 API が無く、`process.stderr.write` hook も Zig 層の panic を捕捉できないため、これが唯一の現実解。
+- **stderr redirect は parent tee 方式 (D1, T013 で改訂)**: 親プロセスが child を `spawn(stdio:["inherit","inherit","pipe"], detached:false)` で起動し、child の stderr を **file (createWriteStream append) と TTY (process.stderr.write) の両方に同時 write** する。Bun の `process.dup2` 相当 API が無く、`process.stderr.write` hook も Zig 層の panic を捕捉できないため fd 経由が必須。v0.8.0 の自己再 spawn (`detached:true` + 親即 exit) は TTY visibility regression を起こしたため、parent foreground hold + tee に転換した (T013)。signal は parent が **forward しない** — kernel pgroup broadcast で child 側 `fatal-handlers` が 1 回だけ受け取る (`fatal-handlers.ts:84–102` に dedup が無いため二重発火を構造的に避ける)。reload 経路は親 TTY が既に死ぬためそちらは file fd を直接 open して child の stdio[2] に注入する (rotate せず append、§5.1 参照)。
 - **handler の単一責務化 (D7)**: uncaughtException / unhandledRejection / signal は `fatal-handlers.ts` に集約、pidfile cleanup は `pidfile.ts` の `'exit'` listener に集約。`process.exit()` の同期 terminate 仕様により、複数 listener を順次走らせて全部に副作用を持たせる設計は構造的に不可能なため、責務を分離する。
 - **stderr rotate は 1 世代 (D3)**: crash 後の debug workflow では「死亡時の stderr」と「その 1 つ前」があれば十分。多世代は disk 占有とコード複雑性を増やす。
 - **telemetry rotation は size base 5 MB (D4)**: 30s 間隔 × 1 record 約 200 bytes = 1 day 約 0.6 MB。5 MB なら約 8 day 保持。
@@ -179,6 +193,6 @@ tail -50 .team/logs/manager.stderr.log.1
 
 ## 10. 関連
 
-- 実装: `skills/cmux-team/manager/{heartbeat,self-telemetry,fatal-handlers,post-mortem-redirect,logger}.ts`
+- 実装: `skills/cmux-team/manager/{heartbeat,self-telemetry,fatal-handlers,post-mortem-redirect,reload,events-writer,logger}.ts`
 - 手動再現: `scripts/test-crash-evidence.sh` (開発者ローカル前提、CI 化は別タスク)
 - 参照: `docs/spec/00-project-overview.md` (観察可能性章) / `docs/spec/05-install-and-infrastructure.md` (`.team/` ファイル一覧)

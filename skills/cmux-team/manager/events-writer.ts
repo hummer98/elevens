@@ -160,6 +160,18 @@ export type EventStreamRecord =
       task_id?: string;
     }
   | {
+      // T013: daemon reload 失敗 event。`performDaemonReload` が child を起動できなかった
+      // 場合に emit。reload 失敗は (i) logger.log / (ii) heartbeat mtime 停止 / (iii)
+      // 本 event の 3 経路で Master / TUI が検知する (spec §5.1)。
+      // schema_version は bump しない (add-only)。
+      event: "reload_failed";
+      reason:
+        | "child_pid_undefined"
+        | "stderr_log_open_failed"
+        | "spawn_threw";
+      detail: string;
+    }
+  | {
       // T011: worktree archive 化 event。`archiveWorktree()` の末尾で emit。
       // observatory として「いつ・どの reason で worktree が archive されたか」を
       // retrospective に追えるようにする。`archived_at` は mv 完了時刻のドメイン値で、
