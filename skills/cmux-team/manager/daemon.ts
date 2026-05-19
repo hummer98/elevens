@@ -1063,8 +1063,10 @@ export async function removeMaster(
 /**
  * team.json の conductor 生データから ConductorState を構築する（A 経路の復元用）。
  * agents の PID alive 判定もここで行う。
+ *
+ * @internal export はテスト用。プロダクションコードから直接呼ばないこと（T014）。
  */
-function restoreConductorState(c: any): ConductorState {
+export function restoreConductorState(c: any): ConductorState {
   const restoredAgents: AgentState[] = (c.agents ?? []).map((a: any) => ({
     surface: a.surface,
     role: a.role,
@@ -1096,15 +1098,22 @@ function restoreConductorState(c: any): ConductorState {
     clearSentAt: c.clearSentAt,
     // T323: token pool 用 handle（永続化されていれば復元）
     tokenHandle: typeof c.tokenHandle === "string" ? c.tokenHandle : undefined,
+    // T014: asking 状態は SESSION_ASK で得た質問本文をユーザーに表示する必要があるため、
+    //       restart 後も askQuestion を保持する（status="asking" の前提）。
+    askQuestion: typeof c.askQuestion === "string" ? c.askQuestion : undefined,
     // T250: broken は再起動後も保持する（明示 clear まで idle に戻さない）
     // T421/F3: reserved も再起動後に保持する。silent に idle へ coerce すると
     //          「pane あり、claude 未起動」が「idle」と誤表示され snapshot が嘘になる。
     //          findIdleConductor は reserved も拾うので自動再起動経路は壊れない。
+    // T014: asking も明示保持。ただし askQuestion が空ならデータ破損疑いで idle に倒す
+    //       (observatory: 再起動後も ask 中の Conductor を観測可能にする)
     status:
       c.status === "running" ? "running"
       : c.status === "disconnected" ? "disconnected"
       : c.status === "broken" ? "broken"
       : c.status === "reserved" ? "reserved"
+      : c.status === "asking" && typeof c.askQuestion === "string" && c.askQuestion.length > 0
+        ? "asking"
       : "idle",
   };
 }
@@ -4723,6 +4732,9 @@ export async function updateTeamJson(state: DaemonState): Promise<void> {
       pid: c.pid,
       // T323: token pool 用 handle（proxy が auth_hash 解決時に書き戻す）
       tokenHandle: c.tokenHandle,
+      // T014: Manager 再起動後も asking 状態を復元できるよう askQuestion を永続化する。
+      //       SESSION_STARTED/IDLE 経路で undefined に戻る（既存挙動を維持）。
+      askQuestion: c.askQuestion,
       agents: c.agents.map((a) => ({
         surface: a.surface,
         role: a.role,

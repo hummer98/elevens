@@ -5467,6 +5467,62 @@ describe("updateTeamJson / restoreConductors: T261 フィールド永続化", ()
   });
 });
 
+describe("updateTeamJson / restoreConductorState: askQuestion 永続化 (T014)", () => {
+  test("updateTeamJson: status='asking' + askQuestion='Q1' の Conductor を書き出すと JSON に askQuestion が含まれる (T014)", async () => {
+    const { updateTeamJson, createDaemon } = await import("./daemon");
+    const state = await createDaemon(testDir);
+    const conductor: ConductorState = {
+      surface: "surface:014a",
+      startedAt: new Date().toISOString(),
+      agents: [],
+      status: "asking",
+      askQuestion: "どちらにしますか?",
+      pid: 12345,
+      taskRunId: "task-014-a",
+      taskId: "14a",
+    };
+    state.conductors.set(conductor.surface, conductor);
+
+    await updateTeamJson(state);
+
+    const teamJson = JSON.parse(
+      await readFile(join(testDir, ".team/team.json"), "utf-8"),
+    );
+    const serialized = teamJson.conductors.find((c: any) => c.surface === "surface:014a");
+    expect(serialized).toBeDefined();
+    expect(serialized.status).toBe("asking");
+    expect(serialized.askQuestion).toBe("どちらにしますか?");
+  });
+
+  test("restoreConductorState: { status: 'asking', askQuestion: 'Q1' } 入力で同値が返る (T014)", async () => {
+    const { restoreConductorState } = await import("./daemon");
+    const restored = restoreConductorState({
+      surface: "surface:014b",
+      startedAt: "2026-05-20T00:00:00.000Z",
+      agents: [],
+      status: "asking",
+      askQuestion: "Q1",
+      pid: 99999,
+    });
+    expect(restored.status).toBe("asking");
+    expect(restored.askQuestion).toBe("Q1");
+  });
+
+  test("restoreConductorState: status='asking' でも askQuestion 空なら idle に倒される (T014 防御)", async () => {
+    const { restoreConductorState } = await import("./daemon");
+    const restored = restoreConductorState({
+      surface: "surface:014c",
+      startedAt: "2026-05-20T00:00:00.000Z",
+      agents: [],
+      status: "asking",
+      askQuestion: undefined,
+      pid: 99999,
+    });
+    expect(restored.status).toBe("idle");
+    expect(restored.askQuestion).toBeUndefined();
+  });
+});
+
 // --- T263: handleConductorDone success/task-state 分岐 ---
 //
 // `CONDUCTOR_DONE --success=false` で rebase 衝突等の「人間判断待ち」を表現する。

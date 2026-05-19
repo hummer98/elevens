@@ -28,7 +28,7 @@
 | `idle` | タスク割当可能。Claude セッション確立済 | `SESSION_STARTED` 到達 / `resetConductor` |
 | `assigning` | `assignTask` が `/clear` 送信済みで SESSION_STARTED 未到達 | `scanTasks` → `assignTask` |
 | `running` | タスク実行中 (ユーザー入力/ツール呼び出し/思考中) | `SESSION_STARTED(source=clear)` in assigning |
-| `asking` | `AskUserQuestion` 受信 (Notification hook) | `SESSION_ASK` |
+| `asking` | `AskUserQuestion` 受信 (Notification hook)。**team.json に `askQuestion` と共に永続化され、Manager 再起動後も保持される (T014)**。`askQuestion` 空時は防御的に `idle` に倒す | `SESSION_ASK` |
 | `disconnected` | Claude プロセス不在 / SessionEnd / PID 死 | `SESSION_ENDED` / PID watcher |
 | `broken` | disconnected 300s 超過で自動復帰停止 (T250) | `monitorConductors` timeout |
 | `error` | StopFailure hook 受信（API エラー確定）— `lastApiError` を伴う (T392) | `STOP_FAILURE` |
@@ -144,6 +144,7 @@ stateDiagram-v2
 | C-I2 | `status=broken` ⇒ `taskRunId == null` | `checkConductorInvariants` |
 | C-I3 | `broken` 解除は `clear-conductor` / `reset-conductor`（T004）のみ | reducer は `broken` で全 event no-op |
 | C-I4 | `status=error` ⇒ `lastApiError != null` (T392) | reducer 監視は P3 まで shadow only — 本タスクでは daemon の直接 mutation のみ |
+| C-I5 | `status=asking` ⇒ `askQuestion != null` (T014) | `restoreConductorState` 防御 fallback（違反検出時は idle に倒す）+ shadow log は将来追加 |
 
 違反は `fsm_invariant_violation` ログに出る (P1 は log only、強制修正しない)。
 
