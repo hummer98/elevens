@@ -8,9 +8,9 @@
  *   D resume-new-surface  : surface 消失 + running task → 新 pane + session-id resume
  *   E discard             : surface 消失 + idle → entry 破棄
  *
- * tree() 失敗時 (`liveSurfaces === null`) は pid_only に degrade:
- *   - PID 生存 → A
- *   - PID 死亡 → A 相当の保守扱い（B/C/D 分岐は回避し、次 tick の disconnected 経路に委ねる）
+ * v0.9.0+ (T016): tree 失敗時の pid_only degrade を撤去。tree が取れないなら
+ * daemon 起動を継続する判断を planLayoutRestore に委ねず、呼び出し元 (daemon.ts)
+ * の retry → exit 1 経路に責任を持たせる。`liveSurfaces` は `Set<string>` 必須。
  *
  * 副作用なし（state mutation・I/O・ロギングは applyRestorePlan 側で担当）。
  */
@@ -56,13 +56,13 @@ export interface LayoutRestorePlan {
  * team.json の conductors と resumePlan から復帰計画を組み立てる pure function。
  *
  * @param conductorsFromJson team.json.conductors 配列（要素は surface フィールドが無ければ無視）
- * @param liveSurfaces       cmux tree から取得した実在 surface の集合。null=tree 失敗（pid_only degrade）
+ * @param liveSurfaces       c11 tree から取得した実在 surface の集合（必須。tree 失敗時は呼び出し元が exit 1 する）
  * @param isAlive            PID 生存判定（テスト時は mock で差し替える）
  * @param resumePlan         main.ts 側で worktree 実在 + sessionId 有を保証済みの resume 計画
  */
 export function planLayoutRestore(
   conductorsFromJson: any[],
-  liveSurfaces: Set<string> | null,
+  liveSurfaces: Set<string>,
   isAlive: (pid: number) => boolean,
   resumePlan: ResumePlanItem[],
 ): LayoutRestorePlan {
@@ -71,7 +71,6 @@ export function planLayoutRestore(
   const cleanup: string[] = [];
   const resumeNewSurface: RestoreEntry[] = [];
   const discarded: DiscardedEntry[] = [];
-  const treeDegraded = liveSurfaces === null;
 
   const resumeByTaskId = new Map<string, ResumePlanItem>();
   for (const r of resumePlan ?? []) {
@@ -82,25 +81,18 @@ export function planLayoutRestore(
   for (const c of conductorsFromJson ?? []) {
     if (!c?.surface || typeof c.surface !== "string") continue;
     const pidAlive = typeof c.pid === "number" && isAlive(c.pid);
-    const surfaceExists = liveSurfaces ? liveSurfaces.has(c.surface) : true;
+    const surfaceExists = liveSurfaces.has(c.surface);
     const taskId = typeof c.taskId === "string" ? c.taskId : undefined;
     const runningTask = !!(taskId && resumeByTaskId.has(taskId));
 
-    // PID 生存 → A（surface 実在判定は不要 — tree degrade 時も surfaceExists=true 扱い）
+    // PID 生存 → A
     if (pidAlive) {
       alive.push({ raw: c, decision: "keep-alive" });
       if (runningTask) matchedTaskIds.add(taskId!);
       continue;
     }
 
-    // tree degrade + pid dead → A 相当の保守経路（B/C/D 分岐は回避）
-    if (treeDegraded) {
-      alive.push({ raw: c, decision: "keep-alive" });
-      if (runningTask) matchedTaskIds.add(taskId!);
-      continue;
-    }
-
-    // ここから !pidAlive かつ !treeDegraded
+    // ここから !pidAlive
     if (surfaceExists && runningTask) {
       // B: 既存 pane に対して session-id resume
       resumeExisting.push({

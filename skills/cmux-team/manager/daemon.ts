@@ -1360,6 +1360,43 @@ async function applyDiscardOnly(
   }
 }
 
+/**
+ * v0.9.0+ (T016): `cmux.fetchLiveSurfaces` を 3 回まで指数バックオフで retry し、
+ * すべて失敗したら fatal log + exit 1。tree が応答しない c11 substrate 下で
+ * elevens を半端な state で走らせない fail-fast 化。
+ *
+ * - retry 回数 / 間隔: 200ms / 600ms / 1500ms（合計 ~2.3s）
+ * - 各 retry の前に `tree_fetch_retry` を log（pull 観測可能性のため）
+ * - 全失敗 → `tree_fetch_exhausted` + process.exit(1)
+ */
+async function fetchLiveSurfacesWithRetry(workspace: string | undefined): Promise<Set<string>> {
+  const delays = [200, 600, 1500];
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      return await cmux.fetchLiveSurfaces(workspace);
+    } catch (e: any) {
+      lastError = e;
+      const delay = delays[attempt];
+      if (delay !== undefined) {
+        await log(
+          "tree_fetch_retry",
+          `attempt=${attempt + 1}/${delays.length + 1} workspace=${workspace ?? "(unset)"} delay=${delay}ms error=${e?.message ?? e}`,
+        );
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  }
+  await log(
+    "tree_fetch_exhausted",
+    `workspace=${workspace ?? "(unset)"} attempts=${delays.length + 1} last_error=${(lastError as any)?.message ?? lastError}`,
+  );
+  console.error(
+    `[elevens] c11 tree が ${delays.length + 1} 回連続で失敗しました。c11 substrate の状態を確認してください。`,
+  );
+  process.exit(1);
+}
+
 export async function initializeLayout(
   state: DaemonState,
   daemonSurface?: string,
@@ -1409,7 +1446,8 @@ export async function initializeLayout(
   }
 
   // 既存 conductor あり → planLayoutRestore でマトリクス分類 → applyRestorePlan で副作用適用
-  const liveSurfaces = await cmux.fetchLiveSurfaces(state.workspace ?? undefined);
+  // v0.9.0+ (T016): tree 失敗時の pid_only degrade を撤去し、retry → exit 1 経路に集約。
+  const liveSurfaces = await fetchLiveSurfacesWithRetry(state.workspace ?? undefined);
   const plan = planLayoutRestore(
     conductorsFromJson,
     liveSurfaces,
@@ -1988,6 +2026,45 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
         await log(
           "agent_spawned",
           `${formatPair(message.conductorSurface, message.surface, "C", "A")}${message.role ? ` role=${message.role}` : ""}${callerSuffix ? ` ${callerSuffix}` : ""}`
+        );
+      }
+      break;
+    }
+
+    case "AGENT_SPAWN_FAILED": {
+      // T016: cmdSpawnAgent が substrate 操作 (newSurface / send 等) で失敗したときに
+      //   post される救済メッセージ。AGENT_SPAWNED が先着していたら同 surface の slot を
+      //   findIndex+splice で取り除く。surface が未確定 (newSurface 自体が失敗) なら
+      //   slot は元から登録されていないので警告ログのみで済ます。
+      const conductor = findConductor(state, message.conductorSurface);
+      if (!conductor) {
+        await log(
+          "agent_spawn_failed_orphan",
+          `conductor=${formatSurface(message.conductorSurface, "C")} surface=${message.surface ?? "(none)"} reason=${message.reason}`,
+        );
+        break;
+      }
+      if (message.surface) {
+        const idx = conductor.agents.findIndex((a) => a.surface === message.surface);
+        if (idx >= 0) {
+          conductor.agents.splice(idx, 1);
+          notifyStateChanged("daemon.ts:handleMessage:agent-spawn-failed-cleanup");
+          await log(
+            "agent_spawn_failed_cleanup",
+            `${formatPair(message.conductorSurface, message.surface, "C", "A")}${message.role ? ` role=${message.role}` : ""} reason=${message.reason}`,
+          );
+        } else {
+          await log(
+            "agent_spawn_failed_no_slot",
+            `${formatPair(message.conductorSurface, message.surface, "C", "A")}${message.role ? ` role=${message.role}` : ""} reason=${message.reason}`,
+          );
+        }
+      } else {
+        // surface 未確定 — newSurface が失敗 or 取得前に die。slot 登録もされていないので
+        // 構造的 cleanup は不要、ログだけ残して上位に知らせる。
+        await log(
+          "agent_spawn_failed_no_surface",
+          `conductor=${formatSurface(message.conductorSurface, "C")}${message.role ? ` role=${message.role}` : ""} reason=${message.reason}`,
         );
       }
       break;

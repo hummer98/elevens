@@ -97,27 +97,10 @@ describe("planLayoutRestore: マトリクス分類 (T255 §3.1)", () => {
     expect(plan.cleanup).toHaveLength(0);
   });
 
-  test("M7: tree 失敗 (liveSurfaces=null) → pid_only に degrade", () => {
-    const conductors = [
-      { surface: "surface:500", pid: 5001 }, // pid alive → A
-      { surface: "surface:501", pid: 5002 }, // pid dead + tree degrade → A 相当（cleanup しない）
-      { surface: "surface:502", pid: 5003, taskId: "099" }, // pid dead + running task + tree degrade → B にしない
-    ];
-    const plan = planLayoutRestore(
-      conductors,
-      null, // tree degrade
-      aliveOf(5001),
-      [resume("099")],
-    );
-    // tree degrade では pid alive も pid dead も A に倒す
-    expect(plan.alive).toHaveLength(3);
-    expect(plan.cleanup).toHaveLength(0);
-    expect(plan.resumeExisting).toHaveLength(0);
-    expect(plan.resumeNewSurface).toHaveLength(0);
-    expect(plan.discarded).toHaveLength(0);
-    // running task は matched 扱いになるため unmatched 0 件
-    expect(plan.unmatchedResumes).toHaveLength(0);
-  });
+  // T016: tree 失敗時の pid_only degrade は撤去 (v0.9.0+)。
+  // 呼び出し元 (daemon.ts fetchLiveSurfacesWithRetry) が retry → exit 1 を担う。
+  // planLayoutRestore は常に Set<string> を受け取る前提に変わったので、
+  // 旧 "null degrade" テストは削除した。
 
   test("M12: team.json 空 + resumePlan 非空 → 全て unmatched", () => {
     const plan = planLayoutRestore(

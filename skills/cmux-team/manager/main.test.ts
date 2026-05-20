@@ -3781,29 +3781,13 @@ describe("makeShutdownGuard (shutdown idempotency)", () => {
   });
 });
 
-// --- backend 可視化: daemon_started log に backend=cmux|c11 を含める -------
+// --- backend 可視化: daemon_started log に backend=c11 を含める ----------
 //
-// elevens は cmux / c11 の 2 backend をサポートする。
-// daemon_started log entry を見ただけでどちらで起動したか判別できるよう
-// `backend=` フィールドを追加する。
-// IS_C11_BACKEND は module load 時に決まるので、純粋関数 formatDaemonStartedDetail
-// に backend を引数として渡してテストする。
+// v0.9.0+ (T016): cmux backend は撤去され、elevens は c11 substrate 専用となった。
+// `backend=c11` は固定値だが、log フォーマット互換と将来 backend 多様化への布石として
+// フィールド自体は維持する。
 
 describe("formatDaemonStartedDetail (backend visualization)", () => {
-  test("backend=cmux のとき detail に backend=cmux が含まれる", () => {
-    const detail = formatDaemonStartedDetail({
-      version: "0.3.2",
-      pid: 12345,
-      pollInterval: 1000,
-      maxConductors: 4,
-      layout: "16x9",
-      sleepPrevention: false,
-      backend: "cmux",
-    });
-    expect(detail).toContain("backend=cmux");
-    expect(detail).not.toContain("backend=c11");
-  });
-
   test("backend=c11 のとき detail に backend=c11 が含まれる", () => {
     const detail = formatDaemonStartedDetail({
       version: "0.3.2",
@@ -3826,7 +3810,7 @@ describe("formatDaemonStartedDetail (backend visualization)", () => {
       maxConductors: 8,
       layout: "wide",
       sleepPrevention: true,
-      backend: "cmux",
+      backend: "c11",
     });
     expect(detail).toContain("0.3.2");
     expect(detail).toContain("pid=99999");
@@ -3834,23 +3818,5 @@ describe("formatDaemonStartedDetail (backend visualization)", () => {
     expect(detail).toContain("max_conductors=8");
     expect(detail).toContain("layout=wide");
     expect(detail).toContain("sleep_prevention=true");
-  });
-
-  test("IS_C11_BACKEND の値に従って backend が選択される (env で間接確認)", async () => {
-    // module load 時 ELEVENS_BACKEND 未設定 → IS_C11_BACKEND=false → "cmux"
-    // 同 process 内で再 import しても module cache のため flip しないが、
-    // formatDaemonStartedDetail に渡る値が IS_C11_BACKEND に追従していることを
-    // cmux 側でも c11 側でも検証するため、両方を pure 関数で確認しておく。
-    const cmuxDetail = formatDaemonStartedDetail({
-      version: "0.0.0", pid: 1, pollInterval: 0, maxConductors: 0,
-      layout: "16x9", sleepPrevention: false, backend: "cmux",
-    });
-    const c11Detail = formatDaemonStartedDetail({
-      version: "0.0.0", pid: 1, pollInterval: 0, maxConductors: 0,
-      layout: "16x9", sleepPrevention: false, backend: "c11",
-    });
-    expect(cmuxDetail).toContain("backend=cmux");
-    expect(c11Detail).toContain("backend=c11");
-    expect(cmuxDetail).not.toEqual(c11Detail);
   });
 });

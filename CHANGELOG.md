@@ -2,17 +2,33 @@
 
 ## [Unreleased]
 
-### Changed
+### Breaking changes (v0.9.0, T016)
 
-- **Substrate backend default reversed**: `SUBSTRATE_BINARY` now falls back to `"c11"` instead of `"cmux"` when `ELEVENS_BACKEND` is unset (T015). Resolves the silent Agent spawn failure on c11.app when `ELEVENS_BACKEND` was unset and the cmux binary was missing from `PATH`.
-- Added `resolveSubstrateBinary(env)` and `isC11Backend(env)` as pure functions exported from `skills/cmux-team/manager/cmux.ts` to make backend resolution testable without module-load-time side effects.
-- Test harness の getCapabilities ガード (`c11-features.ts:37`) と deprecation 通知ガード (`cmux.ts:100`) を `isC11Backend(process.env)` 関数評価化 (Design Review T015 で確定)。これにより cmux backend 想定 test が runtime env 注入で意図通り動作する。他の `IS_C11_BACKEND` 参照 (tree `--no-layout` / `daemon_started` log) は env 切替を想定しないため module-load-time 定数のまま維持。
-- `DEPRECATION_NOTICE` message updated to reflect that c11 is now the default.
+- **cmux backend completely removed** — c11 is now the only supported substrate. The `ELEVENS_BACKEND` env var is no longer read at all. Setups that previously relied on `ELEVENS_BACKEND=cmux` must migrate to c11:
+  ```bash
+  unset ELEVENS_BACKEND
+  brew install --cask c11   # or download c11.app from Stage-11-Agentics/c11
+  ```
+- The deprecation-notice path (`maybeLogDeprecationNotice`) and the `ELEVENS_NO_DEPRECATION_WARN` env var have been deleted along with the cmux code paths.
+- `cmux.ts` keeps its file name and the `SUBSTRATE_BINARY` symbol for compatibility with import sites, but `SUBSTRATE_BINARY` now resolves to `"c11"` (or the bundled `c11.app/Contents/Resources/bin/c11` path when launched from the app) — there is no longer an env-var override.
 
-### Compatibility
+### Fail-fast over silent fallback (T016)
 
-- `ELEVENS_BACKEND=cmux` continues to opt into the legacy cmux backend with the existing deprecation warning.
-- `ELEVENS_BACKEND=/path/to/custom-c11-build` (absolute path / custom builds) is unchanged.
+- `fetchLiveSurfaces` and `getPaneForSurface` now **throw** instead of returning `null` when `c11 tree` fails. The daemon retries `tree` 3 times with exponential backoff (200/600/1500ms) on `initializeLayout`, then `process.exit(1)` with `tree_fetch_exhausted` logged. Layout restore no longer has a pid-only degrade path.
+- `cmdSpawnAgent` removes the `newSurface → newSplit("right")` fallback. If any substrate operation in the spawn path fails (newSurface, send, renameTab, …), the command posts an `AGENT_SPAWN_FAILED` message (with `surface?: string` set only when `newSurface` had already succeeded) and exits 1. The daemon handler does `findIndex + splice` to remove a half-registered agent slot from `conductor.agents`, restoring observability.
+- `runCmux` applies a **default 30s timeout** when callers do not pass `opts.timeout`. `c11 tree` keeps its explicit 5s timeout. This converts every previously hangable `c11 send` into a clean failure path that surfaces via the AGENT_SPAWN_FAILED route above.
+- New schema: `AgentSpawnFailedMessage` is added to the QueueMessage discriminated union with new daemon log labels `agent_spawn_failed_cleanup` / `agent_spawn_failed_no_slot` / `agent_spawn_failed_no_surface` / `agent_spawn_failed_orphan`.
+
+### Preserved (no behavior change)
+
+- Env names `CMUX_BUNDLE_ID` / `CMUX_BUNDLED_CLI_PATH` / `CMUX_SOCKET_PATH` / `CMUX_SURFACE` are still read for c11.app compatibility (c11 dual-reads `CMUX_*` and `C11_*`).
+- File name `cmux.ts`, symbol `SUBSTRATE_BINARY`, and skill directory `skills/cmux-team/` are kept — too many imports / install paths depend on them.
+- `CMUX_BUNDLE_ID=com.manaflow.cmux` detection still produces a `refuse` decision so that elevens does not silently run inside the legacy cmux app.
+
+### Previously in this Unreleased block (T015, kept for context)
+
+- **Substrate backend default reversed**: `SUBSTRATE_BINARY` had been falling back to `"cmux"`; v0.8.x flipped it to `"c11"`. T016 removed the env-var switch entirely.
+- The intermediate `isC11Backend(env)` helper introduced in T015 is gone (no longer needed once cmux backend was removed).
 
 ## [0.8.2] - 2026-05-20
 

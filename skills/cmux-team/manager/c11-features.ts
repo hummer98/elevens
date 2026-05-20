@@ -1,15 +1,16 @@
 /**
- * c11 backend 専用機能（capability 検出 + mailbox.* metadata helpers）。
+ * c11 substrate 専用機能（capability 検出 + mailbox.* metadata helpers）。
  *
- * cmux backend では全ての書き込み系 API は **opportunistic no-op**、
- * 読み取り系 API は null を返す。これにより呼び出し元は backend を意識せず
- * 「書けたら書く / 読めたら使う」スタイルで利用できる（Phase 2 の dual-write 戦略）。
+ * v0.9.0+: cmux backend は撤去済み。mailbox.* 非対応の c11 build（古い c11 や
+ * capability が欠けた build）では、書き込み系 API は no-op、読み取り系 API は
+ * null を返す。これにより呼び出し元は「書けたら書く / 読めたら使う」スタイルで
+ * backend を意識せず利用できる。
  *
  * 詳細は .team/artifacts/A029-c11-parity-and-phase2-prep.md 参照。
  */
 import { execFile as execFileCb } from "child_process";
 import { promisify } from "util";
-import { SUBSTRATE_BINARY, isC11Backend } from "./cmux";
+import { SUBSTRATE_BINARY } from "./cmux";
 import { validateMailboxPayload } from "./mailbox-schema";
 import { warn as logWarn } from "./logger";
 
@@ -27,16 +28,17 @@ type CapabilitiesResult = {
 
 let cachedCaps: CapabilitiesResult | null = null;
 let capsFetched = false;
+// T016: test 用 override（null 注入を「未対応」として扱えるよう、有/無を別フラグで管理）
+let capsOverrideActive = false;
+let capsOverride: CapabilitiesResult | null = null;
 
 /**
  * c11 daemon の capability を取得（成功 1 回のみキャッシュ、失敗は都度再試行）。
- * cmux backend では常に null を返す。
+ * c11 binary が無い / capabilities が取得できない場合は null を返す。
  */
 export async function getCapabilities(): Promise<CapabilitiesResult | null> {
+  if (capsOverrideActive) return capsOverride;
   if (capsFetched && cachedCaps) return cachedCaps;
-  // module-load-time 定数ではなく都度評価（test 時の env 注入を効かせ、cmux backend test が
-  // 狙った「!isC11Backend で早期 return」経路を通ることを観察可能にするため）。
-  if (!isC11Backend(process.env)) return null;
   try {
     // c11 capabilities は default で JSON 出力（--json flag 不要）
     const { stdout } = await execFile(SUBSTRATE_BINARY, ["capabilities"], {
@@ -56,6 +58,24 @@ export async function getCapabilities(): Promise<CapabilitiesResult | null> {
 export function __resetCapabilitiesCache(): void {
   cachedCaps = null;
   capsFetched = false;
+  capsOverrideActive = false;
+  capsOverride = null;
+}
+
+/**
+ * テスト用: capabilities を直接注入する（execFile を bypass）。
+ * `null` を渡すと「c11 binary が capabilities を返さない / 古い build」状態を再現する。
+ * `undefined` を渡すと override を解除（実 execFile 経路に戻る）。
+ * v0.9.0 で `ELEVENS_BACKEND=cmux` 経由の unsupported 注入が廃止されたため、これに置き換わる。
+ */
+export function __setCapabilitiesForTest(caps: CapabilitiesResult | null | undefined): void {
+  if (caps === undefined) {
+    capsOverrideActive = false;
+    capsOverride = null;
+    return;
+  }
+  capsOverrideActive = true;
+  capsOverride = caps;
 }
 
 /**
@@ -76,7 +96,7 @@ export type MailboxValue = string | number | boolean | object;
 
 /**
  * surface または pane に metadata を書き込む。
- * cmux backend（または mailbox 非対応の c11 build）では no-op。
+ * mailbox 非対応の c11 build では no-op。
  *
  * @param target 書き込み先 surface / pane の ref
  * @param payload mailbox.* キーを含む JSON object（merge mode で書き込まれる）
@@ -124,7 +144,7 @@ export async function setMailbox(
 /**
  * watchMailbox 内部用の discriminated 取得結果。
  * - `ok`: c11 から正常に取得できた（metadata は空 dict もあり得る）
- * - `unsupported`: cmux backend / capability 不足で取得できない（永続的）
+ * - `unsupported`: mailbox 非対応の c11 build / capability 不足で取得できない（永続的）
  * - `error`: c11 invocation / parse の transient 失敗。**prev は触らずに次 tick へ**
  *
  * Phase 2 e2e smoke (A031 §2 follow-up) で発覚: 旧実装は error を `null` に
@@ -175,7 +195,7 @@ async function callFetch(
 
 /**
  * surface または pane の metadata を取得。
- * cmux backend / 取得失敗ともに null（既存契約。詳細な失敗種別が必要なときは
+ * mailbox 非対応 c11 build / 取得失敗ともに null（既存契約。詳細な失敗種別が必要なときは
  * watchMailbox 内部の `callFetch` 経路を直接使う）。
  *
  * @param opts.withSources true なら sidecar `metadata_sources` も同梱した raw response を返す
@@ -191,7 +211,7 @@ export async function getMailbox(
 }
 
 /**
- * 指定 key を削除（cmux backend / 未対応 c11 では no-op）。
+ * 指定 key を削除（mailbox 非対応 c11 では no-op）。
  */
 export async function clearMailbox(target: MailboxTarget, key: string): Promise<void> {
   if (!(await isMailboxSupported())) return;
@@ -202,7 +222,7 @@ export async function clearMailbox(target: MailboxTarget, key: string): Promise<
 /**
  * `mailbox.*` キーが追加・変更・削除されたら onChange を呼び出す poll loop。
  *
- * - cmux backend / 未対応 c11 では即 resolve（poll loop は走らない）
+ * - mailbox 非対応 c11 では即 resolve（poll loop は走らない）
  * - 戻り値の `stop()` で停止
  * - 同じキー・同じ値の連続検出は通知しない（差分のみ）
  * - `intervalMs` の default は 1500ms。あまり短くすると CLI spawn コストが嵩むので 1〜2 秒推奨

@@ -93,6 +93,20 @@ export const AgentTokenBoundMessage = z.object({
   timestamp: z.string().datetime(),
 });
 
+// T016: spawn-agent 内で substrate 操作 (newSurface / send 等) が失敗したときに
+// post される救済メッセージ。daemon は conductor.agents から該当 slot を切除する。
+// surface は newSurface 成功後に取得した場合のみ含まれる (newSurface 自体が失敗した
+// ら undefined のまま)。conductorSurface は常に存在する (CLI 入力で正規化済み)。
+export const AgentSpawnFailedMessage = z.object({
+  type: z.literal("AGENT_SPAWN_FAILED"),
+  conductorSurface: z.string(),
+  surface: z.string().optional(),
+  role: z.string().optional(),
+  taskId: z.string().optional(),
+  reason: z.string(),
+  timestamp: z.string().datetime(),
+});
+
 export const SessionStartedMessage = z.object({
   type: z.literal("SESSION_STARTED"),
   surface: z.string(),
@@ -272,6 +286,7 @@ export const QueueMessage = z.discriminatedUnion("type", [
   ConductorRegisteredMessage,
   MasterRegisteredMessage,
   AgentSpawnedMessage,
+  AgentSpawnFailedMessage,
   AgentTokenBoundMessage,
   SessionStartedMessage,
   SessionEndedMessage,
@@ -304,6 +319,7 @@ export type SessionEndedMessage = z.infer<typeof SessionEndedMessage>;
 export type NotificationMessage = z.infer<typeof NotificationMessage>;
 export type StopFailureMessage = z.infer<typeof StopFailureMessage>;
 export type AgentTokenBoundMessage = z.infer<typeof AgentTokenBoundMessage>;
+export type AgentSpawnFailedMessage = z.infer<typeof AgentSpawnFailedMessage>;
 export type PreToolUseMessage = z.infer<typeof PreToolUseMessage>;
 export type PostToolUseMessage = z.infer<typeof PostToolUseMessage>;
 export type PreToolUseDeniedMessage = z.infer<typeof PreToolUseDeniedMessage>;

@@ -74,28 +74,16 @@ Related:
 - The `elevens self-update` subcommand is removed.
 - Migration: set `autoUpdate` to `notify` (or `off`), then run `npm install -g @hummer98/elevens@latest` when the banner appears.
 
-### Substrate backend (`ELEVENS_BACKEND`)
+### Substrate
 
-elevens runs on top of a terminal multiplexer ("substrate"). Two backends are currently supported:
-
-| Backend | How to select | Status |
-|---------|---------------|--------|
-| `c11` ([Stage-11-Agentics/c11](https://github.com/Stage-11-Agentics/c11)) | default; or explicit `export ELEVENS_BACKEND=c11` | **Default since v0.9.0.** Recommended. |
-| `cmux` ([manaflow-ai/cmux](https://github.com/manaflow-ai/cmux)) | `export ELEVENS_BACKEND=cmux` (legacy opt-in) | Legacy compat. **Deprecated** — daemon emits a one-shot `DEPRECATION_NOTICE` warning on start. |
-
-c11 is the default since v0.9.0; no env var is required for new setups. If you previously pinned `ELEVENS_BACKEND=cmux`, unset it (or change to `c11`) to migrate:
+elevens runs on top of the [c11](https://github.com/Stage-11-Agentics/c11) terminal multiplexer. **Since v0.9.0 (T016), c11 is the only supported substrate** — the legacy cmux backend and the `ELEVENS_BACKEND` env var have been removed. If you previously pinned `ELEVENS_BACKEND=cmux`, unset it and install c11:
 
 ```bash
-unset ELEVENS_BACKEND   # or: export ELEVENS_BACKEND=c11
+unset ELEVENS_BACKEND
+brew install --cask c11   # or download the c11.app bundle from Stage-11-Agentics/c11
 ```
 
-Suppress the deprecation warning (e.g. on a runbook that intentionally pins cmux):
-
-```bash
-export ELEVENS_NO_DEPRECATION_WARN=1
-```
-
-Custom builds and absolute paths are also accepted (`ELEVENS_BACKEND=/opt/c11-dev/bin/c11`). The basename decides whether c11-only flags (`--no-layout` etc.) are passed through.
+elevens locates the `c11` binary in this order: (1) the bundled CLI inside `c11.app/Contents/Resources/bin/c11` when launched from the app (auto-detected via `CMUX_BUNDLED_CLI_PATH`), or (2) the first `c11` on `$PATH`. There is no env var to override this — if `c11` is missing or fails, the daemon fails fast and exits with a clear error message rather than silently degrading.
 
 ### Configuration (`.team/config.json`)
 

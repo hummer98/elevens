@@ -757,10 +757,9 @@ export async function resetConductor(
   try {
     // 0. surface 実在確認（T251: 幽霊 Conductor 防止）
     //    surface が tree に存在しない場合は idle 要求であっても broken に倒す。
-    //    tree 失敗時も undefined になるが、tree が死んでいる状況で Conductor 操作は
-    //    そもそも成立しないため fail-safe に broken 判定して問題ない。
-    //    cleanup (sibling close / worktree remove / branch delete) は冪等なので
-    //    surface 不在でも従来通り最後まで実行する。
+    //    v0.9.0+ (T016): tree 失敗時は throw されるが、外側 try で catch するので
+    //    本関数の冪等な後処理 (sibling close / worktree remove / branch delete) は
+    //    呼び出し元の cleanup ルーチンに委ねる。
     const pane = await cmux.getPaneForSurface(conductor.surface, workspace);
     const surfaceMissing = pane === undefined;
     const effectiveTargetStatus: "idle" | "broken" | "reserved" = surfaceMissing

@@ -24,8 +24,9 @@ agent / conductor / master が自身の lifecycle と意思を **surface metadat
 | 拡張余地 | 未知 `mailbox.*` key は warning にして書き込みを許す（schema 進化のため） |
 | 破壊的変更を避ける | canonical key の意味・型は backward compatible にしか変えない |
 
-c11 backend が無い環境（cmux backend 等）では `setMailbox` は opportunistic no-op。
-書き込み側は backend を意識しない（Phase 2 dual-write 戦略、[`A029`](../../.team/artifacts/A029-c11-parity-and-phase2-prep.md) 参照）。
+v0.9.0 (T016) 以降は c11 が唯一の substrate なので、`setMailbox` は常に c11 metadata
+書き込みパス上で動く（cmux 時代の opportunistic no-op 経路は撤去済み）。書き込み側は
+backend 種別を意識しないインタフェースのまま (歴史的経緯は [`A029`](../../.team/artifacts/A029-c11-parity-and-phase2-prep.md) 参照)。
 
 ---
 

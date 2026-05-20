@@ -74,28 +74,16 @@ daemon は `update-notifier` で新バージョンを**検出**し、TUI バナ�
 - `elevens self-update` サブコマンドを削除しました。
 - 移行: `autoUpdate` を `notify`（または `off`）に変更し、バナーが表示されたら `npm install -g @hummer98/elevens@latest` を実行してください。
 
-### Substrate backend (`ELEVENS_BACKEND`)
+### Substrate
 
-elevens はターミナルマルチプレクサ（"substrate"）の上で動作します。現在 2 つの backend が選択できます:
-
-| Backend | 切り替え方 | ステータス |
-|---------|----------|----------|
-| `c11` ([Stage-11-Agentics/c11](https://github.com/Stage-11-Agentics/c11)) | デフォルト。明示するなら `export ELEVENS_BACKEND=c11` | **v0.9.0 以降デフォルト。** 推奨設定。 |
-| `cmux` ([manaflow-ai/cmux](https://github.com/manaflow-ai/cmux)) | `export ELEVENS_BACKEND=cmux` で opt-in | レガシー互換。**deprecated** — daemon 起動時に `DEPRECATION_NOTICE` の警告を 1 度だけ出します。 |
-
-c11 は v0.9.0 以降デフォルトのため、新規セットアップでは環境変数の設定は不要です。以前 `ELEVENS_BACKEND=cmux` を pin していた場合は、unset するか `c11` に変更してください:
+elevens は [c11](https://github.com/Stage-11-Agentics/c11) ターミナルマルチプレクサの上で動作します。**v0.9.0 (T016) 以降、サポート対象 substrate は c11 のみ** — レガシー cmux backend と `ELEVENS_BACKEND` 環境変数は削除されました。以前 `ELEVENS_BACKEND=cmux` を pin していた場合は unset した上で c11 を導入してください:
 
 ```bash
-unset ELEVENS_BACKEND   # または: export ELEVENS_BACKEND=c11
+unset ELEVENS_BACKEND
+brew install --cask c11   # または Stage-11-Agentics/c11 から c11.app バンドルをダウンロード
 ```
 
-意図的に cmux を使い続ける runbook で警告を抑止したい場合:
-
-```bash
-export ELEVENS_NO_DEPRECATION_WARN=1
-```
-
-カスタムビルド・絶対パスも受け付けます（例: `ELEVENS_BACKEND=/opt/c11-dev/bin/c11`）。c11-only フラグ（`--no-layout` 等）の付与判定は basename ベース。
+elevens は `c11` バイナリを次の順で探します: (1) c11.app から launch されたときに同梱される `c11.app/Contents/Resources/bin/c11`（`CMUX_BUNDLED_CLI_PATH` で自動検出）、(2) `$PATH` 上の `c11`。これを上書きする env var はありません — `c11` が見つからない or 動作しない場合、daemon は silent fallback せず明示エラー付きで fail-fast します。
 
 ### 設定ファイル（`.team/config.json`）
 

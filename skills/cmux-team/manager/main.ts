@@ -248,10 +248,8 @@ export function formatUptimeFromStartedAt(startedAtIso: string, now: number = Da
 /**
  * `daemon_started` log の detail 文字列を組み立てる純粋関数。
  *
- * elevens は cmux / c11 の 2 つの substrate backend をサポートするため、
- * log を見ただけでどちらで起動したかが分かるよう `backend=cmux|c11` を含める。
- * IS_C11_BACKEND は cmux.ts が module load 時に確定するので、呼び出し側で
- * 解決した値を渡してもらう設計（テスト容易性のため pure 関数に切り出す）。
+ * v0.9.0+: elevens は c11 substrate 専用となったため `backend` は常に `"c11"`。
+ * log フォーマット互換のためフィールドは残しており、test fixture が値を埋め込めるようにする。
  */
 export function formatDaemonStartedDetail(opts: {
   version: string;
@@ -260,7 +258,7 @@ export function formatDaemonStartedDetail(opts: {
   maxConductors: number;
   layout: string;
   sleepPrevention: boolean;
-  backend: "cmux" | "c11";
+  backend: "c11";
 }): string {
   return [
     opts.version,
@@ -793,10 +791,9 @@ async function cmdStart(): Promise<void> {
     process.exit(1);
   }
 
-  // --- v0.4.0: c11 必須 / 非 c11 multiplexer 上では起動拒否 ---
-  // ELEVENS_BACKEND が明示されていれば opt-in 経路として通す（cmux も含む、
-  // ただし cmux 明示は別途 DEPRECATION_NOTICE が出る）。
-  // auto-detect で c11 multiplexer 上にいると判断できなければ refuse + exit 1。
+  // --- v0.9.0+: c11 必須 / 非 c11 multiplexer 上では起動拒否 ---
+  // detectBackendDecision は `{ kind: "c11" | "refuse" }` の 2 値判定。
+  // ELEVENS_BACKEND env による escape hatch は撤去済み（cmux backend 全削除）。
   const backendDecision = cmux.detectBackendDecision(process.env);
   if (backendDecision.kind === "refuse") {
     console.error("[elevens] " + backendDecision.reason);
@@ -841,11 +838,6 @@ async function cmdStart(): Promise<void> {
       if (shutdownForSignal) await shutdownForSignal(signal);
     },
   });
-
-  // Phase 3 prep (docs/seed.md): cmux backend を選択していると 1 度だけ
-  // deprecation 通知を warn する。c11 backend では何もしない。
-  // ELEVENS_NO_DEPRECATION_WARN=1 で suppress 可能。
-  await cmux.maybeLogDeprecationNotice();
 
   // --- direnv allow fail-fast チェック ---
   // .envrc が未 allow のまま daemon を起動すると CLAUDE_CODE_OAUTH_TOKEN 等が
@@ -1049,9 +1041,8 @@ async function cmdStart(): Promise<void> {
       maxConductors: state.maxConductors,
       layout: state.layout,
       sleepPrevention,
-      // backend 可視化: cmux / c11 どちらで動いているか log だけで判別可能にする。
-      // IS_C11_BACKEND は cmux.ts で module load 時に process.env.ELEVENS_BACKEND を見て確定する。
-      backend: cmux.IS_C11_BACKEND ? "c11" : "cmux",
+      // v0.9.0+: c11 substrate 専用のため backend は固定値。
+      backend: "c11",
     }),
   );
   await log(
@@ -3571,254 +3562,284 @@ async function cmdSpawnAgent(): Promise<void> {
     return;
   }
 
-  // --- 3. タブ作成（new-surface → new-split right フォールバック） ---
+  // --- 3. タブ作成（new-surface） ---
   //   T207: 対象 pane はキャッシュせず、cmux tree から on-demand 解決する。
-  //   解決失敗時は undefined のまま newSurface に渡し、cmux 側のデフォルト pane に
-  //   作成 → 失敗時は new-split right のフォールバック経路に乗せる。
-  const callerWorkspace = await cmux.getCallerWorkspace();
-  const targetPane = await cmux.getPaneForSurface(conductorSurface, callerWorkspace);
-
-  let surface: string;
+  //   T016: newSurface 失敗時の new-split right フォールバックは撤廃した。fail-fast し
+  //   AGENT_SPAWN_FAILED を post して daemon に slot cleanup を依頼する。
+  //   `createdSurface` は try の外側で宣言し、catch から参照できるようにする。
+  //   newSurface 成功直後に代入することで、後続の I/O が落ちても daemon 側で
+  //   既存 conductor.agents の slot を findIndex+splice で取り除ける。
+  let createdSurface: string | undefined;
   try {
-    surface = await cmux.newSurface(targetPane);
-  } catch {
-    surface = await cmux.newSplit("right");
-  }
+    const callerWorkspace = await cmux.getCallerWorkspace();
+    const targetPane = await cmux.getPaneForSurface(conductorSurface, callerWorkspace);
 
-  // T195: newSurface / newSplit 成功時点で surface は cmux 側に存在する。
-  // 念押しの validation は deadlock リスクを招くため廃止。
+    createdSurface = await cmux.newSurface(targetPane);
+    const surface = createdSurface;
 
-  // --- 2a. AGENT_SPAWNED を Claude 起動より前に daemon へ送信（T244） ---
-  //   Claude 起動 (L2068 send(claudeCmd)) で SessionStart hook が発火し SESSION_STARTED
-  //   を daemon に POST する。AGENT_SPAWNED がそれより後に届くと、daemon 側の
-  //   SESSION_STARTED fallback 経路が「未登録 surface = master」と誤判定して
-  //   state.masters に仮登録してしまう（現象: master_session_started_fallback）。
-  //   それを防ぐため、surface 作成直後・Claude 起動前に AGENT_SPAWNED を先行送信する。
-  await postMessage({
-    type: "AGENT_SPAWNED",
-    conductorSurface,
-    surface,
-    role,
-    taskTitle,
-    // T407: pre-inject UUID を同梱。daemon 側で agent.sessionId に格納される。
-    sessionId,
-    timestamp: new Date().toISOString(),
-    // T260: spawn-agent を実行した主体（通常は Conductor surface / pid）を記録し、
-    //       daemon 側で `caller=...` として agent_spawned ログに載せる。
-    callerPid: process.pid,
-    callerSurface: process.env.CMUX_SURFACE,
-  });
+    // T195: newSurface 成功時点で surface は cmux 側に存在する。
+    // 念押しの validation は deadlock リスクを招くため廃止。
 
-  // --- 3. Claude Code 起動 ---
-  // モデル解決
-  const config = await loadConfig(PROJECT_ROOT);
-  const model = getModelForRole(config, "agent", getArg("model"));
+    // --- 2a. AGENT_SPAWNED を Claude 起動より前に daemon へ送信（T244） ---
+    //   Claude 起動 (L2068 send(claudeCmd)) で SessionStart hook が発火し SESSION_STARTED
+    //   を daemon に POST する。AGENT_SPAWNED がそれより後に届くと、daemon 側の
+    //   SESSION_STARTED fallback 経路が「未登録 surface = master」と誤判定して
+    //   state.masters に仮登録してしまう（現象: master_session_started_fallback）。
+    //   それを防ぐため、surface 作成直後・Claude 起動前に AGENT_SPAWNED を先行送信する。
+    await postMessage({
+      type: "AGENT_SPAWNED",
+      conductorSurface,
+      surface,
+      role,
+      taskTitle,
+      // T407: pre-inject UUID を同梱。daemon 側で agent.sessionId に格納される。
+      sessionId,
+      timestamp: new Date().toISOString(),
+      // T260: spawn-agent を実行した主体（通常は Conductor surface / pid）を記録し、
+      //       daemon 側で `caller=...` として agent_spawned ログに載せる。
+      callerPid: process.pid,
+      callerSurface: process.env.CMUX_SURFACE,
+    });
 
-  // Agent 用 settings.json 生成（T181: Stop / SessionEnd hook + statusLine）
-  // T403: cmdSpawnAgent では既に team.json から taskId を解決済み（line 2740 付近）。
-  // 同 taskId を ANTHROPIC_CUSTOM_HEADERS の x-cmux-task-id ヘッダに固定注入し、
-  // proxy 側 (proxy.ts:738) で api_usage.task_id 列に保存できるようにする。
-  const agentSettingsPath = generateAgentSettings(PROJECT_ROOT, surface, taskId);
-  const agentSettingsFlag = `--settings '${agentSettingsPath}'`;
+    // --- 3. Claude Code 起動 ---
+    // モデル解決
+    const config = await loadConfig(PROJECT_ROOT);
+    const model = getModelForRole(config, "agent", getArg("model"));
 
-  // 環境変数をシェルに焼き付け
-  // T283: Agent は worktree 配下で作業し、main project の sync 責務を負わない。
-  // `cmdSpawnAgent` は独立 cmux surface を作るため、Conductor shell に env を
-  // 足しても伝わらない。そのため Agent 経路では無条件に
-  // `CMUX_TEAM_SKIP_SYNC_CHECK=1` を exportVars に追記する（ST8b）。
-  const exportVars = [
-    `ROLE=${role}`,
-    `PROJECT_ROOT=${PROJECT_ROOT}`,
-    `CMUX_SURFACE=${surface}`,
-    `CMUX_NO_RENAME_TAB=1`,
-    `CMUX_CLAUDE_HOOKS_DISABLED=1`,
-    `CMUX_TEAM_SKIP_SYNC_CHECK=1`,
-  ];
-  // T371: token pool 注入の有無を claude 起動コマンドの inline env prefix 判定に使う。
-  // direnv の .envrc.local が CLAUDE_CODE_OAUTH_TOKEN を上書きするため、
-  // `CLAUDE_CODE_OAUTH_TOKEN="$CMUX_CLAUDE_TOKEN" claude ...` の形で execve env を渡す。
-  let tokenInjected = false;
-  if (taskId) {
-    exportVars.push(`CMUX_TASK_ID=${taskId}`);
-  }
-  if (proxyPort) {
-    exportVars.push(`ANTHROPIC_BASE_URL=http://127.0.0.1:${proxyPort}`);
-  }
-  // T322: token pool は env/project/global の 3 階層で opt-in 制御する。
-  // 無効時は selection 自体をスキップし `token_pool_skipped` ログのみ残す。
-  let poolDecision: { enabled: boolean; source: "env" | "project" | "global" | "default" };
-  try {
-    poolDecision = await isTokenPoolEnabled(PROJECT_ROOT);
-  } catch (e: any) {
-    console.error(`Error: ${e.message}`);
-    process.exit(1);
-  }
-  if (!poolDecision.enabled) {
-    await log("token_pool_skipped", `${formatSurface(surface, "A")} source=${poolDecision.source}`);
-  } else {
-    // T321/T335/T367: token pool からトークンを選択して CLAUDE_CODE_OAUTH_TOKEN を注入。
-    // policy 構築は config.ts の buildSelectTokenPolicy に集約（T367 N1）。
-    // daemon (pool-throttle) も同じ関数を呼ぶことで admit 判定の構造的整合を保つ。
+    // Agent 用 settings.json 生成（T181: Stop / SessionEnd hook + statusLine）
+    // T403: cmdSpawnAgent では既に team.json から taskId を解決済み（line 2740 付近）。
+    // 同 taskId を ANTHROPIC_CUSTOM_HEADERS の x-cmux-task-id ヘッダに固定注入し、
+    // proxy 側 (proxy.ts:738) で api_usage.task_id 列に保存できるようにする。
+    const agentSettingsPath = generateAgentSettings(PROJECT_ROOT, surface, taskId);
+    const agentSettingsFlag = `--settings '${agentSettingsPath}'`;
+
+    // 環境変数をシェルに焼き付け
+    // T283: Agent は worktree 配下で作業し、main project の sync 責務を負わない。
+    // `cmdSpawnAgent` は独立 cmux surface を作るため、Conductor shell に env を
+    // 足しても伝わらない。そのため Agent 経路では無条件に
+    // `CMUX_TEAM_SKIP_SYNC_CHECK=1` を exportVars に追記する（ST8b）。
+    const exportVars = [
+      `ROLE=${role}`,
+      `PROJECT_ROOT=${PROJECT_ROOT}`,
+      `CMUX_SURFACE=${surface}`,
+      `CMUX_NO_RENAME_TAB=1`,
+      `CMUX_CLAUDE_HOOKS_DISABLED=1`,
+      `CMUX_TEAM_SKIP_SYNC_CHECK=1`,
+    ];
+    // T371: token pool 注入の有無を claude 起動コマンドの inline env prefix 判定に使う。
+    // direnv の .envrc.local が CLAUDE_CODE_OAUTH_TOKEN を上書きするため、
+    // `CLAUDE_CODE_OAUTH_TOKEN="$CMUX_CLAUDE_TOKEN" claude ...` の形で execve env を渡す。
+    let tokenInjected = false;
+    if (taskId) {
+      exportVars.push(`CMUX_TASK_ID=${taskId}`);
+    }
+    if (proxyPort) {
+      exportVars.push(`ANTHROPIC_BASE_URL=http://127.0.0.1:${proxyPort}`);
+    }
+    // T322: token pool は env/project/global の 3 階層で opt-in 制御する。
+    // 無効時は selection 自体をスキップし `token_pool_skipped` ログのみ残す。
+    let poolDecision: { enabled: boolean; source: "env" | "project" | "global" | "default" };
     try {
-      const tokDb = initTokenDB();
-      const policy = await buildSelectTokenPolicy(PROJECT_ROOT);
-      const isOss = policy.isOss;
-      const selected = selectToken(tokDb, surface, policy);
+      poolDecision = await isTokenPoolEnabled(PROJECT_ROOT);
+    } catch (e: any) {
+      console.error(`Error: ${e.message}`);
+      process.exit(1);
+    }
+    if (!poolDecision.enabled) {
+      await log("token_pool_skipped", `${formatSurface(surface, "A")} source=${poolDecision.source}`);
+    } else {
+      // T321/T335/T367: token pool からトークンを選択して CLAUDE_CODE_OAUTH_TOKEN を注入。
+      // policy 構築は config.ts の buildSelectTokenPolicy に集約（T367 N1）。
+      // daemon (pool-throttle) も同じ関数を呼ぶことで admit 判定の構造的整合を保つ。
+      try {
+        const tokDb = initTokenDB();
+        const policy = await buildSelectTokenPolicy(PROJECT_ROOT);
+        const isOss = policy.isOss;
+        const selected = selectToken(tokDb, surface, policy);
 
-      if (selected) {
-        // T391: subscription token は Claude Code 本体が refresh 管理するため
-        // CMUX_CLAUDE_TOKEN を inject せず Claude Code の認証経路に委ねる。
-        // inject すると Claude Code 側 refresh で乖離した snapshot で 401 を引く。
-        if (!shouldInjectCredential(selected.token.credential_source)) {
-          await log(
-            "token_pool_subscription_no_inject",
-            `${formatSurface(surface, "A")} handle=${selected.token.handle} token_id=${selected.token.id} source=${selected.token.credential_source ?? "null"}`,
-          );
-        } else {
-          // T335 M3: Keychain から実 token を取得。不在なら env 注入のみスキップ
-          let tokenStr: string | null = null;
-          try {
-            tokenStr = retrieveTokenFromKeychain(selected.token.handle);
-          } catch (e: any) {
-            if (e instanceof KeychainNotFoundError) {
-              tokenStr = null;
+        if (selected) {
+          // T391: subscription token は Claude Code 本体が refresh 管理するため
+          // CMUX_CLAUDE_TOKEN を inject せず Claude Code の認証経路に委ねる。
+          // inject すると Claude Code 側 refresh で乖離した snapshot で 401 を引く。
+          if (!shouldInjectCredential(selected.token.credential_source)) {
+            await log(
+              "token_pool_subscription_no_inject",
+              `${formatSurface(surface, "A")} handle=${selected.token.handle} token_id=${selected.token.id} source=${selected.token.credential_source ?? "null"}`,
+            );
+          } else {
+            // T335 M3: Keychain から実 token を取得。不在なら env 注入のみスキップ
+            let tokenStr: string | null = null;
+            try {
+              tokenStr = retrieveTokenFromKeychain(selected.token.handle);
+            } catch (e: any) {
+              if (e instanceof KeychainNotFoundError) {
+                tokenStr = null;
+              } else {
+                throw e;
+              }
+            }
+
+            if (tokenStr) {
+              // T371: direnv の .envrc.local が CLAUDE_CODE_OAUTH_TOKEN を上書きするため、
+              // ここでは中継変数 CMUX_CLAUDE_TOKEN として export し、claude 起動時に
+              // inline env prefix で CLAUDE_CODE_OAUTH_TOKEN にリネームする。
+              exportVars.push(`CMUX_CLAUDE_TOKEN=${tokenStr}`);
+              tokenInjected = true;
+              await log(
+                "token_pool_assigned",
+                `${formatSurface(surface, "A")} handle=${selected.token.handle} token_id=${selected.token.id} source=${poolDecision.source} is_oss=${isOss}`,
+              );
             } else {
-              throw e;
+              // M3 確定動作: env 注入は skip、AGENT_TOKEN_BOUND は post、lease は維持、warn ログ
+              await log(
+                "token_pool_fallback",
+                `${formatSurface(surface, "A")} reason=keychain_missing handle=${selected.token.handle} token_id=${selected.token.id} source=${poolDecision.source}`,
+              );
             }
           }
 
-          if (tokenStr) {
-            // T371: direnv の .envrc.local が CLAUDE_CODE_OAUTH_TOKEN を上書きするため、
-            // ここでは中継変数 CMUX_CLAUDE_TOKEN として export し、claude 起動時に
-            // inline env prefix で CLAUDE_CODE_OAUTH_TOKEN にリネームする。
-            exportVars.push(`CMUX_CLAUDE_TOKEN=${tokenStr}`);
-            tokenInjected = true;
+          // T323/T335: tokenStr 有無に関わらず AGENT_TOKEN_BOUND を post（dashboard が handle を表示するため）。
+          // AGENT_SPAWNED は触らず（T244 race 保護）、第 2 メッセージで agent.tokenHandle を後追い更新する。
+          try {
+            await postMessage({
+              type: "AGENT_TOKEN_BOUND",
+              surface,
+              tokenHandle: selected.token.handle,
+              timestamp: new Date().toISOString(),
+            });
+          } catch (e: any) {
             await log(
-              "token_pool_assigned",
-              `${formatSurface(surface, "A")} handle=${selected.token.handle} token_id=${selected.token.id} source=${poolDecision.source} is_oss=${isOss}`,
-            );
-          } else {
-            // M3 確定動作: env 注入は skip、AGENT_TOKEN_BOUND は post、lease は維持、warn ログ
-            await log(
-              "token_pool_fallback",
-              `${formatSurface(surface, "A")} reason=keychain_missing handle=${selected.token.handle} token_id=${selected.token.id} source=${poolDecision.source}`,
+              "agent_token_bound_post_failed",
+              `${formatSurface(surface, "A")} err=${e?.message ?? e}`,
             );
           }
+        } else {
+          await log("token_pool_fallback", `${formatSurface(surface, "A")} reason=no_candidate`);
         }
-
-        // T323/T335: tokenStr 有無に関わらず AGENT_TOKEN_BOUND を post（dashboard が handle を表示するため）。
-        // AGENT_SPAWNED は触らず（T244 race 保護）、第 2 メッセージで agent.tokenHandle を後追い更新する。
-        try {
-          await postMessage({
-            type: "AGENT_TOKEN_BOUND",
-            surface,
-            tokenHandle: selected.token.handle,
-            timestamp: new Date().toISOString(),
-          });
-        } catch (e: any) {
-          await log(
-            "agent_token_bound_post_failed",
-            `${formatSurface(surface, "A")} err=${e?.message ?? e}`,
-          );
-        }
-      } else {
-        await log("token_pool_fallback", `${formatSurface(surface, "A")} reason=no_candidate`);
+      } catch (e: any) {
+        await log("token_pool_fallback", `${formatSurface(surface, "A")} reason=error err=${e?.message ?? e}`);
       }
-    } catch (e: any) {
-      await log("token_pool_fallback", `${formatSurface(surface, "A")} reason=error err=${e?.message ?? e}`);
     }
-  }
-  await cmux.send(surface, `export ${exportVars.join(" ")}\n`);
-  await sleep(500);
-
-  // worktree ディレクトリに移動
-  if (worktreePath) {
-    await cmux.send(surface, `cd ${worktreePath}\n`);
+    await cmux.send(surface, `export ${exportVars.join(" ")}\n`);
     await sleep(500);
-    await cmux.send(surface, `direnv allow 2>/dev/null\n`);
-    await sleep(500);
-  }
 
-  // Claude Code 起動（T407: builder 関数で `--session-id` を確実に同梱）
-  const claudeFlags = buildAgentClaudeFlags({
-    agentSettingsFlag,
-    model,
-    sessionId,
-  });
+    // worktree ディレクトリに移動
+    if (worktreePath) {
+      await cmux.send(surface, `cd ${worktreePath}\n`);
+      await sleep(500);
+      await cmux.send(surface, `direnv allow 2>/dev/null\n`);
+      await sleep(500);
+    }
 
-  // T247 / T413: prompt-file 内の {{PROJECT_INSTRUCTIONS}} と {{PROJECT_COMMON_INSTRUCTIONS}}
-  // を overlay で展開する。
-  // 展開後は `.team/prompts/<basename>.expanded.md` に書き出し、その path を Claude に渡す。
-  // 失敗時は元の promptFile にフォールバック。
-  let effectivePromptFile = promptFile;
-  if (promptFile) {
+    // Claude Code 起動（T407: builder 関数で `--session-id` を確実に同梱）
+    const claudeFlags = buildAgentClaudeFlags({
+      agentSettingsFlag,
+      model,
+      sessionId,
+    });
+
+    // T247 / T413: prompt-file 内の {{PROJECT_INSTRUCTIONS}} と {{PROJECT_COMMON_INSTRUCTIONS}}
+    // を overlay で展開する。
+    // 展開後は `.team/prompts/<basename>.expanded.md` に書き出し、その path を Claude に渡す。
+    // 失敗時は元の promptFile にフォールバック。
+    let effectivePromptFile = promptFile;
+    if (promptFile) {
+      try {
+        const original = await readFile(promptFile, "utf-8");
+        const { expanded, commonMode, roleMode } = await expandPromptOverlays(
+          PROJECT_ROOT,
+          role,
+          original,
+        );
+        if ((commonMode !== "noop" || roleMode !== "noop") && expanded !== original) {
+          const base = basename(promptFile, ".md");
+          const expandedPath = join(PROJECT_ROOT, ".team/prompts", `${base}.expanded.md`);
+          await mkdir(dirname(expandedPath), { recursive: true });
+          await writeFile(expandedPath, expanded, "utf-8");
+          effectivePromptFile = expandedPath;
+        }
+        await log(
+          "spawn_agent_expand",
+          `role=${role} mode=common:${commonMode}/role:${roleMode} prompt_file=${promptFile}${effectivePromptFile !== promptFile ? ` expanded=${effectivePromptFile}` : ""}`,
+        );
+      } catch (e: any) {
+        await log("spawn_agent_expand_failed", `role=${role} prompt_file=${promptFile} error=${e?.message ?? e}`);
+        // 元の promptFile でフォールバック
+        effectivePromptFile = promptFile;
+      }
+    }
+
+    // T371: token pool が token を注入した経路だけ inline env prefix を付ける。
+    // direnv の .envrc.local が CLAUDE_CODE_OAUTH_TOKEN を export していても、
+    // この prefix は execve env として優先される。
+    const tokenPrefix = tokenInjected ? `CLAUDE_CODE_OAUTH_TOKEN="$CMUX_CLAUDE_TOKEN" ` : "";
+    let claudeCmd: string;
+    if (effectivePromptFile) {
+      claudeCmd = `${tokenPrefix}claude ${claudeFlags.join(" ")} '${effectivePromptFile} を読んで指示に従ってください。'`;
+    } else {
+      claudeCmd = `${tokenPrefix}claude ${claudeFlags.join(" ")} '${prompt}'`;
+    }
+    await cmux.send(surface, claudeCmd + "\n");
+
+    // --- 4. タブ名設定 ---
+    const num = surface.replace("surface:", "");
+    await cmux.renameTab(surface, `[${num}] Agent`);
+
+    // タスク-セッション索引に記録
     try {
-      const original = await readFile(promptFile, "utf-8");
-      const { expanded, commonMode, roleMode } = await expandPromptOverlays(
-        PROJECT_ROOT,
-        role,
-        original,
-      );
-      if ((commonMode !== "noop" || roleMode !== "noop") && expanded !== original) {
-        const base = basename(promptFile, ".md");
-        const expandedPath = join(PROJECT_ROOT, ".team/prompts", `${base}.expanded.md`);
-        await mkdir(dirname(expandedPath), { recursive: true });
-        await writeFile(expandedPath, expanded, "utf-8");
-        effectivePromptFile = expandedPath;
+      const teamJson2 = JSON.parse(await readFile(join(PROJECT_ROOT, ".team/team.json"), "utf-8"));
+      const cond = teamJson2?.conductors?.find((c: any) => c.surface === conductorSurface);
+      if (cond?.taskId) {
+        const db = initDB(PROJECT_ROOT);
+        insertTaskSession(db, {
+          timestamp: new Date().toISOString(),
+          task_id: cond.taskId,
+          task_run_id: cond.taskRunId,
+          // T407: pre-inject UUID。空文字列 hardcode を排除し、Agent 由来 tool_use の
+          //   task_id 解決経路（trace-store の CTE）にこの UUID で hit するようにする。
+          session_id: sessionId,
+          role,
+          surface,
+          worktree_path: worktreePath,
+          event: "agent_spawned",
+        });
+        db.close();
       }
-      await log(
-        "spawn_agent_expand",
-        `role=${role} mode=common:${commonMode}/role:${roleMode} prompt_file=${promptFile}${effectivePromptFile !== promptFile ? ` expanded=${effectivePromptFile}` : ""}`,
-      );
     } catch (e: any) {
-      await log("spawn_agent_expand_failed", `role=${role} prompt_file=${promptFile} error=${e?.message ?? e}`);
-      // 元の promptFile でフォールバック
-      effectivePromptFile = promptFile;
+      log("error", `trace DB agent_spawned insert failed: ${e?.message ?? e}`).catch(() => {});
     }
-  }
 
-  // T371: token pool が token を注入した経路だけ inline env prefix を付ける。
-  // direnv の .envrc.local が CLAUDE_CODE_OAUTH_TOKEN を export していても、
-  // この prefix は execve env として優先される。
-  const tokenPrefix = tokenInjected ? `CLAUDE_CODE_OAUTH_TOKEN="$CMUX_CLAUDE_TOKEN" ` : "";
-  let claudeCmd: string;
-  if (effectivePromptFile) {
-    claudeCmd = `${tokenPrefix}claude ${claudeFlags.join(" ")} '${effectivePromptFile} を読んで指示に従ってください。'`;
-  } else {
-    claudeCmd = `${tokenPrefix}claude ${claudeFlags.join(" ")} '${prompt}'`;
-  }
-  await cmux.send(surface, claudeCmd + "\n");
-
-  // --- 4. タブ名設定 ---
-  const num = surface.replace("surface:", "");
-  await cmux.renameTab(surface, `[${num}] Agent`);
-
-  // タスク-セッション索引に記録
-  try {
-    const teamJson2 = JSON.parse(await readFile(join(PROJECT_ROOT, ".team/team.json"), "utf-8"));
-    const cond = teamJson2?.conductors?.find((c: any) => c.surface === conductorSurface);
-    if (cond?.taskId) {
-      const db = initDB(PROJECT_ROOT);
-      insertTaskSession(db, {
-        timestamp: new Date().toISOString(),
-        task_id: cond.taskId,
-        task_run_id: cond.taskRunId,
-        // T407: pre-inject UUID。空文字列 hardcode を排除し、Agent 由来 tool_use の
-        //   task_id 解決経路（trace-store の CTE）にこの UUID で hit するようにする。
-        session_id: sessionId,
-        role,
-        surface,
-        worktree_path: worktreePath,
-        event: "agent_spawned",
-      });
-      db.close();
-    }
+    // --- 7. stdout に surface を出力 ---
+    console.log(`SURFACE=${surface}`);
   } catch (e: any) {
-    log("error", `trace DB agent_spawned insert failed: ${e?.message ?? e}`).catch(() => {});
+    // T016: substrate 操作 (newSurface / send / renameTab 等) が失敗したら fail-fast し、
+    //   daemon に AGENT_SPAWN_FAILED を post して conductor.agents から slot を切除する。
+    //   `createdSurface` は newSurface が成功していた場合のみ含まれる (newSurface 自体が
+    //   こけたら undefined のまま) — daemon 側 handler はその両ケースを扱う。
+    await log(
+      "spawn_agent_failed",
+      `conductor=${conductorSurface} role=${role} task_id=${taskId ?? "-"} surface=${createdSurface ?? "(none)"} error=${e?.message ?? e}`,
+    );
+    try {
+      const failMsg: Record<string, unknown> = {
+        type: "AGENT_SPAWN_FAILED",
+        conductorSurface,
+        role,
+        taskId,
+        reason: e?.message ?? String(e),
+        timestamp: new Date().toISOString(),
+      };
+      if (createdSurface) failMsg.surface = createdSurface;
+      await postMessage(failMsg);
+    } catch (postErr: any) {
+      await log(
+        "agent_spawn_failed_post_failed",
+        `conductor=${conductorSurface} err=${postErr?.message ?? postErr}`,
+      );
+    }
+    console.error(`Error: spawn-agent failed: ${e?.message ?? e}`);
+    process.exit(1);
   }
-
-  // --- 7. stdout に surface を出力 ---
-  console.log(`SURFACE=${surface}`);
 }
 
 async function cmdAgents(): Promise<void> {

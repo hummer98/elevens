@@ -3,6 +3,7 @@ import {
   AbortTaskMessage,
   AGENT_ROLES,
   AgentSpawnedMessage,
+  AgentSpawnFailedMessage,
   AgentTokenBoundMessage,
   ConductorRegisteredMessage,
   ConductorState,
@@ -673,6 +674,65 @@ describe("AgentSpawnedMessage sessionId (T407)", () => {
       sessionId: false,
     });
     expect(parsed.success).toBe(false);
+  });
+});
+
+// --- T016: AGENT_SPAWN_FAILED ---
+
+describe("AgentSpawnFailedMessage (T016)", () => {
+  const base = {
+    type: "AGENT_SPAWN_FAILED" as const,
+    conductorSurface: "surface:200",
+    reason: "send timeout",
+    timestamp: "2026-05-21T10:00:00.000Z",
+  };
+
+  test("正常系: surface なしで parse 可能 (newSurface 自体が失敗したケース)", () => {
+    const parsed = AgentSpawnFailedMessage.safeParse(base);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.surface).toBeUndefined();
+    }
+  });
+
+  test("正常系: surface 付きで parse 可能 (newSurface 成功後に send 失敗したケース)", () => {
+    const parsed = AgentSpawnFailedMessage.safeParse({
+      ...base,
+      surface: "surface:500",
+      role: "implementer",
+      taskId: "016",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.surface).toBe("surface:500");
+      expect(parsed.data.role).toBe("implementer");
+      expect(parsed.data.taskId).toBe("016");
+    }
+  });
+
+  test("異常系: reason 欠落は reject", () => {
+    const { reason, ...withoutReason } = base;
+    void reason;
+    const parsed = AgentSpawnFailedMessage.safeParse(withoutReason);
+    expect(parsed.success).toBe(false);
+  });
+
+  test("異常系: conductorSurface 欠落は reject", () => {
+    const { conductorSurface, ...withoutConductor } = base;
+    void conductorSurface;
+    const parsed = AgentSpawnFailedMessage.safeParse(withoutConductor);
+    expect(parsed.success).toBe(false);
+  });
+
+  test("QueueMessage discriminated union として parse 可能", () => {
+    const parsed = QueueMessage.safeParse({
+      ...base,
+      surface: "surface:500",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.type).toBe("AGENT_SPAWN_FAILED");
+    }
   });
 });
 

@@ -1,5 +1,9 @@
 /**
- * cmux コマンドラッパー — シェルスクリプト不要でペイン操作
+ * c11 コマンドラッパー — シェルスクリプト不要でペイン操作
+ *
+ * v0.9.0+: cmux backend を完全撤去し c11 のみをサポート。
+ * 但しファイル名 `cmux.ts` / シンボル `SUBSTRATE_BINARY` / env `CMUX_*` は
+ * 互換のため温存している（c11 が cmux 系列の wire format を引き継ぐため）。
  */
 import { execFile as execFileCb } from "child_process";
 import { promisify } from "util";
@@ -9,62 +13,64 @@ import { formatExecError } from "./exec-error";
 const execFile = promisify(execFileCb);
 
 /**
- * Substrate binary 名（cmux 互換 multiplexer）を env から解決する pure 関数。
- * 未設定または `ELEVENS_BACKEND=c11` で c11（default）、`ELEVENS_BACKEND=cmux` で legacy cmux。
- * 任意の文字列も受け付ける（絶対パスやカスタムビルド差し替え用）。
+ * Substrate binary（c11）を env から解決する pure 関数。
+ *
+ * - `CMUX_BUNDLED_CLI_PATH` が `/c11.app/` を含む（c11.app launch 経由）→ そのフルパス
+ * - それ以外 → `"c11"`（PATH 上で解決）
+ *
+ * `ELEVENS_BACKEND` env は v0.9.0 で参照されない（cmux backend を撤去したため）。
  */
-export function resolveSubstrateBinary(env: NodeJS.ProcessEnv): string {
-  return env.ELEVENS_BACKEND?.trim() || "c11";
+export function resolveC11Binary(env: NodeJS.ProcessEnv): string {
+  const cliPath = env.CMUX_BUNDLED_CLI_PATH;
+  if (cliPath && /\/c11\.app\//.test(cliPath)) return cliPath;
+  return "c11";
 }
 
 /**
- * Substrate binary 名（cmux 互換 multiplexer）。
- * 未設定または `ELEVENS_BACKEND=c11` で c11（default）、`ELEVENS_BACKEND=cmux` で legacy cmux。
- * 任意の文字列も受け付ける（絶対パスやカスタムビルド差し替え用）。
+ * Substrate binary（c11）。
  *
- * v0.4.0+: `cmdStart` 起動経路で **auto-detect が c11 でなかった場合は refuse** に切替。
- * ただし SUBSTRATE_BINARY 自体は module load 時に env を 1 回読んで確定する（auto-detect とは別経路）。
- * runtime での backend 切替は `isC11Backend(env)` の都度評価で対応する（test 時の env 注入が
- * 効くようにするため、deprecation 通知と getCapabilities ガードがこの方式）。
- * 起動可否判定は `detectBackendDecision()` を起動経路で呼ぶ設計。
+ * v0.9.0+: c11 のみをサポート。`SUBSTRATE_BINARY` というシンボル名は
+ * caller 側の import を壊さないために温存する（実体は c11 binary を指す）。
+ *
+ * module load 時に 1 回 env を読んで確定する。runtime での切替は不要
+ * （c11 のみのため）。テストで env 注入したい場合は `resolveC11Binary(env)` を直接呼ぶ。
  */
-export const SUBSTRATE_BINARY: string = resolveSubstrateBinary(process.env);
+export const SUBSTRATE_BINARY: string = resolveC11Binary(process.env);
 
 /**
- * elevens start の起動可否判定 (v0.4.0+ で導入)。
+ * elevens start の起動可否判定 (v0.4.0+ 導入、v0.9.0 で 2-value 化)。
  *
  * **方針**: c11-first。auto-detect で c11 multiplexer 上にいないと判断したら refuse。
- * `ELEVENS_BACKEND` を user が明示している場合は opt-in と見做して起動許可（cmux 含む）。
  *
  * 優先順位:
- *   1. `ELEVENS_BACKEND` env 明示 → そのまま `{ kind: "explicit", backend }` を返す
- *   2. auto-detect: `CMUX_BUNDLE_ID === "com.stage11.c11"` → c11 と判定
- *   3. auto-detect backup: `CMUX_BUNDLED_CLI_PATH` が `/c11.app/` を含む → c11
- *   4. それ以外 → `{ kind: "refuse", reason }` を返し、cmdStart で exit 1
+ *   1. `CMUX_BUNDLE_ID === "com.stage11.c11"` → `{ kind: "c11" }`
+ *   2. `CMUX_BUNDLED_CLI_PATH` が `/c11.app/` を含む → `{ kind: "c11" }`
+ *   3. それ以外 → `{ kind: "refuse" }` を返し、cmdStart で exit 1
  *
- * cmdStart 以外の経路 (mailbox / send / status 等) は refuse しない（既存 daemon との
- * 通信ユーティリティとして動かしたい場合があるため）。
+ * v0.9.0+: `ELEVENS_BACKEND` env は読まない（cmux backend を撤去）。
+ * c11 以外の bundle を見たら refuse する（`CMUX_BUNDLE_ID=com.manaflow.cmux` は明示的に refuse）。
+ *
+ * 補足 (m4): c11.app launch 経由のみ `CMUX_BUNDLED_CLI_PATH` が設定される。
+ * `resolveC11Binary` と同じ `/c11\.app/` regex に依存することで、binary 解決と判定が一致する。
  */
 export type BackendDecision =
-  | { kind: "explicit"; backend: string; bundle?: string }
-  | { kind: "auto"; backend: "c11"; bundle: string }
+  | { kind: "c11"; bundle: string; binary: string }
   | { kind: "refuse"; reason: string; observed: { bundleId?: string; cliPath?: string } };
 
 export function detectBackendDecision(env: NodeJS.ProcessEnv = process.env): BackendDecision {
-  const explicit = env.ELEVENS_BACKEND?.trim();
-  if (explicit) {
-    return { kind: "explicit", backend: explicit, bundle: env.CMUX_BUNDLE_ID };
-  }
-  if (env.CMUX_BUNDLE_ID === "com.stage11.c11") {
-    return { kind: "auto", backend: "c11", bundle: env.CMUX_BUNDLE_ID };
-  }
+  const bundleId = env.CMUX_BUNDLE_ID;
   const cliPath = env.CMUX_BUNDLED_CLI_PATH;
+  if (bundleId === "com.stage11.c11") {
+    return { kind: "c11", bundle: bundleId, binary: resolveC11Binary(env) };
+  }
   if (cliPath && /\/c11\.app\//.test(cliPath)) {
-    return { kind: "auto", backend: "c11", bundle: env.CMUX_BUNDLE_ID ?? "(unknown via CLI path)" };
+    return {
+      kind: "c11",
+      bundle: bundleId ?? "(unknown via CLI path)",
+      binary: resolveC11Binary(env),
+    };
   }
   // refuse path: c11 surface 起動のみを案内する。
-  // ELEVENS_BACKEND env による escape hatch は仕様としては存在するが、
-  // user 向けエラーメッセージでは敢えて言及せず、c11 への移行を促す。
   return {
     kind: "refuse",
     reason: [
@@ -73,76 +79,47 @@ export function detectBackendDecision(env: NodeJS.ProcessEnv = process.env): Bac
       "c11 surface 内で `elevens start` を実行してください。",
     ].join("\n"),
     observed: {
-      bundleId: env.CMUX_BUNDLE_ID,
-      cliPath: env.CMUX_BUNDLED_CLI_PATH,
+      bundleId,
+      cliPath,
     },
   };
 }
 
-/**
- * Backend が c11 かどうかを env から都度判定する pure 関数（basename ベース）。
- * `c11` / `/path/to/c11` / `c11-dev` 等の絶対パス指定にも反応する。
- * test 時の env 注入が効くよう、deprecation 通知 / getCapabilities ガードはこの関数評価を使う。
- */
-export function isC11Backend(env: NodeJS.ProcessEnv = process.env): boolean {
-  const binary = resolveSubstrateBinary(env);
-  const basename = binary.split("/").pop() ?? binary;
-  return basename === "c11";
-}
+/** send / new-surface 等の substrate 操作の default timeout (ms) */
+export const SEND_TIMEOUT_MS = 30_000;
 
-/**
- * Backend が c11 かどうかの判定（basename ベース、module-load-time 定数）。
- * runtime で backend が変わらない参照箇所（`tree --no-layout` / `daemon_started` log）が依存する。
- * runtime での env 切替を要する箇所は `isC11Backend(env)` の都度評価を使うこと。
- */
-const SUBSTRATE_BASENAME = SUBSTRATE_BINARY.split("/").pop() ?? SUBSTRATE_BINARY;
-export const IS_C11_BACKEND: boolean = SUBSTRATE_BASENAME === "c11";
-
-/**
- * Phase 3 prep (docs/seed.md): cmux backend が選択されているとき
- * daemon 起動時に **1 度だけ** deprecation 通知を `manager.log` に warn する。
- *
- * - **強制ではない**（exit せず、ユーザーの作業を阻害しない）
- * - `ELEVENS_NO_DEPRECATION_WARN=1` で suppress 可能
- * - c11 backend では何もしない
- * - 同一プロセス内で複数回呼んでも 1 回しか log しない（idempotent flag）
- *
- * cmdStart の起動経路（acquireOrExit 直後あたり）で呼ばれる前提。
- */
-let deprecationNoticeEmitted = false;
-
-/** テスト用: emitted flag を初期化する（process 単位のキャッシュをリセット） */
-export function __resetDeprecationNoticeForTest(): void {
-  deprecationNoticeEmitted = false;
-}
-
-export async function maybeLogDeprecationNotice(): Promise<void> {
-  if (deprecationNoticeEmitted) return;
-  if (process.env.ELEVENS_NO_DEPRECATION_WARN === "1") return;
-  // module-load-time 定数 IS_C11_BACKEND ではなく都度評価を使う（test 時の env 注入を効かせるため）。
-  if (isC11Backend(process.env)) return;
-  // 一度フラグを立ててから log（log 失敗時の二重発火も避ける）
-  deprecationNoticeEmitted = true;
-  // logger を遅延 import（循環依存回避 + cmux.ts の既存 logger 依存と整合）
-  const { warn } = await import("./logger");
-  await warn(
-    "DEPRECATION_NOTICE",
-    "cmux backend is deprecated and no longer the default (v0.9.0+). Unset ELEVENS_BACKEND or set ELEVENS_BACKEND=c11 to use c11. See docs/seed.md Phase 3.",
-  );
-}
+/** tree 呼び出し専用のタイムアウト (ms) */
+export const TREE_TIMEOUT_MS = 5_000;
 
 type RunCmuxOpts = { timeout?: number };
 
 /**
- * cmux コマンドの execFile ラッパー。失敗時に stderr/stdout を含む新しい Error を throw する。
+ * テスト用: 実際に execFile に渡す binary を上書きする。`null` で元に戻す。
+ * c11.app launch 経由で起動された test runner では SUBSTRATE_BINARY が
+ * `/Applications/c11.app/.../c11` の絶対パスに解決され、PATH 上の fake binary が
+ * 効かなくなるため、fake 経路を必要とするテストはこの hook で binary を差し替える。
+ */
+let substrateBinaryOverride: string | null = null;
+export function __setSubstrateBinaryForTest(binary: string | null): void {
+  substrateBinaryOverride = binary;
+}
+
+/**
+ * c11 コマンドの execFile ラッパー。失敗時に stderr/stdout を含む新しい Error を throw する。
  *
+ * - **default timeout** `SEND_TIMEOUT_MS` (30s) を `opts.timeout` 未指定時に適用する (T016)。
+ *   `tree` は `TREE_TIMEOUT_MS` (5s) を明示渡しするため上書きされない。
  * - 二重ラップ防止: 既に runCmux で wrap 済みの Error はそのまま再 throw する
  * - 元の Error は `cause` および `__cmuxWrapped` チェーンで追跡可能
  * - 元 Error の `stderr` / `stdout` プロパティも wrap 後の Error に転写する（呼び出し元が必要なら参照可能）
  */
 async function runCmux(args: string[], opts?: RunCmuxOpts): Promise<{ stdout: string; stderr: string }> {
+  // spread を先に置き timeout を後に置くことで、`opts.timeout` が未指定なら
+  // default を、明示指定があればその値を使う（tree の 5s が上書きされないよう注意）。
+  const mergedOpts: RunCmuxOpts = { ...opts, timeout: opts?.timeout ?? SEND_TIMEOUT_MS };
+  const binary = substrateBinaryOverride ?? SUBSTRATE_BINARY;
   try {
-    const { stdout, stderr } = await execFile(SUBSTRATE_BINARY, args, opts);
+    const { stdout, stderr } = await execFile(binary, args, mergedOpts);
     return { stdout: stdout.toString(), stderr: stderr.toString() };
   } catch (e: any) {
     if (e?.__cmuxWrapped) throw e;
@@ -241,14 +218,11 @@ export async function renameWorkspace(title: string, workspace?: string): Promis
   await runCmux(args).catch(() => {});
 }
 
-/** tree 呼び出しのタイムアウト（ミリ秒） */
-const TREE_TIMEOUT_MS = 5_000;
-
 export type TreeOpts = { json?: boolean; idFormat?: "refs" | "uuids" | "both" };
 
 /**
  * テストから tree の実体を差し替えるためのフック（R4）。
- * 未設定時は実 cmux コマンドを呼ぶ。テスト時は `__setTreeImpl()` で差し替える。
+ * 未設定時は実 c11 コマンドを呼ぶ。テスト時は `__setTreeImpl()` で差し替える。
  */
 let treeImpl: ((workspace?: string, opts?: TreeOpts) => Promise<string>) | null = null;
 
@@ -266,52 +240,53 @@ export async function tree(workspace?: string, opts?: TreeOpts): Promise<string>
   if (opts?.json) args.push("--json");
   args.push("tree");
   if (workspace) args.push("--workspace", workspace);
-  // c11 only: text 出力時に floor plan ASCII art の前置を抑制（output 肥大化を回避）
-  if (IS_C11_BACKEND && !opts?.json) args.push("--no-layout");
+  // c11: text 出力時に floor plan ASCII art の前置を抑制（output 肥大化を回避）
+  if (!opts?.json) args.push("--no-layout");
   const { stdout } = await runCmux(args, { timeout: TREE_TIMEOUT_MS });
   return stdout;
 }
 
 /**
- * 指定 workspace の生存 surface 集合を返す（T255）。
+ * 指定 workspace の生存 surface 集合を返す (T255、T016 で fail-fast 化)。
  *
- * - workspace 未指定 → null（initializeLayout の degrade パスに乗せるため fail-fast）
- * - tree 失敗 → null + tree_fetch_failed ログ。呼び出し元は pid_only モードに degrade
+ * - workspace 未指定 → throw（initializeLayout の retry/exit 経路に乗せる）
+ * - tree 失敗 → throw（呼び出し元 daemon が retry → exit 1 に責任を持つ）
  * - 成功 → tree 出力から `surface:N` を集合化して返す
+ *
+ * v0.9.0 以前は `null` を返して pid_only モードへ degrade していたが、
+ * c11 substrate が応答していないのに動き続ける方が観察箱原則上有害と判断し fail-fast 化した。
  */
-export async function fetchLiveSurfaces(workspace?: string): Promise<Set<string> | null> {
-  if (!workspace) return null;
-  try {
-    const output = await tree(workspace);
-    const matches = output.match(/surface:\d+/g) ?? [];
-    return new Set(matches);
-  } catch (e: any) {
-    await log("tree_fetch_failed", `workspace=${workspace} ${formatExecError(e)} degrade=pid_only`);
-    return null;
+export async function fetchLiveSurfaces(workspace?: string): Promise<Set<string>> {
+  if (!workspace) {
+    throw new Error("fetchLiveSurfaces: workspace is required (c11 substrate fail-fast)");
   }
+  const output = await tree(workspace);
+  const matches = output.match(/surface:\d+/g) ?? [];
+  return new Set(matches);
 }
 
+/**
+ * surface が属する pane を返す (T016 で fail-fast 化)。
+ *
+ * tree が失敗した場合は throw する（v0.9.0 以前は undefined を返して swallow していた）。
+ * 「surface が見つからなかった」場合は引き続き undefined を返す（正常範囲の missing）。
+ */
 export async function getPaneForSurface(surface: string, workspace?: string): Promise<string | undefined> {
-  try {
-    const output = await tree(workspace);
-    const lines = output.split("\n");
-    let currentPane: string | undefined;
-    for (const line of lines) {
-      const paneMatch = line.match(/pane (pane:\d+)/);
-      if (paneMatch) currentPane = paneMatch[1];
-      if (line.includes(surface) && currentPane) return currentPane;
-    }
-    return undefined;
-  } catch (e: any) {
-    await log("error", `getPaneForSurface failed: ${formatSurface(surface, "S")} ${formatExecError(e)}`);
-    return undefined;
+  const output = await tree(workspace);
+  const lines = output.split("\n");
+  let currentPane: string | undefined;
+  for (const line of lines) {
+    const paneMatch = line.match(/pane (pane:\d+)/);
+    if (paneMatch) currentPane = paneMatch[1];
+    if (line.includes(surface) && currentPane) return currentPane;
   }
+  return undefined;
 }
 
 /**
  * 指定 surface が属する pane 内の全 surface を返す（自分自身を含む）。
  *
- * `cmux tree` を 1 回だけ呼び、(1) 対象 surface の所属 pane を特定し
+ * `c11 tree` を 1 回だけ呼び、(1) 対象 surface の所属 pane を特定し
  * (2) 同 pane に属する全 surface を集める。`getPaneForSurface` と同じ
  * line-by-line スキャン方式を採用し、tree 出力 1 回で両情報を引き出す。
  *
@@ -352,7 +327,7 @@ export async function listSiblingSurfaces(surface: string, workspace?: string): 
  * PID 生存確認（T195）。
  *
  * `process.kill(pid, 0)` で signal 0 を送信し、プロセス存在を確認する。
- * tree / list-status を使わないため cmux daemon の deadlock 影響を受けない。
+ * tree / list-status を使わないため c11 daemon の deadlock 影響を受けない。
  *
  * 注意: PID は OS で再利用されるため、kill(pid, 0) が true を返しても
  * それが元のプロセスとは限らない。Manager 再起動直後は team.json 永続化の
@@ -415,7 +390,7 @@ export async function clearStatus(
 }
 
 /**
- * cmux notify を実行して OS 通知を送る (T238)。
+ * c11 notify を実行して OS 通知を送る (T238)。
  * best-effort: 失敗時は log するのみで throw しない。
  */
 export async function notify(

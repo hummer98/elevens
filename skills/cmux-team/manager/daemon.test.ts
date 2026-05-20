@@ -2814,6 +2814,129 @@ describe("handleMessage: AGENT_SPAWNED master fallback cleanup (T244)", () => {
   });
 });
 
+// T016: AGENT_SPAWN_FAILED — cmdSpawnAgent が substrate 操作中に失敗したときの slot 切除
+describe("handleMessage: AGENT_SPAWN_FAILED (T016)", () => {
+  async function readManagerLog(): Promise<string> {
+    try {
+      return await readFile(join(testDir, ".team/logs/manager.log"), "utf-8");
+    } catch {
+      return "";
+    }
+  }
+
+  function stopWatchers(state: DaemonState): void {
+    state.running = false;
+  }
+
+  test("surface 確定済み + slot 登録済み → findIndex+splice で agents から切除する", async () => {
+    const state = await createDaemon(testDir);
+    state.conductors.set("surface:100", {
+      surface: "surface:100",
+      status: "running",
+      startedAt: new Date().toISOString(),
+      agents: [
+        { surface: "surface:500", role: "implementer", spawnedAt: new Date().toISOString(), status: "starting" },
+      ],
+    } as any);
+
+    try {
+      await handleMessage(state, {
+        type: "AGENT_SPAWN_FAILED",
+        conductorSurface: "surface:100",
+        surface: "surface:500",
+        role: "implementer",
+        reason: "send timeout",
+        timestamp: new Date().toISOString(),
+      });
+
+      const c = state.conductors.get("surface:100")!;
+      expect(c.agents.length).toBe(0);
+      const logContent = await readManagerLog();
+      expect(logContent).toContain("agent_spawn_failed_cleanup");
+      expect(logContent).toContain("reason=send timeout");
+    } finally {
+      stopWatchers(state);
+    }
+  });
+
+  test("surface 確定済みだが slot 未登録 → no-op で警告ログのみ", async () => {
+    const state = await createDaemon(testDir);
+    state.conductors.set("surface:100", {
+      surface: "surface:100",
+      status: "running",
+      startedAt: new Date().toISOString(),
+      agents: [],
+    } as any);
+
+    try {
+      await handleMessage(state, {
+        type: "AGENT_SPAWN_FAILED",
+        conductorSurface: "surface:100",
+        surface: "surface:500",
+        role: "implementer",
+        reason: "claude crash",
+        timestamp: new Date().toISOString(),
+      });
+
+      const c = state.conductors.get("surface:100")!;
+      expect(c.agents.length).toBe(0);
+      const logContent = await readManagerLog();
+      expect(logContent).toContain("agent_spawn_failed_no_slot");
+    } finally {
+      stopWatchers(state);
+    }
+  });
+
+  test("surface 未確定 (newSurface 自体が失敗) → no_surface ログのみ", async () => {
+    const state = await createDaemon(testDir);
+    state.conductors.set("surface:100", {
+      surface: "surface:100",
+      status: "running",
+      startedAt: new Date().toISOString(),
+      agents: [],
+    } as any);
+
+    try {
+      await handleMessage(state, {
+        type: "AGENT_SPAWN_FAILED",
+        conductorSurface: "surface:100",
+        // surface omitted — newSurface 自体が失敗したケース
+        role: "implementer",
+        reason: "tree timeout",
+        timestamp: new Date().toISOString(),
+      });
+
+      const c = state.conductors.get("surface:100")!;
+      expect(c.agents.length).toBe(0);
+      const logContent = await readManagerLog();
+      expect(logContent).toContain("agent_spawn_failed_no_surface");
+      expect(logContent).toContain("reason=tree timeout");
+    } finally {
+      stopWatchers(state);
+    }
+  });
+
+  test("conductor 未登録 → orphan ログのみで cleanup は走らない", async () => {
+    const state = await createDaemon(testDir);
+
+    try {
+      await handleMessage(state, {
+        type: "AGENT_SPAWN_FAILED",
+        conductorSurface: "surface:999",
+        surface: "surface:500",
+        role: "implementer",
+        reason: "unknown conductor",
+        timestamp: new Date().toISOString(),
+      });
+
+      const logContent = await readManagerLog();
+      expect(logContent).toContain("agent_spawn_failed_orphan");
+    } finally {
+      stopWatchers(state);
+    }
+  });
+});
+
 describe("depends_on cascade on parent abort/delete (T241)", () => {
   test("ケース1: 親 abort → 子 ready が draft に戻る（journal 追記）", async () => {
     await createTask("1", "parent", { status: "ready" });
@@ -4049,45 +4172,10 @@ describe("initializeLayout: マトリクス復帰 (T255 §8.3 M6〜M16)", () => 
     }
   }, 15000);
 
-  test("M7: tree() 失敗時は pid_only に degrade — pid dead でも cleanup/B/D に倒さない", async () => {
-    const { __setIsAliveImpl, __setTreeImpl } = await import("./cmux");
-    __setIsAliveImpl((pid: number) => pid === 7001);
-    __setTreeImpl(async () => { throw new Error("tree timeout"); });
-    const stubs = await stubCmuxIO();
-    try {
-      await writeTeamJson([
-        { surface: "surface:700", pid: 7001 },
-        { surface: "surface:701", pid: 7002, taskId: "077", taskRunId: "tr-077", worktreePath: testDir },
-      ]);
-
-      const state = await createDaemon(testDir);
-      state.workspace = "ws-test";
-      // T346: partial restore で topup が動くため mainBranch を明示
-      state.mainBranch = "main";
-      const { initializeLayout } = await import("./daemon");
-      const resumePlan = [{
-        taskId: "077", taskRunId: "tr-077",
-        worktreePath: testDir, sessionId: "sess-077",
-      }];
-      const assignments = await initializeLayout(state, undefined, resumePlan);
-
-      // 全 entry が A 相当に倒れて state に残る
-      expect(state.conductors.has("surface:700")).toBe(true);
-      expect(state.conductors.has("surface:701")).toBe(true);
-      // B/D 経路に入らないので resume assignment は 0 件
-      expect(assignments).toHaveLength(0);
-      // cleanup が呼ばれていないこと（C 経路に入らない）
-      expect(stubs.closeSurface).not.toHaveBeenCalled();
-    } finally {
-      __setIsAliveImpl(null);
-      __setTreeImpl(null);
-      stubs.send.mockRestore();
-      stubs.sendKey.mockRestore();
-      stubs.closeSurface.mockRestore();
-      stubs.renameTab.mockRestore();
-      stubs.newSplit.mockRestore();
-    }
-  }, 15000);
+  // T016: M7 (tree() 失敗時の pid_only degrade) は仕様撤去で削除。
+  // v0.9.0+ では fetchLiveSurfacesWithRetry が 3 回 retry (200/600/1500ms) しても
+  // 失敗すれば process.exit(1) する。test 内で exit を踏むと bun test runner が落ちるため、
+  // 「retry → exit 1」自体は smoke / e2e で検証し、unit test では assert しない。
 
   test("M10: A 復元時に task-state が assigned でなければ taskId を reconcile (クリア)", async () => {
     const { __setIsAliveImpl, __setTreeImpl } = await import("./cmux");
@@ -4129,41 +4217,9 @@ describe("initializeLayout: マトリクス復帰 (T255 §8.3 M6〜M16)", () => 
     }
   }, 15000);
 
-  test("M11: workspace 不明 (state.workspace=null) 時は fetchLiveSurfaces=null → pid_only degrade", async () => {
-    const { __setIsAliveImpl, __setTreeImpl } = await import("./cmux");
-    __setIsAliveImpl((pid: number) => pid === 8001);
-    let treeCalled = false;
-    __setTreeImpl(async () => { treeCalled = true; return ""; });
-    const stubs = await stubCmuxIO();
-    try {
-      await writeTeamJson([
-        { surface: "surface:800", pid: 8001 },
-        { surface: "surface:801", pid: 8002 },
-      ]);
-
-      const state = await createDaemon(testDir);
-      state.workspace = null; // workspace 不明
-      // T346: partial restore で topup が動くため mainBranch を明示
-      state.mainBranch = "main";
-      const { initializeLayout } = await import("./daemon");
-      await initializeLayout(state, undefined, []);
-
-      // tree は呼ばれない (fetchLiveSurfaces で early return)
-      expect(treeCalled).toBe(false);
-      // pid alive のみ keep、pid dead も degrade で keep
-      expect(state.conductors.has("surface:800")).toBe(true);
-      expect(state.conductors.has("surface:801")).toBe(true);
-      expect(stubs.closeSurface).not.toHaveBeenCalled();
-    } finally {
-      __setIsAliveImpl(null);
-      __setTreeImpl(null);
-      stubs.send.mockRestore();
-      stubs.sendKey.mockRestore();
-      stubs.closeSurface.mockRestore();
-      stubs.renameTab.mockRestore();
-      stubs.newSplit.mockRestore();
-    }
-  }, 15000);
+  // T016: M11 (workspace 不明 / tree 失敗 → pid_only degrade) は仕様撤去で削除。
+  // v0.9.0+ では fetchLiveSurfacesWithRetry が 3 回 retry 後に process.exit(1) する。
+  // 「exit 1 を呼ぶ」のテストは process 死亡を伴うため別の方法 (e2e / smoke) で確認する。
 
   test("M12: team.json 空 + resumePlan 非空 → initializeConductorSlots に resumePlan が透過される", async () => {
     const { __setIsAliveImpl } = await import("./cmux");

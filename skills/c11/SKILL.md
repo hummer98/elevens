@@ -6,7 +6,7 @@ description: >
   flash / blueprint / snapshot / `c11 tree` / `c11 set-metadata` / `c11 send` /
   `c11 mailbox` / `c11 trigger-flash` / `CMUX_SHELL_INTEGRATION` /
   `C11_SHELL_INTEGRATION` / `CMUX_SURFACE_ID` / `CMUX_SOCKET_PATH` /
-  `ELEVENS_BACKEND=c11` (default since v0.9.0) / cmux との差分。
+  cmux からの lineage と差分。
   Provides: c11 の lineage・概念モデル・cmux にない独自機能・主要 CLI cheat-sheet・
   PATH wrapper 方式・elevens 4 層との接続点。本家 SKILL.md (AGPL) のフルコピーではなく、
   elevens 開発に必要な範囲の自前要約。詳細は本家へのリンクで誘導する。
@@ -14,7 +14,7 @@ description: >
 
 # c11 — elevens 開発者向けリファレンス
 
-elevens は **c11 (Stage-11-Agentics/c11) を substrate として動く**。v0.9.0 以降は env 未設定でも c11 が default。`ELEVENS_BACKEND=cmux` で legacy cmux に opt-in 可能（deprecated）。
+elevens は **c11 (Stage-11-Agentics/c11) を substrate として動く**。v0.9.0 (T016) 以降は c11 のみがサポート対象で、レガシー cmux backend と `ELEVENS_BACKEND` 環境変数は撤去された。`c11` バイナリが見つからない / 動作しない場合、daemon は silent fallback せず明示エラー付きで fail-fast する。
 
 このドキュメントは elevens 開発時に Claude が参照する用の自前要約。本家の正規スキルは [Stage-11-Agentics/c11/skills/c11/SKILL.md](https://github.com/Stage-11-Agentics/c11/blob/main/skills/c11/SKILL.md)（AGPL-3.0-or-later, 537行）。**API の最終真実はそちら**。ここに書いてあるのは elevens 開発で頻出する範囲の cheat-sheet。
 

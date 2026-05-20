@@ -1,23 +1,23 @@
 /**
  * c11-features.ts のテスト。
  *
- * モック戦略: cmux.test.ts と同じく fake binary を `PATH` 先頭に置く方式。
+ * v0.9.0+ (T016): cmux backend は撤去された。「mailbox 非対応」状態を再現するには
+ * `__setCapabilitiesForTest(null)` で capabilities を null 注入する（旧来の
+ * `process.env.ELEVENS_BACKEND = "cmux"` 経路は廃止）。
  *
- * 注意: T015 以降、cmux backend 想定 test は各テスト本体で `process.env.ELEVENS_BACKEND = "cmux"`
- * を明示注入する（env 未設定だと default が c11 になるため）。getCapabilities ガードが
- * `isC11Backend(process.env)` を都度評価するので、この実行時注入が有効に効く。
- * SUBSTRATE_BINARY 自体は module load 時に確定する定数なので、backend 判定は isC11Backend 経由で行う。
+ * モック戦略:
+ * - opportunistic no-op テスト: `__setCapabilitiesForTest(null)` で unsupported を強制
+ * - mailbox 対応 c11 のテスト: `__setCapabilitiesForTest({methods: [...]})` で対応を強制
+ * - watchMailbox: `__setFetchMailboxImpl` で fetch を直接 fake
  */
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { writeFile, chmod, mkdir } from "fs/promises";
 import { join } from "path";
 import { createDummyProject, type DummyProject } from "./test-project";
-import { isC11Backend } from "./cmux";
 
 let project: DummyProject;
 let testDir: string;
 let origPath: string | undefined;
-let origBackend: string | undefined;
 
 beforeEach(async () => {
   project = await createDummyProject({
@@ -31,13 +31,10 @@ beforeEach(async () => {
   await mkdir(binDir, { recursive: true });
   origPath = process.env.PATH;
   process.env.PATH = `${binDir}:${origPath}`;
-  origBackend = process.env.ELEVENS_BACKEND;
 });
 
 afterEach(async () => {
   process.env.PATH = origPath ?? "";
-  if (origBackend === undefined) delete process.env.ELEVENS_BACKEND;
-  else process.env.ELEVENS_BACKEND = origBackend;
   await project.dispose();
 });
 
@@ -47,76 +44,81 @@ async function writeFakeBin(name: string, script: string): Promise<void> {
   await chmod(path, 0o755);
 }
 
-describe("cmux backend での opportunistic no-op", () => {
-  test("setMailbox / getMailbox / clearMailbox は backend が cmux のとき何もしない", async () => {
-    // T015: cmux backend として動かす（env 未設定だと c11 default になるため明示注入）。
-    // getCapabilities ガードが isC11Backend(process.env) を都度評価するため、この注入が実行時に効く。
-    process.env.ELEVENS_BACKEND = "cmux";
-    const { setMailbox, getMailbox, clearMailbox, isMailboxSupported, __resetCapabilitiesCache } =
+describe("mailbox 非対応 c11 build での opportunistic no-op (T016)", () => {
+  test("setMailbox / getMailbox / clearMailbox は mailbox 非対応で何もしない", async () => {
+    const { setMailbox, getMailbox, clearMailbox, isMailboxSupported, __setCapabilitiesForTest, __resetCapabilitiesCache } =
       await import("./c11-features");
     __resetCapabilitiesCache();
-    // 観察箱: cmux backend 経路（!isC11Backend で getCapabilities が早期 null 返却）を通ることを明示
-    expect(isC11Backend(process.env)).toBe(false);
-
-    // cmux backend では `c11` を呼ぼうとしないので、fake `c11` スクリプトが無くても通る
-    expect(await isMailboxSupported()).toBe(false);
-    expect(await getMailbox({ kind: "surface", ref: "surface:1" })).toBeNull();
-    await setMailbox({ kind: "surface", ref: "surface:1" }, { "mailbox.status": "running" });
-    await clearMailbox({ kind: "surface", ref: "surface:1" }, "mailbox.status");
-    // ↑ throw しなければ OK（no-op が成立している）
+    // capabilities=null → 「c11 binary が capabilities を返さない」状態
+    __setCapabilitiesForTest(null);
+    try {
+      expect(await isMailboxSupported()).toBe(false);
+      expect(await getMailbox({ kind: "surface", ref: "surface:1" })).toBeNull();
+      await setMailbox({ kind: "surface", ref: "surface:1" }, { "mailbox.status": "running" });
+      await clearMailbox({ kind: "surface", ref: "surface:1" }, "mailbox.status");
+      // ↑ throw しなければ OK（no-op が成立している）
+    } finally {
+      __resetCapabilitiesCache();
+    }
   });
 });
 
 describe("setMailbox の validate option (mailbox-schema integration)", () => {
   test("validate=strict で型違反 payload は throw する（書き込み前にガード）", async () => {
-    process.env.ELEVENS_BACKEND = "cmux";
-    const { setMailbox, __resetCapabilitiesCache } = await import("./c11-features");
+    const { setMailbox, __setCapabilitiesForTest, __resetCapabilitiesCache } = await import("./c11-features");
     __resetCapabilitiesCache();
-    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
-    await expect(
-      setMailbox(
-        { kind: "surface", ref: "surface:1" },
-        { "mailbox.progress": 2.0 } as any,
-        { validate: "strict" },
-      ),
-    ).rejects.toThrow(/mailbox\.progress/);
+    __setCapabilitiesForTest(null); // unsupported (mailbox を試みない)
+    try {
+      await expect(
+        setMailbox(
+          { kind: "surface", ref: "surface:1" },
+          { "mailbox.progress": 2.0 } as any,
+          { validate: "strict" },
+        ),
+      ).rejects.toThrow(/mailbox\.progress/);
+    } finally {
+      __resetCapabilitiesCache();
+    }
   });
 
-  test("validate=warn (default) で型違反 payload でも no-op exit（cmux backend）", async () => {
-    process.env.ELEVENS_BACKEND = "cmux";
-    const { setMailbox, __resetCapabilitiesCache } = await import("./c11-features");
+  test("validate=warn (default) で型違反 payload でも no-op exit (mailbox 非対応)", async () => {
+    const { setMailbox, __setCapabilitiesForTest, __resetCapabilitiesCache } = await import("./c11-features");
     __resetCapabilitiesCache();
-    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
-    // throw しなければ OK
-    await setMailbox(
-      { kind: "surface", ref: "surface:1" },
-      { "mailbox.status": "DONE" } as any, // canonical 集合に無い大文字
-      { validate: "warn" },
-    );
+    __setCapabilitiesForTest(null);
+    try {
+      // throw しなければ OK
+      await setMailbox(
+        { kind: "surface", ref: "surface:1" },
+        { "mailbox.status": "DONE" } as any, // canonical 集合に無い大文字
+        { validate: "warn" },
+      );
+    } finally {
+      __resetCapabilitiesCache();
+    }
   });
 
   test("validate=off で schema 検証を完全 skip", async () => {
-    process.env.ELEVENS_BACKEND = "cmux";
-    const { setMailbox, __resetCapabilitiesCache } = await import("./c11-features");
+    const { setMailbox, __setCapabilitiesForTest, __resetCapabilitiesCache } = await import("./c11-features");
     __resetCapabilitiesCache();
-    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
-    // strict なら throw する payload も off では throw しない
-    await setMailbox(
-      { kind: "surface", ref: "surface:1" },
-      { "mailbox.progress": 99 } as any,
-      { validate: "off" },
-    );
+    __setCapabilitiesForTest(null);
+    try {
+      // strict なら throw する payload も off では throw しない
+      await setMailbox(
+        { kind: "surface", ref: "surface:1" },
+        { "mailbox.progress": 99 } as any,
+        { validate: "off" },
+      );
+    } finally {
+      __resetCapabilitiesCache();
+    }
   });
 });
 
 describe("watchMailbox の error 経路で prev を破壊しない (A031 §2 follow-up)", () => {
   test("transient error tick → prev を保持、phantom removed を emit しない、復帰後に正常 diff", async () => {
-    process.env.ELEVENS_BACKEND = "cmux";
     const c11 = await import("./c11-features");
     c11.__resetCapabilitiesCache();
-    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
 
-    type R = Awaited<ReturnType<typeof c11.getMailbox>>;
     const events: any[] = [];
     let phase = 0;
     // tick 1: 初期状態 mailbox.x=foo
@@ -163,10 +165,8 @@ describe("watchMailbox の error 経路で prev を破壊しない (A031 §2 fol
   });
 
   test("unsupported を返すと watcher は静かに停止する", async () => {
-    process.env.ELEVENS_BACKEND = "cmux";
     const c11 = await import("./c11-features");
     c11.__resetCapabilitiesCache();
-    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
 
     let calls = 0;
     c11.__setFetchMailboxImpl(async () => {
@@ -190,22 +190,48 @@ describe("watchMailbox の error 経路で prev を破壊しない (A031 §2 fol
   });
 });
 
-describe("c11 backend での mailbox 経路", () => {
-  test("isMailboxSupported は capabilities の methods を見て判定する", async () => {
-    // テスト前に再 import したいが ESM cache の都合で困難。
-    // ここでは ELEVENS_BACKEND=c11 を起動 process に注入できないので smoke test のみ:
-    // capabilities --json が JSON を返せば parse が通る、エラーなら null になる、
-    // という最低限の動作を fake `c11` で確認する
-    if (process.env.ELEVENS_BACKEND !== "c11") {
-      // この test は ELEVENS_BACKEND=c11 で起動された場合のみ走る（CI default は cmux）
-      return;
-    }
-    await writeFakeBin(
-      "c11",
-      `if [ "$1" = "capabilities" ]; then echo '{"ok":true,"id":1,"result":{"methods":["surface.set_metadata","pane.get_metadata"]}}'; exit 0; fi`
-    );
-    const { isMailboxSupported, __resetCapabilitiesCache } = await import("./c11-features");
+describe("isMailboxSupported は capabilities methods を見る (T016)", () => {
+  test("surface.set_metadata を持つ → true", async () => {
+    const { isMailboxSupported, __setCapabilitiesForTest, __resetCapabilitiesCache } = await import("./c11-features");
     __resetCapabilitiesCache();
-    expect(await isMailboxSupported()).toBe(true);
+    __setCapabilitiesForTest({ methods: ["surface.set_metadata", "pane.get_metadata"] });
+    try {
+      expect(await isMailboxSupported()).toBe(true);
+    } finally {
+      __resetCapabilitiesCache();
+    }
+  });
+
+  test("pane.set_metadata を持つ → true (どちらかが有れば良い)", async () => {
+    const { isMailboxSupported, __setCapabilitiesForTest, __resetCapabilitiesCache } = await import("./c11-features");
+    __resetCapabilitiesCache();
+    __setCapabilitiesForTest({ methods: ["pane.set_metadata"] });
+    try {
+      expect(await isMailboxSupported()).toBe(true);
+    } finally {
+      __resetCapabilitiesCache();
+    }
+  });
+
+  test("set_metadata 系を持たない → false", async () => {
+    const { isMailboxSupported, __setCapabilitiesForTest, __resetCapabilitiesCache } = await import("./c11-features");
+    __resetCapabilitiesCache();
+    __setCapabilitiesForTest({ methods: ["surface.get_metadata"] });
+    try {
+      expect(await isMailboxSupported()).toBe(false);
+    } finally {
+      __resetCapabilitiesCache();
+    }
+  });
+
+  test("capabilities が null → false (mailbox 非対応 c11 build)", async () => {
+    const { isMailboxSupported, __setCapabilitiesForTest, __resetCapabilitiesCache } = await import("./c11-features");
+    __resetCapabilitiesCache();
+    __setCapabilitiesForTest(null);
+    try {
+      expect(await isMailboxSupported()).toBe(false);
+    } finally {
+      __resetCapabilitiesCache();
+    }
   });
 });

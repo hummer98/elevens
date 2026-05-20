@@ -141,9 +141,9 @@ PoC で問題が出たら scope を広げる（adapter の追加、subcommand �
 ### Phase 3 — cmux サポートの段階削除（〜2026-07-15）
 
 - ✅ `ELEVENS_BACKEND` の default を c11 に切替（v0.9.0、T015）
-- cmux backend を deprecated 表示
+- ✅ cmux backend サポート完全削除（v0.9.0、T016）— `ELEVENS_BACKEND` env 変数自体を撤去し、c11 が唯一の substrate に。tree 失敗 / send timeout は silent fallback せず fail-fast (3-retry → exit 1, AGENT_SPAWN_FAILED で slot cleanup)
+- ✅ README / docs を c11 native に書き換え（v0.9.0、T016）
 - cmux 固有のコード paths（done marker / PID watcher の一部 / read-screen pattern detection）を削除
-- README / docs を c11 native に書き換え
 
 ### Phase 4 — cleanup（タイミング判断）
 
