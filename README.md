@@ -80,13 +80,13 @@ elevens runs on top of a terminal multiplexer ("substrate"). Two backends are cu
 
 | Backend | How to select | Status |
 |---------|---------------|--------|
-| `c11` ([Stage-11-Agentics/c11](https://github.com/Stage-11-Agentics/c11)) | `export ELEVENS_BACKEND=c11` | **Recommended.** Becomes the default in v0.3.0 (Phase 3, see [`docs/seed.md`](docs/seed.md)). |
-| `cmux` ([manaflow-ai/cmux](https://github.com/manaflow-ai/cmux)) | unset, or `export ELEVENS_BACKEND=cmux` | Legacy compat. Default through v0.2.x; **deprecated** — daemon emits a one-shot `DEPRECATION_NOTICE` warning on start. |
+| `c11` ([Stage-11-Agentics/c11](https://github.com/Stage-11-Agentics/c11)) | default; or explicit `export ELEVENS_BACKEND=c11` | **Default since v0.9.0.** Recommended. |
+| `cmux` ([manaflow-ai/cmux](https://github.com/manaflow-ai/cmux)) | `export ELEVENS_BACKEND=cmux` (legacy opt-in) | Legacy compat. **Deprecated** — daemon emits a one-shot `DEPRECATION_NOTICE` warning on start. |
 
-The cmux backend keeps working for now but will lose default status in v0.3.0. To migrate today:
+c11 is the default since v0.9.0; no env var is required for new setups. If you previously pinned `ELEVENS_BACKEND=cmux`, unset it (or change to `c11`) to migrate:
 
 ```bash
-export ELEVENS_BACKEND=c11   # or set in your shell rc / direnv .envrc
+unset ELEVENS_BACKEND   # or: export ELEVENS_BACKEND=c11
 ```
 
 Suppress the deprecation warning (e.g. on a runbook that intentionally pins cmux):

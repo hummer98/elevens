@@ -34,12 +34,74 @@ afterEach(async () => {
 });
 
 async function writeFakeCmux(script: string): Promise<void> {
-  const path = join(testDir, "bin/cmux");
+  // T015: default backend が c11 に反転したため、fake binary 名は SUBSTRATE_BINARY の
+  // basename（env 未設定なら "c11"、ELEVENS_BACKEND=cmux なら "cmux"）に合わせる。
+  // runCmux は execFile(SUBSTRATE_BINARY, ...) で呼ぶので、この名前と一致しないと PATH 上の
+  // 実バイナリが呼ばれてしまう。
+  const basename = SUBSTRATE_BINARY.split("/").pop() ?? SUBSTRATE_BINARY;
+  const path = join(testDir, "bin", basename);
   await writeFile(path, `#!/bin/sh\n${script}\n`);
   await chmod(path, 0o755);
 }
 
-import { send, setStatus, isAlive, __setIsAliveImpl, __setTreeImpl, listSiblingSurfaces, detectBackendDecision } from "./cmux";
+import {
+  send,
+  setStatus,
+  isAlive,
+  __setIsAliveImpl,
+  __setTreeImpl,
+  listSiblingSurfaces,
+  detectBackendDecision,
+  resolveSubstrateBinary,
+  isC11Backend,
+  SUBSTRATE_BINARY,
+} from "./cmux";
+
+describe("resolveSubstrateBinary (T015)", () => {
+  test("env 空 → c11 fallback（default 反転後の新挙動）", () => {
+    expect(resolveSubstrateBinary({})).toBe("c11");
+  });
+
+  test("ELEVENS_BACKEND=cmux → cmux（legacy opt-in 維持）", () => {
+    expect(resolveSubstrateBinary({ ELEVENS_BACKEND: "cmux" })).toBe("cmux");
+  });
+
+  test("ELEVENS_BACKEND=絶対パス → そのまま透過（カスタムビルド差し替え）", () => {
+    expect(resolveSubstrateBinary({ ELEVENS_BACKEND: "/opt/c11/bin/c11" })).toBe(
+      "/opt/c11/bin/c11",
+    );
+  });
+
+  test("ELEVENS_BACKEND=whitespace → trim 後 falsy で c11 fallback", () => {
+    expect(resolveSubstrateBinary({ ELEVENS_BACKEND: "   " })).toBe("c11");
+  });
+
+  test("SUBSTRATE_BINARY は module load 時 resolveSubstrateBinary(process.env) と一致（regression 防止）", () => {
+    expect(SUBSTRATE_BINARY).toBe(resolveSubstrateBinary(process.env));
+  });
+});
+
+describe("isC11Backend (T015)", () => {
+  test("env 空 → true（c11 fallback）", () => {
+    expect(isC11Backend({})).toBe(true);
+  });
+
+  test("ELEVENS_BACKEND=cmux → false（cmux opt-in）", () => {
+    expect(isC11Backend({ ELEVENS_BACKEND: "cmux" })).toBe(false);
+  });
+
+  test("ELEVENS_BACKEND=c11 → true（明示）", () => {
+    expect(isC11Backend({ ELEVENS_BACKEND: "c11" })).toBe(true);
+  });
+
+  test("ELEVENS_BACKEND=絶対パス c11 → true（basename 判定）", () => {
+    expect(isC11Backend({ ELEVENS_BACKEND: "/opt/c11-dev/bin/c11" })).toBe(true);
+  });
+
+  test("ELEVENS_BACKEND=絶対パス cmux → false（basename 判定）", () => {
+    expect(isC11Backend({ ELEVENS_BACKEND: "/opt/cmux/bin/cmux" })).toBe(false);
+  });
+});
 
 describe("detectBackendDecision (v0.4.0+ c11 必須化)", () => {
   test("ELEVENS_BACKEND=c11 明示 → kind=explicit, backend=c11", () => {
@@ -212,13 +274,18 @@ import { maybeLogDeprecationNotice, __resetDeprecationNoticeForTest } from "./cm
 describe("maybeLogDeprecationNotice (Phase 3 prep)", () => {
   let origNoWarn: string | undefined;
   let origRoot: string | undefined;
+  let origBackend: string | undefined;
 
   beforeEach(() => {
     __resetDeprecationNoticeForTest();
     origNoWarn = process.env.ELEVENS_NO_DEPRECATION_WARN;
     origRoot = process.env.PROJECT_ROOT;
+    origBackend = process.env.ELEVENS_BACKEND;
     delete process.env.ELEVENS_NO_DEPRECATION_WARN;
     process.env.PROJECT_ROOT = testDir;
+    // T015: default 反転後は env 未設定だと c11 backend 判定になり deprecation 通知が出ない。
+    // この describe は cmux backend 想定なので明示的に cmux を注入する。
+    process.env.ELEVENS_BACKEND = "cmux";
   });
 
   afterEach(() => {
@@ -227,6 +294,8 @@ describe("maybeLogDeprecationNotice (Phase 3 prep)", () => {
     else process.env.ELEVENS_NO_DEPRECATION_WARN = origNoWarn;
     if (origRoot === undefined) delete process.env.PROJECT_ROOT;
     else process.env.PROJECT_ROOT = origRoot;
+    if (origBackend === undefined) delete process.env.ELEVENS_BACKEND;
+    else process.env.ELEVENS_BACKEND = origBackend;
   });
 
   async function readManagerLog(): Promise<string> {
@@ -239,9 +308,10 @@ describe("maybeLogDeprecationNotice (Phase 3 prep)", () => {
   }
 
   test("cmux backend では DEPRECATION_NOTICE が manager.log に 1 度だけ warn される", async () => {
-    // SUBSTRATE_BINARY は module 読み込み時に process.env.ELEVENS_BACKEND を見て確定する。
-    // テスト harness では default = cmux backend として走る前提（top-level beforeEach で
-    // ELEVENS_BACKEND を delete している）。
+    // T015: maybeLogDeprecationNotice は isC11Backend(process.env) を都度評価する。
+    // この describe の beforeEach で ELEVENS_BACKEND=cmux を注入しているため cmux backend 判定。
+    // 観察箱として「cmux backend 経路を通っている」ことを明示 assert する。
+    expect(isC11Backend(process.env)).toBe(false);
     await mkdir(join(testDir, ".team/logs"), { recursive: true });
     await maybeLogDeprecationNotice();
     let log = await readManagerLog();

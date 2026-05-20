@@ -118,7 +118,7 @@ substrate-specific な部分は最小:
 
 ### Phase 1 — substrate adapter PoC（〜2026-05-15）
 
-- `cmux.ts` adapter を env で backend 切替可能に（`ELEVENS_BACKEND=c11|cmux`、default は当面 cmux）
+- ✅ `cmux.ts` adapter を env で backend 切替可能に（`ELEVENS_BACKEND=c11|cmux`、Phase 1 時点では default cmux）
 - carta workspace 等で c11 を substrate にして:
   - `cmux-team start` 相当が動く
   - Master / Conductor / Agent spawn が動く
@@ -140,7 +140,7 @@ PoC で問題が出たら scope を広げる（adapter の追加、subcommand �
 
 ### Phase 3 — cmux サポートの段階削除（〜2026-07-15）
 
-- `ELEVENS_BACKEND` の default を c11 に切替
+- ✅ `ELEVENS_BACKEND` の default を c11 に切替（v0.9.0、T015）
 - cmux backend を deprecated 表示
 - cmux 固有のコード paths（done marker / PID watcher の一部 / read-screen pattern detection）を削除
 - README / docs を c11 native に書き換え

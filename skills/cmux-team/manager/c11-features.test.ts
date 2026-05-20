@@ -2,15 +2,17 @@
  * c11-features.ts のテスト。
  *
  * モック戦略: cmux.test.ts と同じく fake binary を `PATH` 先頭に置く方式。
- * `ELEVENS_BACKEND=c11` を beforeEach で設定し、`c11` という名前の fake script を作る。
  *
- * 注意: SUBSTRATE_BINARY は cmux.ts の module load 時に評価されるため、
- * `bun:test` の各テストファイルは独立 module コンテキストで動く前提で env を起動前に設定する。
+ * 注意: T015 以降、cmux backend 想定 test は各テスト本体で `process.env.ELEVENS_BACKEND = "cmux"`
+ * を明示注入する（env 未設定だと default が c11 になるため）。getCapabilities ガードが
+ * `isC11Backend(process.env)` を都度評価するので、この実行時注入が有効に効く。
+ * SUBSTRATE_BINARY 自体は module load 時に確定する定数なので、backend 判定は isC11Backend 経由で行う。
  */
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { writeFile, chmod, mkdir } from "fs/promises";
 import { join } from "path";
 import { createDummyProject, type DummyProject } from "./test-project";
+import { isC11Backend } from "./cmux";
 
 let project: DummyProject;
 let testDir: string;
@@ -47,13 +49,14 @@ async function writeFakeBin(name: string, script: string): Promise<void> {
 
 describe("cmux backend での opportunistic no-op", () => {
   test("setMailbox / getMailbox / clearMailbox は backend が cmux のとき何もしない", async () => {
-    // ELEVENS_BACKEND を未設定にして cmux backend にする
-    delete process.env.ELEVENS_BACKEND;
-    const mod = await import(`./c11-features?cmux-${Date.now()}.ts` as any).catch(() => null);
-    // 上記 dynamic re-import が効かない場合は静的 import を使う（SUBSTRATE_BINARY が cmux のはず）
+    // T015: cmux backend として動かす（env 未設定だと c11 default になるため明示注入）。
+    // getCapabilities ガードが isC11Backend(process.env) を都度評価するため、この注入が実行時に効く。
+    process.env.ELEVENS_BACKEND = "cmux";
     const { setMailbox, getMailbox, clearMailbox, isMailboxSupported, __resetCapabilitiesCache } =
-      mod ?? (await import("./c11-features"));
+      await import("./c11-features");
     __resetCapabilitiesCache();
+    // 観察箱: cmux backend 経路（!isC11Backend で getCapabilities が早期 null 返却）を通ることを明示
+    expect(isC11Backend(process.env)).toBe(false);
 
     // cmux backend では `c11` を呼ぼうとしないので、fake `c11` スクリプトが無くても通る
     expect(await isMailboxSupported()).toBe(false);
@@ -66,9 +69,10 @@ describe("cmux backend での opportunistic no-op", () => {
 
 describe("setMailbox の validate option (mailbox-schema integration)", () => {
   test("validate=strict で型違反 payload は throw する（書き込み前にガード）", async () => {
-    delete process.env.ELEVENS_BACKEND;
+    process.env.ELEVENS_BACKEND = "cmux";
     const { setMailbox, __resetCapabilitiesCache } = await import("./c11-features");
     __resetCapabilitiesCache();
+    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
     await expect(
       setMailbox(
         { kind: "surface", ref: "surface:1" },
@@ -79,9 +83,10 @@ describe("setMailbox の validate option (mailbox-schema integration)", () => {
   });
 
   test("validate=warn (default) で型違反 payload でも no-op exit（cmux backend）", async () => {
-    delete process.env.ELEVENS_BACKEND;
+    process.env.ELEVENS_BACKEND = "cmux";
     const { setMailbox, __resetCapabilitiesCache } = await import("./c11-features");
     __resetCapabilitiesCache();
+    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
     // throw しなければ OK
     await setMailbox(
       { kind: "surface", ref: "surface:1" },
@@ -91,9 +96,10 @@ describe("setMailbox の validate option (mailbox-schema integration)", () => {
   });
 
   test("validate=off で schema 検証を完全 skip", async () => {
-    delete process.env.ELEVENS_BACKEND;
+    process.env.ELEVENS_BACKEND = "cmux";
     const { setMailbox, __resetCapabilitiesCache } = await import("./c11-features");
     __resetCapabilitiesCache();
+    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
     // strict なら throw する payload も off では throw しない
     await setMailbox(
       { kind: "surface", ref: "surface:1" },
@@ -105,9 +111,10 @@ describe("setMailbox の validate option (mailbox-schema integration)", () => {
 
 describe("watchMailbox の error 経路で prev を破壊しない (A031 §2 follow-up)", () => {
   test("transient error tick → prev を保持、phantom removed を emit しない、復帰後に正常 diff", async () => {
-    delete process.env.ELEVENS_BACKEND;
+    process.env.ELEVENS_BACKEND = "cmux";
     const c11 = await import("./c11-features");
     c11.__resetCapabilitiesCache();
+    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
 
     type R = Awaited<ReturnType<typeof c11.getMailbox>>;
     const events: any[] = [];
@@ -156,9 +163,10 @@ describe("watchMailbox の error 経路で prev を破壊しない (A031 §2 fol
   });
 
   test("unsupported を返すと watcher は静かに停止する", async () => {
-    delete process.env.ELEVENS_BACKEND;
+    process.env.ELEVENS_BACKEND = "cmux";
     const c11 = await import("./c11-features");
     c11.__resetCapabilitiesCache();
+    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
 
     let calls = 0;
     c11.__setFetchMailboxImpl(async () => {

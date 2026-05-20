@@ -9,15 +9,26 @@ import { formatExecError } from "./exec-error";
 const execFile = promisify(execFileCb);
 
 /**
+ * Substrate binary 名（cmux 互換 multiplexer）を env から解決する pure 関数。
+ * 未設定または `ELEVENS_BACKEND=c11` で c11（default）、`ELEVENS_BACKEND=cmux` で legacy cmux。
+ * 任意の文字列も受け付ける（絶対パスやカスタムビルド差し替え用）。
+ */
+export function resolveSubstrateBinary(env: NodeJS.ProcessEnv): string {
+  return env.ELEVENS_BACKEND?.trim() || "c11";
+}
+
+/**
  * Substrate binary 名（cmux 互換 multiplexer）。
- * `ELEVENS_BACKEND=c11` で c11、`ELEVENS_BACKEND=cmux`（または未設定）で cmux。
+ * 未設定または `ELEVENS_BACKEND=c11` で c11（default）、`ELEVENS_BACKEND=cmux` で legacy cmux。
  * 任意の文字列も受け付ける（絶対パスやカスタムビルド差し替え用）。
  *
  * v0.4.0+: `cmdStart` 起動経路で **auto-detect が c11 でなかった場合は refuse** に切替。
- * ただし SUBSTRATE_BINARY 自体は module load 時に確定し続ける（既存テスト互換）。
+ * ただし SUBSTRATE_BINARY 自体は module load 時に env を 1 回読んで確定する（auto-detect とは別経路）。
+ * runtime での backend 切替は `isC11Backend(env)` の都度評価で対応する（test 時の env 注入が
+ * 効くようにするため、deprecation 通知と getCapabilities ガードがこの方式）。
  * 起動可否判定は `detectBackendDecision()` を起動経路で呼ぶ設計。
  */
-export const SUBSTRATE_BINARY: string = process.env.ELEVENS_BACKEND?.trim() || "cmux";
+export const SUBSTRATE_BINARY: string = resolveSubstrateBinary(process.env);
 
 /**
  * elevens start の起動可否判定 (v0.4.0+ で導入)。
@@ -69,9 +80,20 @@ export function detectBackendDecision(env: NodeJS.ProcessEnv = process.env): Bac
 }
 
 /**
- * Backend が c11 かどうかの判定（basename ベース）。
+ * Backend が c11 かどうかを env から都度判定する pure 関数（basename ベース）。
  * `c11` / `/path/to/c11` / `c11-dev` 等の絶対パス指定にも反応する。
- * c11-only flag（`--no-layout` 等）の付与判定に使う。
+ * test 時の env 注入が効くよう、deprecation 通知 / getCapabilities ガードはこの関数評価を使う。
+ */
+export function isC11Backend(env: NodeJS.ProcessEnv = process.env): boolean {
+  const binary = resolveSubstrateBinary(env);
+  const basename = binary.split("/").pop() ?? binary;
+  return basename === "c11";
+}
+
+/**
+ * Backend が c11 かどうかの判定（basename ベース、module-load-time 定数）。
+ * runtime で backend が変わらない参照箇所（`tree --no-layout` / `daemon_started` log）が依存する。
+ * runtime での env 切替を要する箇所は `isC11Backend(env)` の都度評価を使うこと。
  */
 const SUBSTRATE_BASENAME = SUBSTRATE_BINARY.split("/").pop() ?? SUBSTRATE_BINARY;
 export const IS_C11_BACKEND: boolean = SUBSTRATE_BASENAME === "c11";
@@ -97,14 +119,15 @@ export function __resetDeprecationNoticeForTest(): void {
 export async function maybeLogDeprecationNotice(): Promise<void> {
   if (deprecationNoticeEmitted) return;
   if (process.env.ELEVENS_NO_DEPRECATION_WARN === "1") return;
-  if (IS_C11_BACKEND) return;
+  // module-load-time 定数 IS_C11_BACKEND ではなく都度評価を使う（test 時の env 注入を効かせるため）。
+  if (isC11Backend(process.env)) return;
   // 一度フラグを立ててから log（log 失敗時の二重発火も避ける）
   deprecationNoticeEmitted = true;
   // logger を遅延 import（循環依存回避 + cmux.ts の既存 logger 依存と整合）
   const { warn } = await import("./logger");
   await warn(
     "DEPRECATION_NOTICE",
-    "cmux backend is deprecated and will become non-default in v0.3.0. Set ELEVENS_BACKEND=c11 to migrate. See docs/seed.md Phase 3.",
+    "cmux backend is deprecated and no longer the default (v0.9.0+). Unset ELEVENS_BACKEND or set ELEVENS_BACKEND=c11 to use c11. See docs/seed.md Phase 3.",
   );
 }
 

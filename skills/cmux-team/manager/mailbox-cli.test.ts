@@ -5,6 +5,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { runMailboxCli } from "./mailbox-cli";
 import { __resetCapabilitiesCache } from "./c11-features";
+import { isC11Backend } from "./cmux";
 
 class StringSink {
   data = "";
@@ -47,8 +48,9 @@ describe("help / 引数なし", () => {
 
 describe("supported (cmux backend → 1, c11 backend は smoke test 側)", () => {
   test("cmux backend では supported=no、exit 1", async () => {
-    delete process.env.ELEVENS_BACKEND;
+    process.env.ELEVENS_BACKEND = "cmux"; // T015: cmux backend 想定（default は c11）
     __resetCapabilitiesCache();
+    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
     const stdout = new StringSink();
     const stderr = new StringSink();
     const code = await runMailboxCli({ args: ["supported"], stdout: stdout as any, stderr: stderr as any });
@@ -57,8 +59,9 @@ describe("supported (cmux backend → 1, c11 backend は smoke test 側)", () =>
   });
 
   test("--json flag で JSON 出力 + exit code 据え置き (cmux backend → false / exit 1)", async () => {
-    delete process.env.ELEVENS_BACKEND;
+    process.env.ELEVENS_BACKEND = "cmux"; // T015: cmux backend 想定（default は c11）
     __resetCapabilitiesCache();
+    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
     const stdout = new StringSink();
     const stderr = new StringSink();
     const code = await runMailboxCli({
@@ -77,7 +80,8 @@ describe("supported (cmux backend → 1, c11 backend は smoke test 側)", () =>
 
 describe("引数バリデーション", () => {
   test("set --key 単独 (--value 欠落) で exit 2", async () => {
-    delete process.env.ELEVENS_BACKEND;
+    process.env.ELEVENS_BACKEND = "cmux"; // T015: cmux backend 想定（default は c11）
+    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
     const stdout = new StringSink();
     const stderr = new StringSink();
     const code = await runMailboxCli({
@@ -90,7 +94,8 @@ describe("引数バリデーション", () => {
   });
 
   test("set --json で不正 JSON は exit 2", async () => {
-    delete process.env.ELEVENS_BACKEND;
+    process.env.ELEVENS_BACKEND = "cmux"; // T015: cmux backend 想定（default は c11）
+    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
     const stdout = new StringSink();
     const stderr = new StringSink();
     const code = await runMailboxCli({
@@ -103,7 +108,8 @@ describe("引数バリデーション", () => {
   });
 
   test("clear で --key 欠落は exit 2", async () => {
-    delete process.env.ELEVENS_BACKEND;
+    process.env.ELEVENS_BACKEND = "cmux"; // T015: cmux backend 想定（default は c11）
+    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
     const stdout = new StringSink();
     const stderr = new StringSink();
     const code = await runMailboxCli({
@@ -130,8 +136,9 @@ describe("引数バリデーション", () => {
 
 describe("validate 経路 smoke (mailbox-schema integration)", () => {
   test("canonical key で型違反値があっても warn mode (default) で exit 0（書き込み続行）", async () => {
-    delete process.env.ELEVENS_BACKEND;
+    process.env.ELEVENS_BACKEND = "cmux"; // T015: cmux backend 想定（default は c11）
     __resetCapabilitiesCache();
+    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
     const stdout = new StringSink();
     const stderr = new StringSink();
     // mailbox.progress に 2.0（範囲外）を渡しても CLI は exit 0 で抜ける（warn のみ）
@@ -150,8 +157,9 @@ describe("validate 経路 smoke (mailbox-schema integration)", () => {
   });
 
   test("未知 mailbox.* key も warn mode で exit 0（書き込み続行）", async () => {
-    delete process.env.ELEVENS_BACKEND;
+    process.env.ELEVENS_BACKEND = "cmux"; // T015: cmux backend 想定（default は c11）
     __resetCapabilitiesCache();
+    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
     const stdout = new StringSink();
     const stderr = new StringSink();
     const code = await runMailboxCli({
@@ -171,8 +179,9 @@ describe("validate 経路 smoke (mailbox-schema integration)", () => {
 
 describe("cmux backend での no-op set/get/clear", () => {
   test("set/get/clear が exit 0、副作用なし", async () => {
-    delete process.env.ELEVENS_BACKEND;
+    process.env.ELEVENS_BACKEND = "cmux"; // T015: cmux backend 想定（default は c11）
     __resetCapabilitiesCache();
+    expect(isC11Backend(process.env)).toBe(false); // 観察箱: cmux backend 経路
     const stdout = new StringSink();
     const stderr = new StringSink();
     let code = await runMailboxCli({

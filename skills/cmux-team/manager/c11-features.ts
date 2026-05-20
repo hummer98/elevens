@@ -9,7 +9,7 @@
  */
 import { execFile as execFileCb } from "child_process";
 import { promisify } from "util";
-import { SUBSTRATE_BINARY, IS_C11_BACKEND } from "./cmux";
+import { SUBSTRATE_BINARY, isC11Backend } from "./cmux";
 import { validateMailboxPayload } from "./mailbox-schema";
 import { warn as logWarn } from "./logger";
 
@@ -34,7 +34,9 @@ let capsFetched = false;
  */
 export async function getCapabilities(): Promise<CapabilitiesResult | null> {
   if (capsFetched && cachedCaps) return cachedCaps;
-  if (!IS_C11_BACKEND) return null;
+  // module-load-time 定数ではなく都度評価（test 時の env 注入を効かせ、cmux backend test が
+  // 狙った「!isC11Backend で早期 return」経路を通ることを観察可能にするため）。
+  if (!isC11Backend(process.env)) return null;
   try {
     // c11 capabilities は default で JSON 出力（--json flag 不要）
     const { stdout } = await execFile(SUBSTRATE_BINARY, ["capabilities"], {

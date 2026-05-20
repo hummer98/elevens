@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Substrate backend default reversed**: `SUBSTRATE_BINARY` now falls back to `"c11"` instead of `"cmux"` when `ELEVENS_BACKEND` is unset (T015). Resolves the silent Agent spawn failure on c11.app when `ELEVENS_BACKEND` was unset and the cmux binary was missing from `PATH`.
+- Added `resolveSubstrateBinary(env)` and `isC11Backend(env)` as pure functions exported from `skills/cmux-team/manager/cmux.ts` to make backend resolution testable without module-load-time side effects.
+- Test harness の getCapabilities ガード (`c11-features.ts:37`) と deprecation 通知ガード (`cmux.ts:100`) を `isC11Backend(process.env)` 関数評価化 (Design Review T015 で確定)。これにより cmux backend 想定 test が runtime env 注入で意図通り動作する。他の `IS_C11_BACKEND` 参照 (tree `--no-layout` / `daemon_started` log) は env 切替を想定しないため module-load-time 定数のまま維持。
+- `DEPRECATION_NOTICE` message updated to reflect that c11 is now the default.
+
+### Compatibility
+
+- `ELEVENS_BACKEND=cmux` continues to opt into the legacy cmux backend with the existing deprecation warning.
+- `ELEVENS_BACKEND=/path/to/custom-c11-build` (absolute path / custom builds) is unchanged.
+
 ## [0.8.2] - 2026-05-20
 
 ### Fixed

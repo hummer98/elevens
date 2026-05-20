@@ -80,13 +80,13 @@ elevens はターミナルマルチプレクサ（"substrate"）の上で動作�
 
 | Backend | 切り替え方 | ステータス |
 |---------|----------|----------|
-| `c11` ([Stage-11-Agentics/c11](https://github.com/Stage-11-Agentics/c11)) | `export ELEVENS_BACKEND=c11` | **推奨設定。** v0.3.0 でデフォルトに昇格します（Phase 3、詳細は [`docs/seed.md`](docs/seed.md)）。 |
-| `cmux` ([manaflow-ai/cmux](https://github.com/manaflow-ai/cmux)) | 未設定 または `export ELEVENS_BACKEND=cmux` | レガシー互換。v0.2.x まではデフォルトですが**deprecated** — daemon 起動時に `DEPRECATION_NOTICE` の警告を 1 度だけ出します。 |
+| `c11` ([Stage-11-Agentics/c11](https://github.com/Stage-11-Agentics/c11)) | デフォルト。明示するなら `export ELEVENS_BACKEND=c11` | **v0.9.0 以降デフォルト。** 推奨設定。 |
+| `cmux` ([manaflow-ai/cmux](https://github.com/manaflow-ai/cmux)) | `export ELEVENS_BACKEND=cmux` で opt-in | レガシー互換。**deprecated** — daemon 起動時に `DEPRECATION_NOTICE` の警告を 1 度だけ出します。 |
 
-cmux backend は当面そのまま動作しますが、v0.3.0 でデフォルトの座を譲ります。今のうちに移行するには:
+c11 は v0.9.0 以降デフォルトのため、新規セットアップでは環境変数の設定は不要です。以前 `ELEVENS_BACKEND=cmux` を pin していた場合は、unset するか `c11` に変更してください:
 
 ```bash
-export ELEVENS_BACKEND=c11   # shell rc または direnv .envrc に書くのが楽
+unset ELEVENS_BACKEND   # または: export ELEVENS_BACKEND=c11
 ```
 
 意図的に cmux を使い続ける runbook で警告を抑止したい場合:
