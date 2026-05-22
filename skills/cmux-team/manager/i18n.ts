@@ -249,7 +249,7 @@ Examples:
 
 Notes:
   - Creates an Agent as a tab within the Conductor pane
-  - Falls back to new-split right if tab creation fails
+  - Fail-fast: if tab creation (pane lookup or new-surface) fails, posts AGENT_SPAWN_FAILED and exits 1 (no implicit fallback to new-split or focused pane)
   - AGENT_SPAWNED message is automatically sent to the queue
 `,
 
@@ -1333,7 +1333,7 @@ Examples:
 
 Notes:
   - Conductor ペイン内にタブとして Agent を作成します
-  - タブ作成に失敗した場合は new-split right にフォールバックします
+  - Fail-fast: タブ作成（pane lookup または new-surface）が失敗した場合は AGENT_SPAWN_FAILED を post して exit 1 します（new-split / focused pane への暗黙フォールバックはしません）
   - AGENT_SPAWNED メッセージが自動的にキューに送信されます
 `,
 

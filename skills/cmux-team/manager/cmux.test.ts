@@ -5,7 +5,7 @@
  * 実プロセスとして呼び出す。呼び出し回数は外部 state file (`count`) で管理する。
  */
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { writeFile, chmod, mkdir } from "fs/promises";
+import { writeFile, chmod, mkdir, readFile } from "fs/promises";
 import { join } from "path";
 import { createDummyProject, type DummyProject } from "./test-project";
 
@@ -60,6 +60,7 @@ import {
   resolveC11Binary,
   fetchLiveSurfaces,
   getPaneForSurface,
+  newSurface,
   tree,
   SUBSTRATE_BINARY,
   SEND_TIMEOUT_MS,
@@ -341,4 +342,105 @@ describe("runCmux default timeout (T016)", () => {
     expect(elapsed).toBeGreaterThanOrEqual(4_000);
     expect(elapsed).toBeLessThan(10_000);
   }, 15_000);
+});
+
+// --- T017: getPaneForSurface prefix collision regression -----------------
+
+describe("getPaneForSurface prefix collision (T017)", () => {
+  afterEach(() => {
+    __setTreeImpl(null);
+  });
+
+  test("surface:2 検索時 surface:26 を含む行に誤マッチしない (tree 出力順: surface:26 が先)", async () => {
+    // pane:1 に surface:26、pane:2 に target の surface:2 が居る
+    const fake = [
+      "workspace workspace:1",
+      "  pane pane:1",
+      "    surface:26",
+      "  pane pane:2",
+      "    surface:2",
+    ].join("\n");
+    __setTreeImpl(async () => fake);
+    expect(await getPaneForSurface("surface:2", "workspace:1")).toBe("pane:2");
+  });
+
+  test("surface:27 も同様に surface:2 とは区別される", async () => {
+    const fake = [
+      "workspace workspace:1",
+      "  pane pane:9",
+      "    surface:27",
+      "  pane pane:10",
+      "    surface:2",
+    ].join("\n");
+    __setTreeImpl(async () => fake);
+    expect(await getPaneForSurface("surface:27", "workspace:1")).toBe("pane:9");
+    expect(await getPaneForSurface("surface:2", "workspace:1")).toBe("pane:10");
+  });
+
+  test("1 行に複数 surface が同居していても完全一致のみ拾う (prefix collision は別 pane の同居行)", async () => {
+    // pane:5 (先行) の同居行に collision 源 surface:26 を置き、target surface:2 は
+    // 別 pane (pane:6) の同居行に居る配置。pre-fix の line.includes("surface:2") は
+    // pane:5 行で誤 true になり pane:5 を返す → 赤。完全一致照合では pane:6 を返す → 緑。
+    // 同居行の positive 検証として、pane:6 の同居 surface (surface:31) → pane:6 も併せて確認する。
+    const fake = [
+      "workspace workspace:1",
+      "  pane pane:5",
+      "    surface:26 surface:99",
+      "  pane pane:6",
+      "    surface:2 surface:31",
+    ].join("\n");
+    __setTreeImpl(async () => fake);
+    expect(await getPaneForSurface("surface:2", "workspace:1")).toBe("pane:6");
+    expect(await getPaneForSurface("surface:31", "workspace:1")).toBe("pane:6");
+  });
+});
+
+// --- T017: newSurface の pane 必須化 (D 層) ------------------------------
+
+describe("newSurface pane required (T017 D layer)", () => {
+  test("pane=undefined → throw（型 cast で undefined を強制した場合）", async () => {
+    await expect(newSurface(undefined as unknown as string)).rejects.toThrow(/pane is required/);
+  });
+
+  test("pane='' (空文字) → throw", async () => {
+    await expect(newSurface("")).rejects.toThrow(/pane is required/);
+  });
+
+  test("pane が 'pane:' で始まらない → throw", async () => {
+    await expect(newSurface("surface:1")).rejects.toThrow(/pane is required/);
+  });
+});
+
+// --- T017: newSurface が --workspace を c11 argv に渡す (二重防御) -----
+
+describe("newSurface forwards --workspace (T017 二重防御)", () => {
+  test("opts.workspace 指定時 c11 argv に --workspace <ws> が含まれる", async () => {
+    const argvFile = join(testDir, "argv.txt");
+    await writeFakeCmux(
+      `printf '%s\\n' "$@" > "${argvFile}"\n` +
+        `echo "ok surface:100"`,
+    );
+    const created = await newSurface("pane:7", { workspace: "workspace:42" });
+    expect(created).toBe("surface:100");
+    const argv = (await readFile(argvFile, "utf-8")).split("\n").filter(Boolean);
+    expect(argv).toContain("new-surface");
+    expect(argv).toContain("--pane");
+    expect(argv).toContain("pane:7");
+    expect(argv).toContain("--workspace");
+    expect(argv).toContain("workspace:42");
+  });
+
+  test("opts.workspace 未指定時は --workspace を含めない", async () => {
+    const argvFile = join(testDir, "argv.txt");
+    await writeFakeCmux(
+      `printf '%s\\n' "$@" > "${argvFile}"\n` +
+        `echo "ok surface:101"`,
+    );
+    const created = await newSurface("pane:7");
+    expect(created).toBe("surface:101");
+    const argv = (await readFile(argvFile, "utf-8")).split("\n").filter(Boolean);
+    expect(argv).not.toContain("--workspace");
+    expect(argv).toContain("--pane");
+    expect(argv).toContain("pane:7");
+  });
 });

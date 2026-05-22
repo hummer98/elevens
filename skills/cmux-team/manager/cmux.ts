@@ -151,9 +151,28 @@ export async function newSplit(
   return surface;
 }
 
-export async function newSurface(pane?: string): Promise<string> {
-  const args = ["new-surface"];
-  if (pane) args.push("--pane", pane);
+/**
+ * 指定 pane 上に新しい surface（タブ）を作成する。
+ *
+ * T017: pane は必須化された (`!pane.startsWith("pane:")` で throw)。
+ * かつて `pane?` optional だったが、undefined を渡すと c11 が focused pane /
+ * focused workspace に surface を作って別ペインに Agent が飛ぶ事故が発生したため
+ * fail-fast に切り替えた。caller 側で `getPaneForSurface` が undefined を返した場合は
+ * caller 自身が throw して意味付きの reason を残すこと。
+ *
+ * 二重防御: `opts.workspace` が指定されれば `--workspace <ws>` を c11 argv に追加する。
+ * c11 が `--pane` だけで意図 workspace を解決できなかった将来変更や、別 workspace の
+ * pane を誤って指定された場合の暗黙フォールバックを物理的に塞ぐ。
+ */
+export async function newSurface(
+  pane: string,
+  opts?: { workspace?: string },
+): Promise<string> {
+  if (!pane || !pane.startsWith("pane:")) {
+    throw new Error(`newSurface: pane is required (got ${JSON.stringify(pane)})`);
+  }
+  const args = ["new-surface", "--pane", pane];
+  if (opts?.workspace) args.push("--workspace", opts.workspace);
   const { stdout } = await runCmux(args);
   const surface = stdout.trim().split(/\s+/)[1];
   if (!surface?.startsWith("surface:")) {
@@ -266,10 +285,15 @@ export async function fetchLiveSurfaces(workspace?: string): Promise<Set<string>
 }
 
 /**
- * surface が属する pane を返す (T016 で fail-fast 化)。
+ * surface が属する pane を返す (T016 で fail-fast 化、T017 で完全一致照合化)。
  *
  * tree が失敗した場合は throw する（v0.9.0 以前は undefined を返して swallow していた）。
  * 「surface が見つからなかった」場合は引き続き undefined を返す（正常範囲の missing）。
+ *
+ * **照合方式**: 各行から `surface:\d+` を全抽出し、引数 `surface` と `===` で完全一致するものを探す。
+ * 部分一致 (`line.includes(surface)`) は禁止 — `surface:2` が `surface:26` を含む行に誤マッチして
+ * 間違った pane を返すバグ (T017) を防ぐため。`listSiblingSurfaces` と同じ照合パターンに揃え、
+ * 両者の判定結果が常に同期するようにしている。
  */
 export async function getPaneForSurface(surface: string, workspace?: string): Promise<string | undefined> {
   const output = await tree(workspace);
@@ -278,7 +302,9 @@ export async function getPaneForSurface(surface: string, workspace?: string): Pr
   for (const line of lines) {
     const paneMatch = line.match(/pane (pane:\d+)/);
     if (paneMatch) currentPane = paneMatch[1];
-    if (line.includes(surface) && currentPane) return currentPane;
+    const surfaceMatches = line.match(/surface:\d+/g);
+    if (!surfaceMatches || !currentPane) continue;
+    if (surfaceMatches.includes(surface)) return currentPane;
   }
   return undefined;
 }

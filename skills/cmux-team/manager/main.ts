@@ -3574,7 +3574,19 @@ async function cmdSpawnAgent(): Promise<void> {
     const callerWorkspace = await cmux.getCallerWorkspace();
     const targetPane = await cmux.getPaneForSurface(conductorSurface, callerWorkspace);
 
-    createdSurface = await cmux.newSurface(targetPane);
+    // T017: pane lookup 失敗時の暗黙フォールバック（focused pane / focused workspace に
+    //   surface を作る）を物理的に塞ぐ。意味付きの reason を投げて、既存の T016 catch
+    //   経路 (AGENT_SPAWN_FAILED post + exit 1) に乗せる。
+    if (!targetPane) {
+      throw new Error(
+        `pane lookup failed: conductor_surface=${conductorSurface} caller_workspace=${callerWorkspace ?? "(none)"} ` +
+          `(c11 tree did not return a pane containing the conductor surface; refusing to fall back to focused pane)`,
+      );
+    }
+
+    // T017 二重防御: 必ず caller workspace を明示して `c11 new-surface --workspace <ws>` を発行する。
+    //   callerWorkspace が undefined の場合は newSurface 内で --workspace を args に積まない。
+    createdSurface = await cmux.newSurface(targetPane, { workspace: callerWorkspace });
     const surface = createdSurface;
 
     // T195: newSurface 成功時点で surface は cmux 側に存在する。
