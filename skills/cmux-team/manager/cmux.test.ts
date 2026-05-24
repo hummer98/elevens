@@ -62,6 +62,7 @@ import {
   getPaneForSurface,
   newSurface,
   tree,
+  assertTabTitle,
   SUBSTRATE_BINARY,
   SEND_TIMEOUT_MS,
   TREE_TIMEOUT_MS,
@@ -442,5 +443,60 @@ describe("newSurface forwards --workspace (T017 二重防御)", () => {
     expect(argv).not.toContain("--workspace");
     expect(argv).toContain("--pane");
     expect(argv).toContain("pane:7");
+  });
+});
+
+// --- T026: assertTabTitle (counter-rename 共通ヘルパ) ---------------------
+
+describe("assertTabTitle (T026)", () => {
+  // assertTabTitle は内部で logger.log / logger.error を呼ぶので、
+  // PROJECT_ROOT を testDir に向けて manager.log ファイルを観察する。
+  let origProjectRoot: string | undefined;
+
+  beforeEach(async () => {
+    origProjectRoot = process.env.PROJECT_ROOT;
+    process.env.PROJECT_ROOT = testDir;
+    await mkdir(join(testDir, ".team/logs"), { recursive: true });
+  });
+
+  afterEach(() => {
+    if (origProjectRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origProjectRoot;
+  });
+
+  test("成功時: rename-tab を 1 回呼び、title_reassert を log する", async () => {
+    const argvFile = join(testDir, "argv.txt");
+    await writeFakeCmux(
+      `printf '%s\\n' "$@" >> "${argvFile}"\n` + `exit 0`,
+    );
+    await assertTabTitle("surface:42", "[42] Conductor", "conductor session_started");
+    const argv = (await readFile(argvFile, "utf-8")).split("\n").filter(Boolean);
+    expect(argv).toContain("rename-tab");
+    expect(argv).toContain("--surface");
+    expect(argv).toContain("surface:42");
+    expect(argv).toContain("[42] Conductor");
+    // 1 回だけ呼ばれる（rename-tab token が argv ファイル中に 1 度）
+    const renameCount = argv.filter((a) => a === "rename-tab").length;
+    expect(renameCount).toBe(1);
+    const logBody = await readFile(join(testDir, ".team/logs/manager.log"), "utf-8");
+    expect(logBody).toContain("title_reassert");
+    expect(logBody).toContain('title="[42] Conductor"');
+    expect(logBody).toContain("context=conductor session_started");
+    // success path では failed event が出ない
+    expect(logBody).not.toContain("title_reassert_failed");
+  });
+
+  test("失敗時: 例外を抑止し、title_reassert_failed を error log + contextForLog を含む", async () => {
+    await writeFakeCmux(`echo "rename failed boom" >&2\nexit 1`);
+    // throw しないこと
+    await expect(
+      assertTabTitle("surface:7", "[7] Agent", "agent session_started"),
+    ).resolves.toBeUndefined();
+    const logBody = await readFile(join(testDir, ".team/logs/manager.log"), "utf-8");
+    expect(logBody).toContain("title_reassert_failed");
+    expect(logBody).toContain("context=agent session_started");
+    expect(logBody).toContain('title="[7] Agent"');
+    // success log は出ていない
+    expect(logBody).not.toMatch(/\btitle_reassert\b(?!_failed)/);
   });
 });

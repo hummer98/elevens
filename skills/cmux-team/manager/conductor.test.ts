@@ -8,7 +8,13 @@
 import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
 import { writeFile } from "fs/promises";
 import { join } from "path";
-import { assignTask, AssignTaskError, createConductorPanes, resetConductor } from "./conductor";
+import {
+  assignTask,
+  AssignTaskError,
+  createConductorPanes,
+  initializeConductorSlots,
+  resetConductor,
+} from "./conductor";
 import type { ConductorState } from "./schema";
 import * as cmux from "./cmux";
 import * as template from "./template";
@@ -501,6 +507,116 @@ describe("createConductorPanes layout 分岐 (T176)", () => {
     expect(newSplitSpy.mock.calls[0][0]).toBe("down");
     expect(newSplitSpy.mock.calls[1][0]).toBe("right");
   });
+});
+
+// --- T026 / T4: initializeConductorSlots reserved 分岐の遅延 re-rename ---
+// reserved Conductor pane では claude 未起動 → SESSION_STARTED が来ないため、
+// W-A (c11 default title setter ~570ms) に上書きされる前提で「reservedRenameDelayMs 後に
+// 後着で `[N] Conductor` を再 assert する」遅延 re-rename を入れる。
+// 実時刻依存（bun:test に fake timer 無し）。テスト時間短縮のため config で delay=200ms に絞る。
+describe("initializeConductorSlots reserved delay re-rename (T026/T4)", () => {
+  test("reserved 分岐: 即時 rename + delayMs 以降の遅延 rename が各 pane で発火", async () => {
+    // config で delay を短くしてテスト時間を圧縮（実機 default は 800ms）
+    await writeFile(
+      join(testDir, ".team/config.json"),
+      JSON.stringify({ cmux: { reservedRenameDelayMs: 200 } }),
+    );
+
+    // newSplit: 2 pane を生成（layout=16x9, count=2）
+    let surfaceCounter = 700;
+    const newSplitSpy = spyOn(cmux, "newSplit").mockImplementation(
+      async (_dir: any, _opts?: any) => `surface:${++surfaceCounter}`,
+    );
+
+    // assertTabTitle: 呼び出しを timestamp 付きで記録
+    type Call = { surface: string; title: string; context: string; t: number };
+    const calls: Call[] = [];
+    const start = Date.now();
+    const assertSpy = spyOn(cmux, "assertTabTitle").mockImplementation(
+      async (surface: string, title: string, context: string) => {
+        calls.push({ surface, title, context, t: Date.now() - start });
+      },
+    );
+
+    try {
+      const conductors = new Map<string, ConductorState>();
+      await initializeConductorSlots(
+        testDir,
+        conductors,
+        2,
+        "surface:1",
+        undefined,
+        "16x9",
+        "main",
+      );
+
+      // 各 reserved pane について 2 回ずつ呼ばれる: 即時 (conductor reserved) + 遅延 (conductor reserved delayed)
+      const immediate = calls.filter((c) => c.context === "conductor reserved");
+      const delayed = calls.filter((c) => c.context === "conductor reserved delayed");
+      expect(immediate.length).toBe(2);
+      expect(delayed.length).toBe(2);
+
+      // 即時呼び出しは delay より十分早く (< 100ms)、遅延呼び出しは delayMs 以降
+      // ※ Promise.all で並列化されているため、N pane でも合計遅延 ~delayMs に収束する
+      for (const c of immediate) {
+        expect(c.t).toBeLessThan(150);
+        expect(c.title).toMatch(/^\[\d+\] Conductor$/);
+      }
+      for (const c of delayed) {
+        expect(c.t).toBeGreaterThanOrEqual(200);
+        expect(c.title).toMatch(/^\[\d+\] Conductor$/);
+      }
+
+      // 全 pane が reserved 状態で state に登録されていること
+      expect(conductors.size).toBe(2);
+      for (const c of conductors.values()) {
+        expect(c.status).toBe("reserved");
+      }
+    } finally {
+      newSplitSpy.mockRestore();
+      assertSpy.mockRestore();
+    }
+  }, 15000);
+
+  test("reserved 並列化: pane 数が増えても合計遅延は delayMs 1 回分に収束する (Rec #2)", async () => {
+    // config で delay を 200ms に絞る
+    await writeFile(
+      join(testDir, ".team/config.json"),
+      JSON.stringify({ cmux: { reservedRenameDelayMs: 200 } }),
+    );
+
+    let surfaceCounter = 800;
+    const newSplitSpy = spyOn(cmux, "newSplit").mockImplementation(
+      async (_dir: any, _opts?: any) => `surface:${++surfaceCounter}`,
+    );
+    const assertSpy = spyOn(cmux, "assertTabTitle").mockImplementation(
+      async () => {},
+    );
+
+    try {
+      const conductors = new Map<string, ConductorState>();
+      const t0 = Date.now();
+      // layout=16x9 は最大 2 pane に clamp される (R1 ガード) ので count=2 を使う
+      await initializeConductorSlots(
+        testDir,
+        conductors,
+        2,
+        "surface:1",
+        undefined,
+        "16x9",
+        "main",
+      );
+      const elapsed = Date.now() - t0;
+      // serial だと N*200ms。並列化されていれば 200ms + α (newSplit / log 等) で済む。
+      // 余裕を持って 700ms 以下に収まることを assert（CI ノイズも吸収）
+      expect(elapsed).toBeLessThan(700);
+      // 最低限 delay が走った証拠として 200ms 以上は要する
+      expect(elapsed).toBeGreaterThanOrEqual(200);
+    } finally {
+      newSplitSpy.mockRestore();
+      assertSpy.mockRestore();
+    }
+  }, 15000);
 });
 
 // --- T250: resetConductor opts テスト ---

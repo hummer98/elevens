@@ -3297,6 +3297,7 @@ async function cmdSpawnConductor(): Promise<void> {
   // cmux identify fallback 経路でも statusline.sh / hook が CMUX_SURFACE を
   // 取得できるよう defensive に明示設定する。
   process.env.CMUX_SURFACE = surface;
+  // T026: using-cmux plugin v1.8.0+ の SessionStart hook（plugin.json 内で参照）を抑止する env gate。dead flag ではない、削除不可。
   process.env.CMUX_NO_RENAME_TAB = "1";
   process.env.CMUX_CLAUDE_HOOKS_DISABLED = "1";
   const proxyPort = await resolveProxyPort();
@@ -3385,6 +3386,7 @@ async function cmdLaunchMaster(): Promise<void> {
   // 環境変数を設定
   process.env.PROJECT_ROOT = PROJECT_ROOT;
   process.env.CMUX_SURFACE = surface;
+  // T026: using-cmux plugin v1.8.0+ の SessionStart hook（plugin.json 内で参照）を抑止する env gate。dead flag ではない、削除不可。
   process.env.CMUX_NO_RENAME_TAB = "1";
   process.env.CMUX_CLAUDE_HOOKS_DISABLED = "1";
   const proxyPort = await resolveProxyPort();
@@ -3651,6 +3653,7 @@ async function cmdSpawnAgent(): Promise<void> {
       `ROLE=${role}`,
       `PROJECT_ROOT=${PROJECT_ROOT}`,
       `CMUX_SURFACE=${surface}`,
+      // T026: using-cmux plugin v1.8.0+ の SessionStart hook（plugin.json 内で参照）を抑止する env gate。dead flag ではない、削除不可。
       `CMUX_NO_RENAME_TAB=1`,
       `CMUX_CLAUDE_HOOKS_DISABLED=1`,
       `CMUX_TEAM_SKIP_SYNC_CHECK=1`,
@@ -3811,8 +3814,13 @@ async function cmdSpawnAgent(): Promise<void> {
     await cmux.send(surface, claudeCmd + "\n");
 
     // --- 4. タブ名設定 ---
+    // T026: assertTabTitle 経由に統一して title_reassert ログを残す（DRY）。
+    //   本質的な W-A (c11 default title setter ~570ms) 防御は daemon.ts の
+    //   Agent SESSION_STARTED 分岐の counter-rename が担う。この呼び出しは
+    //   claude 起動 send 直後の初回 rename にすぎず、cmdSpawnAgent で
+    //   `CMUX_NO_RENAME_TAB=1` を立てているため W-B (using-cmux hook) は発火しない。
     const num = surface.replace("surface:", "");
-    await cmux.renameTab(surface, `[${num}] Agent`);
+    await cmux.assertTabTitle(surface, `[${num}] Agent`, "agent spawn");
 
     // タスク-セッション索引に記録
     try {
@@ -5607,7 +5615,14 @@ async function cmdRestartTask(): Promise<void> {
   });
 
   // 6. Conductor を再起動（session-id は cmdSpawnConductor が自己生成して daemon に通知する）
-  await cmux.send(conductor.surface, `export CMUX_SURFACE=${conductor.surface} CMUX_CLAUDE_HOOKS_DISABLED=1\n`);
+  //    T026: CMUX_NO_RENAME_TAB=1 は using-cmux plugin v1.8.0+ の SessionStart hook
+  //    （`[N] Claude Code` に rename する W-B）を抑止する env gate。findings §6 で
+  //    指摘された通り、restart 経路ではこれが欠落していた。spawn-conductor (L3300)
+  //    / launch-master (L3388) / spawn-agent (L3654) と整合させる。
+  await cmux.send(
+    conductor.surface,
+    `export CMUX_SURFACE=${conductor.surface} CMUX_CLAUDE_HOOKS_DISABLED=1 CMUX_NO_RENAME_TAB=1\n`,
+  );
   await sleep(500);
   await cmux.send(conductor.surface, buildLaunchCommand(PROJECT_ROOT, "elevens spawn-conductor") + "\n");
 

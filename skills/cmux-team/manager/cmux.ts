@@ -7,7 +7,7 @@
  */
 import { execFile as execFileCb } from "child_process";
 import { promisify } from "util";
-import { log, formatSurface } from "./logger";
+import { log, error as logError, formatSurface } from "./logger";
 import { formatExecError } from "./exec-error";
 
 const execFile = promisify(execFileCb);
@@ -228,6 +228,39 @@ export async function renameTab(
   await runCmux(["rename-tab", "--surface", surface, title]).catch(
     () => {}
   );
+}
+
+/**
+ * surface のタブタイトルを assert する（T026: counter-rename 共通化）。
+ *
+ * `renameTab` の薄いラッパ相当で、以下の責務を持つ:
+ * - 成功時に `title_reassert` イベントを 1 行 log に出す（observatory 原則 — `grep title_reassert` で
+ *   W-A (c11 default title setter) や W-B (using-cmux SessionStart hook) の上書き発火頻度を pull 観測する）
+ * - 失敗時は `title_reassert_failed` event で stderr/stdout 含めた error log を残し、例外は外に投げない
+ *   （Master / Conductor / Agent の SESSION_STARTED 経路で title 修正が失敗してもメイン制御を止めない）
+ * - `contextForLog` は呼び出し位置の識別子（例: `"conductor session_started"`）。log の trace で
+ *   どの経路から再 assert したかを後追いできるようにする
+ *
+ * 単発・冪等。watcher / poll / retry loop を持たない。caller が外部イベント
+ * （SESSION_STARTED hook など）に乗って 1 回呼ぶ前提。
+ */
+export async function assertTabTitle(
+  surface: string,
+  title: string,
+  contextForLog: string,
+): Promise<void> {
+  try {
+    await runCmux(["rename-tab", "--surface", surface, title]);
+    await log(
+      "title_reassert",
+      `${formatSurface(surface, "S")} title="${title}" context=${contextForLog}`,
+    );
+  } catch (e: any) {
+    await logError(
+      "title_reassert_failed",
+      `${formatSurface(surface, "S")} title="${title}" context=${contextForLog} ${formatExecError(e)}`,
+    );
+  }
 }
 
 export async function renameWorkspace(title: string, workspace?: string): Promise<void> {

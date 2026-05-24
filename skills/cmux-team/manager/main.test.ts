@@ -3820,3 +3820,37 @@ describe("formatDaemonStartedDetail (backend visualization)", () => {
     expect(detail).toContain("sleep_prevention=true");
   });
 });
+
+// --- T026 / T5: restart 経路の env 文字列に CMUX_NO_RENAME_TAB=1 が含まれる -----
+//
+// `cmdRestartTask` は CLI コマンドとして起動するため、process.exit と外部 cmux send を
+// 含む integration 経路。subprocess を起こさずに send 文字列を捕捉するのは難しいので、
+// 「main.ts ソース上の restart 経路 region に env 文字列が正しく書かれているか」を
+// static に assert する（regression 検出が主目的）。
+//
+// findings §6 で指摘された通り、過去にこの export 行から `CMUX_NO_RENAME_TAB=1` が
+// 欠落していた（using-cmux plugin v1.8.0+ の SessionStart hook gate が外れていた）。
+// 本テストは同じ欠落の再発を防ぐ。
+
+describe("cmdRestartTask env export (T026/T5)", () => {
+  test("restart 経路の cmux.send には CMUX_NO_RENAME_TAB=1 / CMUX_CLAUDE_HOOKS_DISABLED=1 / CMUX_SURFACE が含まれる", async () => {
+    const mainTsPath = join(import.meta.dir, "main.ts");
+    const source = await readFile(mainTsPath, "utf-8");
+
+    // restart 経路の export 行は cmdRestartTask 内の "// 6. Conductor を再起動" コメント直後にある。
+    // section を切り出して、その範囲内で env が揃っていることを確認。
+    const marker = "// 6. Conductor を再起動";
+    const idx = source.indexOf(marker);
+    expect(idx).toBeGreaterThan(0);
+    // marker から spawn-conductor 呼び出しまでの範囲（~30 行程度）を section として切り出す
+    const section = source.slice(idx, idx + 1500);
+
+    expect(section).toContain("cmux.send(");
+    expect(section).toContain("export CMUX_SURFACE=");
+    expect(section).toContain("CMUX_CLAUDE_HOOKS_DISABLED=1");
+    // 本 PR の本命: restart 経路の export に CMUX_NO_RENAME_TAB=1 が含まれること
+    expect(section).toContain("CMUX_NO_RENAME_TAB=1");
+    // spawn-conductor の起動が後続する（exported env が活きる経路の整合）
+    expect(section).toContain("spawn-conductor");
+  });
+});

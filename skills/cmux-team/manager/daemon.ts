@@ -2108,16 +2108,13 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
             `persistMasterFile failed (session_started): ${e?.message ?? e}`
           );
         }
-        // using-cmux plugin の SessionStart hook が "[N] Claude Code" に rename
-        // するため、Master では hook 発火後に "[N] Master" で上書きする（A016）。
-        try {
+        // using-cmux plugin の SessionStart hook と c11 default title setter (W-A) が
+        // "[N] Claude Code" に rename するため、Master では hook 発火後に "[N] Master"
+        // で上書きする（A016 / T026）。共通ヘルパ `assertTabTitle` 経由（cmux.ts）で
+        // title_reassert ログを出して observatory で頻度を pull 観測する。
+        {
           const num = message.surface.replace("surface:", "");
-          await cmux.renameTab(message.surface, `[${num}] Master`);
-        } catch (e: any) {
-          await log(
-            "error",
-            `renameTab failed (master session_started): ${e?.message ?? e}`
-          );
+          await cmux.assertTabTitle(message.surface, `[${num}] Master`, "master session_started");
         }
         await log("master_session_started", `${formatSurface(message.surface, "U")} pid=${message.pid}`);
         break;
@@ -2225,6 +2222,14 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
         //   `spawnConductorMailboxWatcher` の再呼び出し冪等性（旧 stop → 新 start）を活用する。
         void spawnConductorMailboxWatcher(state, conductor);
 
+        // T026: c11 default title setter (W-A, ~570ms 後) / using-cmux SessionStart hook (W-B)
+        // が "[N] Claude Code" に上書きする問題を、Master と同じ「SESSION_STARTED hook 駆動の
+        // counter-rename」で防ぐ。broken 早期 break (L2131) では呼ばれない。
+        {
+          const num = message.surface.replace("surface:", "");
+          await cmux.assertTabTitle(message.surface, `[${num}] Conductor`, "conductor session_started");
+        }
+
         // T203 C3 / T303: updateTaskSessionId に D5 3 段 guard を集約。
         // hook 配布物は taskRunId を知らないが、daemon 内部の突合で mismatch を検出する。
         if (
@@ -2311,6 +2316,13 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
           agent.lastApiError = undefined;
           spawnAgentPidWatcher(state, c, agent, message.pid);
           notifyStateChanged("daemon.ts:handleMessage:session-started-agent");
+          // T026: Agent も `generateAgentSettings` の SessionStart hook 経由で daemon に
+          // SESSION_STARTED を POST する（main.ts:2932 付近、Master/Conductor と同 pattern）。
+          // ここで counter-rename を入れて W-A (c11 default ~570ms) / W-B を後着で上書き。
+          {
+            const num = message.surface.replace("surface:", "");
+            await cmux.assertTabTitle(message.surface, `[${num}] Agent`, "agent session_started");
+          }
           await log(
             "session_started",
             `${formatPair(c.surface, message.surface, "C", "A")} pid=${message.pid} session_id=${message.sessionId ?? "-"} source=${message.source ?? "-"}`

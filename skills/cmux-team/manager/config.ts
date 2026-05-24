@@ -109,6 +109,44 @@ export interface TeamConfig {
    * - `stderrRotateGenerations`: stderr.log の rotate 世代数。default 1、clamp [1, 5]
    */
   postMortem?: PostMortemConfig;
+  /**
+   * cmux / c11 backend 周りの調整 override（T026）。全フィールド optional。
+   *
+   * - `reservedRenameDelayMs`: reserved Conductor pane の delay re-rename 遅延（ms）。
+   *   c11 default title setter (W-A) が surface 作成 +~570ms で `[N] Claude Code` を
+   *   書き戻す問題を、後着で `[N] Conductor` に上書きするための待ち時間。
+   *   default 800ms (570ms + マージン 230ms)。clamp [0, 60_000]。
+   *   実機の W-A timing が将来 c11 update で変わったとき、再ビルド無しに延長可能にする。
+   */
+  cmux?: CmuxConfig;
+}
+
+/**
+ * cmux / c11 backend 周りの設定（T026）。詳細は docs/spec 該当箇所（未作成）または
+ * conductor.ts の reserved 分岐コメントを参照。
+ */
+export interface CmuxConfig {
+  reservedRenameDelayMs?: number;
+}
+
+/**
+ * `cmux.reservedRenameDelayMs` を解決する（T026）。
+ *
+ * - 数値以外 / 非有限 → default(800)
+ * - 範囲外（< 0 / > 60_000）→ default(800)
+ * - 範囲内 → そのまま返す
+ *
+ * 範囲は「0 = delay 無し（テスト時短縮用）」から「60s（reserved init を 1 分以上待たせる
+ * 設定は明らかに事故）」まで。実機既定 800ms はマージン込み（findings 実測 570ms +230ms）。
+ */
+export function resolveReservedRenameDelayMs(config: Pick<TeamConfig, "cmux">): number {
+  const DEFAULT_MS = 800;
+  const MIN_MS = 0;
+  const MAX_MS = 60_000;
+  const raw = config.cmux?.reservedRenameDelayMs;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return DEFAULT_MS;
+  if (raw < MIN_MS || raw > MAX_MS) return DEFAULT_MS;
+  return raw;
 }
 
 /**

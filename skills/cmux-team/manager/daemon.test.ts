@@ -1062,6 +1062,133 @@ describe("Agent SESSION_STARTED (T195)", () => {
       updated.pidWatcherInterval = undefined;
     }
   });
+
+  // --- T026: Agent SESSION_STARTED counter-rename (T3) -----------------------
+  // daemon.ts は Agent SESSION_STARTED 分岐で cmux.assertTabTitle を直接呼ぶ。
+  // W-A (c11 default title setter ~570ms) / W-B (using-cmux SessionStart hook) が
+  // `[N] Claude Code` に上書きする問題を、SESSION_STARTED hook 駆動の counter-rename で
+  // 後着 assert する。renameTab ではなく assertTabTitle 経由なので spy 対象も assertTabTitle。
+  test("T026/T3: Agent SESSION_STARTED で assertTabTitle が ([N] Agent, \"agent session_started\") で 1 回呼ばれる", async () => {
+    const cmuxMod = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const assertSpy = spyOn(cmuxMod, "assertTabTitle").mockImplementation(async () => {});
+    try {
+      const state = await createDaemon(testDir);
+      const agent = {
+        surface: "surface:719",
+        spawnedAt: new Date().toISOString(),
+        status: "starting" as const,
+      };
+      const conductor: ConductorState = {
+        surface: "surface:665",
+        startedAt: new Date().toISOString(),
+        agents: [agent],
+        status: "running",
+      };
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "SESSION_STARTED",
+        surface: "surface:719",
+        pid: 81000,
+        timestamp: new Date().toISOString(),
+      });
+
+      // 1 回だけ呼ばれる（Agent 分岐の単発 assert）
+      expect(assertSpy).toHaveBeenCalledTimes(1);
+      const call = assertSpy.mock.calls[0]!;
+      expect(call[0]).toBe("surface:719");
+      expect(call[1]).toBe("[719] Agent");
+      expect(call[2]).toBe("agent session_started");
+
+      // pidWatcher クリーンアップ
+      const updated = conductor.agents.find(a => a.surface === "surface:719");
+      if (updated?.pidWatcherInterval) {
+        clearInterval(updated.pidWatcherInterval);
+        updated.pidWatcherInterval = undefined;
+      }
+    } finally {
+      assertSpy.mockRestore();
+    }
+  });
+});
+
+// --- T026: Conductor SESSION_STARTED counter-rename (T2) ---------------------
+// reserved / disconnected / assigning などの「broken でない」全分岐で
+// cmux.assertTabTitle が `[N] Conductor` / "conductor session_started" で呼ばれる。
+// broken 状態は早期 break (daemon.ts:2128-2131) なので呼ばれない。
+describe("Conductor SESSION_STARTED counter-rename (T026/T2)", () => {
+  async function runWithSpy(
+    initialStatus: "reserved" | "disconnected" | "assigning" | "broken",
+    surface: string,
+  ): Promise<{ callsCount: number; firstCall?: any[] }> {
+    const cmuxMod = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const assertSpy = spyOn(cmuxMod, "assertTabTitle").mockImplementation(async () => {});
+    try {
+      const state = await createDaemon(testDir);
+      const conductor: ConductorState = {
+        surface,
+        startedAt: new Date().toISOString(),
+        agents: [],
+        status: initialStatus,
+      };
+      // disconnected / assigning は disconnectedAt や taskRunId 等が要るが、
+      // 本テストは title 経路の発火可否のみ検証するため最小 state で十分。
+      if (initialStatus === "disconnected") {
+        conductor.disconnectedAt = new Date().toISOString();
+      }
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "SESSION_STARTED",
+        surface,
+        pid: 91000,
+        sessionId: "uuid-counter-rename",
+        source: "startup",
+        timestamp: new Date().toISOString(),
+      });
+
+      const callsCount = assertSpy.mock.calls.length;
+      const firstCall = assertSpy.mock.calls[0];
+
+      // pidWatcher クリーンアップ
+      if (conductor.pidWatcherInterval) {
+        clearInterval(conductor.pidWatcherInterval);
+        conductor.pidWatcherInterval = undefined;
+      }
+      return { callsCount, firstCall };
+    } finally {
+      assertSpy.mockRestore();
+    }
+  }
+
+  test("reserved → assertTabTitle が ([N] Conductor, \"conductor session_started\") で 1 回呼ばれる", async () => {
+    const r = await runWithSpy("reserved", "surface:601");
+    expect(r.callsCount).toBe(1);
+    expect(r.firstCall?.[0]).toBe("surface:601");
+    expect(r.firstCall?.[1]).toBe("[601] Conductor");
+    expect(r.firstCall?.[2]).toBe("conductor session_started");
+  });
+
+  test("disconnected → assertTabTitle が 1 回呼ばれる", async () => {
+    const r = await runWithSpy("disconnected", "surface:602");
+    expect(r.callsCount).toBe(1);
+    expect(r.firstCall?.[1]).toBe("[602] Conductor");
+    expect(r.firstCall?.[2]).toBe("conductor session_started");
+  });
+
+  test("assigning → assertTabTitle が 1 回呼ばれる", async () => {
+    const r = await runWithSpy("assigning", "surface:603");
+    expect(r.callsCount).toBe(1);
+    expect(r.firstCall?.[1]).toBe("[603] Conductor");
+    expect(r.firstCall?.[2]).toBe("conductor session_started");
+  });
+
+  test("broken → 早期 break で assertTabTitle は呼ばれない", async () => {
+    const r = await runWithSpy("broken", "surface:604");
+    expect(r.callsCount).toBe(0);
+  });
 });
 
 describe("SESSION_STARTED で sessionId 更新 (T203)", () => {

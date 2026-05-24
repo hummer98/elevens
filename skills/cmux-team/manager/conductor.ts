@@ -14,7 +14,7 @@ import { notifyStateChanged } from "./eventBus";
 import { formatExecError } from "./exec-error";
 import { initDB, insertTaskSession } from "./trace-store";
 import { resolveWorktreeBase } from "./worktree-base";
-import { resolveFetchBeforeWorktree } from "./config";
+import { resolveFetchBeforeWorktree, loadConfig, resolveReservedRenameDelayMs } from "./config";
 import type { ConductorState, LayoutMode } from "./schema";
 import { ClaudeCodeBackend } from "./claude-code-backend";
 import { shellQuote, buildLaunchCommand } from "./util";
@@ -299,6 +299,11 @@ export async function initializeConductorSlots(
     // T421: 非 resume 経路は reserved entry を pre-set する（claude 未起動を表現）。
     //       初回 assignTask の kill+spawn で spawn-conductor が起動 →
     //       CONDUCTOR_REGISTERED で sessionId merge → SESSION_STARTED で running 遷移する。
+    // T026 (Rec #2/#8): reserved 分岐の delay re-rename を Promise.all で並列化する。
+    //   serial に sleep を入れると N*delayMs 遅延になるため、各 pane の delay は独立に走らせ
+    //   ループ後の Promise.all で一括 await する。pane 数によらず合計遅延は delayMs 1 回分に収束。
+    const reservedDelayMs = resolveReservedRenameDelayMs(await loadConfig(projectRoot));
+    const reservedDelayedRenames: Promise<void>[] = [];
     for (const [i, surface] of panes.entries()) {
       const resumeItem = resumePlan?.[i];
       if (resumeItem && !conductors.has(surface)) {
@@ -327,16 +332,26 @@ export async function initializeConductorSlots(
         // タブ名を `[N] Conductor` に設定（claude 未起動でも UI 上は Conductor として見せる）。
         // 初回 assign 時に kill+spawn → cmdSpawnConductor が `CMUX_NO_RENAME_TAB=1` を立てるので
         // ここで設定したタブ名は維持される。
-        try {
-          const num = surface.replace("surface:", "");
-          await cmux.renameTab(surface, `[${num}] Conductor`);
-        } catch (e: any) {
-          await log(
-            "error",
-            `renameTab failed (reserved): ${formatSurface(surface, "C")} ${e?.message ?? e}`,
-          );
-        }
+        // T026: 即時 rename は W-A (c11 default title setter ~570ms 後) に上書きされる可能性が
+        //       高いため、`reservedDelayMs` 後に再度 assert する遅延 re-rename を予約する。
+        //       初回 rename / 遅延 re-rename とも assertTabTitle 経由で title_reassert ログを残す。
+        const num = surface.replace("surface:", "");
+        await cmux.assertTabTitle(surface, `[${num}] Conductor`, "conductor reserved");
+        reservedDelayedRenames.push(
+          (async () => {
+            await sleep(reservedDelayMs);
+            await cmux.assertTabTitle(
+              surface,
+              `[${num}] Conductor`,
+              "conductor reserved delayed",
+            );
+          })(),
+        );
       }
+    }
+    // T026: 並列化した delay re-rename をまとめて await（Rec #2）。pane 数 N に対し合計 delayMs 1 回分。
+    if (reservedDelayedRenames.length > 0) {
+      await Promise.all(reservedDelayedRenames);
     }
 
     await log("conductor_slots_initialized", `count=${panes.length}`);
