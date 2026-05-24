@@ -181,6 +181,18 @@ SessionStart hook (source=startup) → SESSION_STARTED
 - Master (`cmdLaunchMaster`) は **scope 外**（`task_sessions` に Master 起動行が無いため、pre-inject の効用が集計に効かない）
 - `cmdResume` には `--session-id` を**渡さない**（`--resume` 経路は既存 session を復元するため）
 
+### 1.8 タブ名固定の counter-rename (T026)
+
+c11 substrate の default title setter（W-A: c11 binary 由来、常時発火、env で無効化不可、`source=explicit`）が surface 作成 +~570ms で `[N] Claude Code` を書き戻し、Conductor / Agent の固定タブ名（`[N] Conductor` / `[N] <role>`）を上書きする。両者 `explicit` のため OSC 抑止（`CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1`）では勝てない。
+
+そこで last-write-wins の競争に持ち込まず、**決定論的イベント起点で後着上書きする**。`SESSION_STARTED` hook の到達を起点に Master / Conductor / Agent / restart / reserved の各経路で固定名を re-rename する（`broken` 早期 break では非発火）。
+
+- **`assertTabTitle` ヘルパ** (`cmux.ts`): 成功時に `title_reassert`、失敗時に `title_reassert_failed` を `manager.log` に記録する（observatory で上書き頻度を pull 観測できる）。例外は握り潰して main 制御を止めない。
+- **reserved Conductor pane** は遅延 re-rename で W-A を後着上書きする。待ち時間は `cmux.reservedRenameDelayMs`（default 800ms = 実測 570ms + マージン）で config 化されている（[`05-install-and-infrastructure.md`](05-install-and-infrastructure.md) の config 節参照）。N pane でも `Promise.all` で並列化し合計遅延を一定に保つ。
+- restart 経路には `CMUX_NO_RENAME_TAB=1` を渡す（欠落を T026 で補填）。
+
+> スコープ注記: タスク名による recap 上書き（動的書き換え）は本対応の範囲外で、`title_reassert` ログ + c11 `get-metadata` による継続観察に委ねる。
+
 ## 2. Task FSM
 
 ### 2.1 状態一覧 (6 値)

@@ -1,6 +1,19 @@
 # Changelog
 
-## [Unreleased]
+## [0.9.0] - 2026-05-24
+
+### Fixed
+
+- **spawn-agent の pane lookup を完全一致化** (T017): surface 解決時に `line.includes(surface)` で部分一致していたため、`surface:7` の検索が `surface:73` 等にも誤マッチし、Agent spawn 時に意図しない pane へ split を送る不具合があった。`getPaneForSurface` を exact `===` 比較に修正し、該当 pane が無い場合は undefined pane を fail-fast させる。これにより spawn-agent が無関係なペインを 3 分割する事象を構造的に解消
+- **surface タブ固定名を SESSION_STARTED counter-rename で死守** (T026): Master / Conductor / Agent の各 pane に付けた固定タブ名が、c11 既定の title setter（`source=explicit`）に上書きされて消える事象を修正。SESSION_STARTED 受信時に `assertTabTitle` で counter-rename を行い、reserved-branch では遅延再 rename（`cmux.reservedRenameDelayMs`、既定 800ms）を入れて確実に固定名を維持する
+
+### Added
+
+- **spawn-agent の pane 解決・surface 生成を決定論的にログ記録** (T024): `cmdSpawnAgent` に `spawn_agent_pane_resolved` / `spawn_agent_surface_created` の決定論的ログを追加し、spawn 経路の観察可能性を向上。stale install 由来の split 事象などを retrospective に追跡できるようにした（observatory 原則）
+
+### Changed
+
+- **team-task の新規作成手順を現行 create-task CLI に整合** (T020): ドキュメント上の旧手順を `elevens create-task` ベースに更新
 
 ### Breaking changes (v0.9.0, T016)
 

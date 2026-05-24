@@ -208,6 +208,13 @@ dashboard ヘッダー右端に `5h: X% ████░░░░░░` / `7d: Y
 
 `cmux tree` はデフォルトで全ワークスペースの surface を返すため、複数ワークスペースで cmux-team を同時起動している場合は別ワークスペースの surface ID と混同する原因になる。daemon は起動時に呼び出し元の workspace を `state.workspace` に記録し、pane 逆引き・surface 作成には常に `--workspace` を付けて問い合わせる（T195 以降 surface 検証は PID ベースに移行したため、`cmux tree` は init 時の pane 逆引きにのみ使用）。
 
+**spawn-agent の pane 解決と fail-fast (T017 / T024):**
+
+`cmdSpawnAgent` は `getPaneForSurface(conductorSurface)` で Conductor pane を解決し、その pane 内に `newSurface` で Agent タブを生やす。
+
+- **完全一致照合 (T017)**: `getPaneForSurface` は `surface:N` を `\d+` 単位の**完全一致**で照合する。旧実装の `line.includes(surface)` は `surface:2` が `surface:26` 等を含む行へ prefix 衝突で誤マッチし、Agent を別 pane / split / 別 workspace に起動するバグがあった。`newSurface` は pane 必須化され（`pane:` 始まりでない / 空なら throw）、`--workspace` 明示渡しで focused workspace への暗黙フォールバックを物理的に封鎖する。pane が解決できなければ `newSurface(undefined)` に到達せず throw し、上位 catch が `AGENT_SPAWN_FAILED` を daemon に POST して exit 1（silent fallback なし）。
+- **決定論的ログ (T024)**: pane 解決過程の観察盲点を塞ぐため、`getPaneForSurface` 直後に `spawn_agent_pane_resolved`（解決失敗時も `target_pane=(none)` を残してから throw）、`newSurface` 成功後に `spawn_agent_surface_created` を `manager.log` に記録する。throw 時は catch 側の `spawn_agent_failed` が `surface=(none)` で残り、daemon の `agent_spawned` と pair で「CLI 決定 → daemon 受信」の往復を再構成できる（observatory 原則: silent state mutation を作らない / observer が pull で観測できる）。
+
 **基本操作コマンド:**
 
 | コマンド | 用途 |

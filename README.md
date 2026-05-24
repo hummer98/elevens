@@ -5,7 +5,7 @@
 
 c11-native multi-agent orchestration package — successor to [cmux-team](https://github.com/hummer98/cmux-team).
 
-> **Status — early access (v0.1.0).** elevens is the successor to cmux-team, migrating from manaflow-ai/cmux to [Stage 11 Agentics' c11](https://github.com/Stage-11-Agentics/c11) as the substrate. This release is a renamed snapshot of cmux-team v4.28.x; **the c11 backend adapter is not yet wired** — see [`docs/seed.md`](docs/seed.md) for the full migration plan and phase schedule. Use cmux-team for current production needs until Phase 1 lands.
+> **Status.** elevens is the successor to cmux-team, migrated from manaflow-ai/cmux to [Stage 11 Agentics' c11](https://github.com/Stage-11-Agentics/c11) as the substrate. As of v0.9.0 (T016) the legacy cmux backend has been removed and **c11 is the only supported substrate** (see [Substrate](#substrate)). For the full migration history and phase schedule, see [`docs/seed.md`](docs/seed.md).
 
 **[日本語版 README はこちら](README.ja.md)**
 
@@ -29,14 +29,14 @@ To peek into another project's runtime state without leaving your shell: `eleven
 The design principle: *reduce cognitive load by making the process **visible**, not by hiding it.*
 
 **What you do**: Give Claude instructions in natural language.
-**What Claude does**: Splits panes via cmux, launches sub-agents, monitors them, and integrates results — all in plain sight.
+**What Claude does**: Splits panes via c11, launches sub-agents, monitors them, and integrates results — all in plain sight.
 
 ## Prerequisites
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed
-- [cmux](https://github.com/manaflow-ai/cmux) installed
+- [c11](https://github.com/Stage-11-Agentics/c11) installed (the only supported substrate since v0.9.0 / T016)
 - [bun](https://bun.sh/) installed (required for the Manager daemon)
-- Running Claude Code inside a cmux session
+- Running Claude Code inside a c11 session
 - [Nerd Font](https://www.nerdfonts.com/) (recommended) — enhances TUI dashboard icons
   ```bash
   brew install --cask font-hack-nerd-font
@@ -97,6 +97,7 @@ Created per-project by `elevens start`. All keys are optional — the file can b
 | `autoUpdate` | `"off"` \| `"notify"` | `"off"` | Version detection mode (see above). Override: env `CMUX_TEAM_AUTO_UPDATE`. |
 | `models.master` / `models.conductor` / `models.agent` | string | Claude defaults | Per-role model selection (e.g. `"claude-sonnet-4-6"`). |
 | `envrcHookPromptSkipped` | boolean | `false` | Internal flag set when the user declines the direnv hook prompt — normally not edited by hand. |
+| `cmux.reservedRenameDelayMs` | number | `800` | c11 title-pinning tuning knob (T026). Delay (ms, clamped to `[0, 60000]`) before re-renaming a reserved Conductor pane so the fixed tab name wins over c11's default title setter. Raise this if a future c11 update shifts the title timing. |
 
 Example:
 
@@ -116,7 +117,7 @@ See `docs/spec/05-install-and-infrastructure.md` for the full resolution semanti
 
 ### Basic Workflow
 
-Start cmux, launch Claude Code inside it.
+Start c11, launch Claude Code inside it.
 
 ```
 $ elevens start
@@ -389,7 +390,7 @@ See `docs/spec/15-post-mortem-evidence.md` for the analysis cookbook (with examp
 
 **bun not installed**: `brew install oven-sh/bun/bun`
 
-**Not in cmux**: Run inside cmux. `CMUX_SOCKET_PATH` must be set.
+**Not in c11**: Run inside a c11 session. `CMUX_SOCKET_PATH` must be set.
 
 ### Panes too narrow
 

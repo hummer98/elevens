@@ -5,7 +5,7 @@
 
 c11 を基盤とした multi-agent orchestration パッケージ — [cmux-team](https://github.com/hummer98/cmux-team) の後継。
 
-> **状態 — early access (v0.1.0)。** elevens は cmux-team の後継で、substrate を manaflow-ai/cmux から [Stage 11 Agentics の c11](https://github.com/Stage-11-Agentics/c11) に切り替えるプロジェクト。この初回リリースは cmux-team v4.28.x をリネームしたスナップショットであり、**c11 backend adapter はまだ実装されていません**。完全な移行計画とフェーズスケジュールは [`docs/seed.md`](docs/seed.md) を参照してください。Phase 1 完了までは production 用途では cmux-team を使ってください。
+> **状態。** elevens は cmux-team の後継で、substrate を manaflow-ai/cmux から [Stage 11 Agentics の c11](https://github.com/Stage-11-Agentics/c11) に切り替えたプロジェクト。v0.9.0 (T016) でレガシー cmux backend を撤廃し、**サポート対象 substrate は c11 のみ** になりました（[Substrate](#substrate) を参照）。移行の経緯とフェーズスケジュールは [`docs/seed.md`](docs/seed.md) を参照してください。
 
 **[English README](README.md)**
 
@@ -29,14 +29,14 @@ elevens は **AI 観察箱** です。自動化ブラックボックスではあ
 設計原則：認知負荷を下げるのは「プロセスを隠す」ことではなく、**「プロセスを見やすくする」** ことで。
 
 **あなたがやること**: Claude に自然言語で指示するだけ。
-**Claude がやること**: cmux でペインを分割し、サブエージェントを起動・監視・統合 — すべて目の前で。
+**Claude がやること**: c11 でペインを分割し、サブエージェントを起動・監視・統合 — すべて目の前で。
 
 ## 前提条件
 
 - [Claude Code](https://claude.ai/claude-code) がインストール済み
-- [cmux](https://github.com/manaflow-ai/cmux) がインストール済み
+- [c11](https://github.com/Stage-11-Agentics/c11) がインストール済み（v0.9.0 / T016 以降、サポート対象 substrate は c11 のみ）
 - [bun](https://bun.sh/) がインストール済み（Manager daemon に必要）
-- cmux 内で Claude Code を実行していること
+- c11 内で Claude Code を実行していること
 - [Nerd Font](https://www.nerdfonts.com/)（推奨）— TUI ダッシュボードのアイコン表示が向上します
   ```bash
   brew install --cask font-hack-nerd-font
@@ -97,6 +97,7 @@ elevens は `c11` バイナリを次の順で探します: (1) c11.app から la
 | `autoUpdate` | `"off"` \| `"notify"` | `"off"` | バージョン検出モード（上記参照）。上書き: 環境変数 `CMUX_TEAM_AUTO_UPDATE`。 |
 | `models.master` / `models.conductor` / `models.agent` | string | Claude デフォルト | ロール別モデル指定（例: `"claude-sonnet-4-6"`）。 |
 | `envrcHookPromptSkipped` | boolean | `false` | direnv hook プロンプトをスキップした際の内部フラグ。通常手動編集しません。 |
+| `cmux.reservedRenameDelayMs` | number | `800` | c11 のタブ名固定タイミング調整 (T026)。reserved Conductor pane を再 rename するまでの遅延（ms、`[0, 60000]` にクランプ）。c11 の default title setter に後着で勝つための待ち時間で、将来の c11 update で title timing が変わったら延長する。 |
 
 例:
 
@@ -116,7 +117,7 @@ elevens は `c11` バイナリを次の順で探します: (1) c11.app から la
 
 ### 基本的な流れ
 
-cmux を起動し、その中で Claude Code を起動します。
+c11 を起動し、その中で Claude Code を起動します。
 
 ```
 $ elevens start
@@ -462,7 +463,7 @@ daemon が原因不明でクラッシュした場合に WHEN/WHAT/WHY を再構�
 
 **bun がインストールされていない**: `brew install oven-sh/bun/bun` でインストール。
 
-**cmux 環境外**: cmux 内で実行してください。`CMUX_SOCKET_PATH` 環境変数が必要です。
+**c11 環境外**: c11 内で実行してください。`CMUX_SOCKET_PATH` 環境変数が必要です。
 
 ### ペインが狭くなって動作しない
 
