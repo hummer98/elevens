@@ -3574,6 +3574,15 @@ async function cmdSpawnAgent(): Promise<void> {
     const callerWorkspace = await cmux.getCallerWorkspace();
     const targetPane = await cmux.getPaneForSurface(conductorSurface, callerWorkspace);
 
+    // T024: pane lookup 結果を決定論的に記録する。pane lookup 失敗時は本 log →
+    //   throw → catch の spawn_agent_failed の 2 行ペアになる設計。本 log を
+    //   `if (!targetPane)` の後ろに動かすと target_pane=(none) のケースを残せなく
+    //   なるため、必ず if 判定より前に置くこと。
+    await log(
+      "spawn_agent_pane_resolved",
+      `${formatSurface(conductorSurface, "C")} target_pane=${targetPane ?? "(none)"} caller_workspace=${callerWorkspace ?? "(none)"} role=${role}`,
+    );
+
     // T017: pane lookup 失敗時の暗黙フォールバック（focused pane / focused workspace に
     //   surface を作る）を物理的に塞ぐ。意味付きの reason を投げて、既存の T016 catch
     //   経路 (AGENT_SPAWN_FAILED post + exit 1) に乗せる。
@@ -3588,6 +3597,14 @@ async function cmdSpawnAgent(): Promise<void> {
     //   callerWorkspace が undefined の場合は newSurface 内で --workspace を args に積まない。
     createdSurface = await cmux.newSurface(targetPane, { workspace: callerWorkspace });
     const surface = createdSurface;
+
+    // T024: new-surface 生成結果を決定論的に記録する。CLI 側で「どの pane に
+    //   どの surface を生やしたか」を spawn 時点で残し、後段 (postMessage) で
+    //   daemon が記録する agent_spawned (daemon.ts) と pair で読めるようにする。
+    await log(
+      "spawn_agent_surface_created",
+      `${formatSurface(createdSurface, "A")} target_pane=${targetPane} conductor=${conductorSurface} role=${role} caller_workspace=${callerWorkspace ?? "(none)"}`,
+    );
 
     // T195: newSurface 成功時点で surface は cmux 側に存在する。
     // 念押しの validation は deadlock リスクを招くため廃止。
