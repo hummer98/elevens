@@ -1349,11 +1349,21 @@ async function applyDiscardOnly(
     );
   }
 
-  // E: discarded — log のみ（reason === "surface_missing_no_task" のみ）
+  // E: discarded — log のみ
+  //   - reason "surface_missing_no_task" は従来通り conductor_discarded
+  //   - reason "broken_surface_missing" (T027) は conductor_pruned で別 event に分離
+  //     (retrospective grep で「broken からの除去」だけを抽出できるようにする)
+  //   - reason "pid_dead_idle_cleanup" は C 経路の conductor_stale_surface_closed で
+  //     記録済みのため重複防止で除外 (Decision D12 同様)
   for (const d of plan.discarded) {
     if (d.reason === "surface_missing_no_task") {
       await log(
         "conductor_discarded",
+        `${formatSurface(d.surface, "C")} reason=${d.reason}`,
+      );
+    } else if (d.reason === "broken_surface_missing") {
+      await log(
+        "conductor_pruned",
         `${formatSurface(d.surface, "C")} reason=${d.reason}`,
       );
     }
@@ -1678,6 +1688,50 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
           "conductor_clear_ignored",
           `${formatSurface(conductor.surface, "C")} status=${conductor.status} reason=not_broken`
         );
+        break;
+      }
+      // T027: surface が tree に存在しないなら idle 復帰でなく entry 削除する。
+      //   resetConductor は surface_missing 時に effectiveTargetStatus="broken" へ
+      //   倒し戻す (conductor.ts:780-782) ため、idle 復帰経路では「surface 不在の
+      //   broken」を絶対に解除できない。観察制約: 現役スロットの broken
+      //   (surface 実在) は drop 対象外なので、ここで pane の有無を確認して分岐する。
+      const clearPane = await cmux.getPaneForSurface(
+        conductor.surface,
+        state.workspace ?? undefined,
+      );
+      if (clearPane === undefined) {
+        // R1: pid watcher / mailbox watcher を delete の前に明示停止する。
+        //   daemon 再起動を挟むと applyRestorePlan (daemon.ts:1192-1197) で
+        //   broken でも pid 値が残っていれば spawnPidWatcher /
+        //   spawnConductorMailboxWatcher が再 spawn される。delete 後も interval が
+        //   走り続け、dangling timer リーク + 削除済みオブジェクトへの mutation
+        //   (observability ノイズ — session_ended / conductor_disconnected 誤発火) を
+        //   起こす。abort_task / RESET_CONDUCTOR (L1727-1736) /
+        //   forceCloseDisconnectedConductor (L4518-4527) と同形の「pid watcher →
+        //   mailbox watcher の 2 連停止」を必ず行う規約に合わせる。
+        if (conductor.pidWatcherInterval) {
+          clearInterval(conductor.pidWatcherInterval);
+          conductor.pidWatcherInterval = undefined;
+        }
+        if (conductor.mailboxWatcherStop) {
+          try { conductor.mailboxWatcherStop(); } catch { /* best-effort */ }
+          conductor.mailboxWatcherStop = undefined;
+        }
+        // C-I2 invariant: status=broken ⇒ taskRunId == null は維持されている前提。
+        // worktree archive も broken 遷移時に実施済み
+        // (CONDUCTOR_DISCONNECT_TIMEOUT 経路の cleanupMode: archive)。
+        state.conductors.delete(conductor.surface);
+        const aliveDetail = conductor.pid !== undefined
+          ? String(cmux.isAlive(conductor.pid))
+          : "unknown";
+        await log(
+          "conductor_pruned",
+          `${formatSurface(conductor.surface, "C")} reason=user_clear_surface_missing` +
+            ` pid=${conductor.pid ?? "null"} alive=${aliveDetail}`,
+        );
+        // team.json 永続化は notifyStateChanged を起点に既存 debounce 経路で行われる。
+        notifyStateChanged("daemon.ts:CONDUCTOR_CLEAR:pruned");
+        requestWakeup(state);
         break;
       }
       // cleanup は broken 遷移時点で既に済んでいるが、resetConductor は冪等なので

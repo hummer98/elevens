@@ -161,3 +161,86 @@ describe("planLayoutRestore: マトリクス分類 (T255 §3.1)", () => {
     expect(plan.cleanup).toEqual(["surface:700"]);
   });
 });
+
+// T027: 「broken + surface 消失」は pidAlive 短絡より前に E (discard) に倒す。
+// broken Conductor の pid は resetConductor が reserved 経路でのみクリアするため
+// (conductor.ts:918-921)、team.json に live 値が残り続け、PID が他プロセスに
+// recycle されると pidAlive=true で誤って A keep-alive に流入する。surface が
+// tree に無ければ「過去 surface の残骸」確定なので早期 discard し、現役スロット
+// (surface 実在) は従来通り pidAlive 判定に進める。
+describe("planLayoutRestore: T027 broken+surface_missing 早期 discard", () => {
+  test("status=broken + pidAlive=true + surface_missing → broken_surface_missing で discard", () => {
+    const conductors = [
+      { surface: "surface:27", pid: 27001, status: "broken" },
+    ];
+    const live = new Set<string>(); // surface 消失
+    // pidAlive=true でも broken + surface_missing なら discard に倒す
+    const plan = planLayoutRestore(conductors, live, aliveOf(27001), []);
+    expect(plan.discarded).toHaveLength(1);
+    expect(plan.discarded[0]!.surface).toBe("surface:27");
+    expect(plan.discarded[0]!.reason).toBe("broken_surface_missing");
+    expect(plan.alive).toHaveLength(0);
+    expect(plan.cleanup).toHaveLength(0);
+    expect(plan.resumeExisting).toHaveLength(0);
+    expect(plan.resumeNewSurface).toHaveLength(0);
+  });
+
+  test("status=broken + pidAlive=false + surface_missing → broken_surface_missing で discard", () => {
+    const conductors = [
+      { surface: "surface:28", pid: 28001, status: "broken" },
+    ];
+    const live = new Set<string>();
+    const plan = planLayoutRestore(conductors, live, ALL_DEAD, []);
+    expect(plan.discarded).toHaveLength(1);
+    expect(plan.discarded[0]!.surface).toBe("surface:28");
+    expect(plan.discarded[0]!.reason).toBe("broken_surface_missing");
+    expect(plan.alive).toHaveLength(0);
+  });
+
+  test("status=broken + surface_exists + pidAlive=true → 従来通り A keep-alive (現役 broken スロット温存)", () => {
+    const conductors = [
+      { surface: "surface:29", pid: 29001, status: "broken" },
+    ];
+    const live = new Set(["surface:29"]); // surface 実在
+    const plan = planLayoutRestore(conductors, live, aliveOf(29001), []);
+    expect(plan.alive).toHaveLength(1);
+    expect(plan.alive[0]!.decision).toBe("keep-alive");
+    expect(plan.alive[0]!.raw.surface).toBe("surface:29");
+    expect(plan.discarded).toHaveLength(0);
+  });
+
+  test("status=broken + surface_exists + pidAlive=false → 従来通り C (pid_dead_idle_cleanup)", () => {
+    const conductors = [
+      { surface: "surface:30", pid: 30001, status: "broken" },
+    ];
+    const live = new Set(["surface:30"]);
+    const plan = planLayoutRestore(conductors, live, ALL_DEAD, []);
+    // surface 実在 + pid 死亡 + task なし → C
+    expect(plan.cleanup).toEqual(["surface:30"]);
+    expect(plan.discarded).toHaveLength(1);
+    expect(plan.discarded[0]!.reason).toBe("pid_dead_idle_cleanup");
+    expect(plan.alive).toHaveLength(0);
+  });
+
+  test("status=disconnected + pidAlive=true + surface_missing → 従来通り A (broken 以外は触らない)", () => {
+    const conductors = [
+      { surface: "surface:31", pid: 31001, status: "disconnected" },
+    ];
+    const live = new Set<string>();
+    const plan = planLayoutRestore(conductors, live, aliveOf(31001), []);
+    expect(plan.alive).toHaveLength(1);
+    expect(plan.alive[0]!.decision).toBe("keep-alive");
+    expect(plan.discarded).toHaveLength(0);
+  });
+
+  test("status=idle + pidAlive=true + surface_missing → 従来通り A (broken 以外は触らない)", () => {
+    const conductors = [
+      { surface: "surface:32", pid: 32001, status: "idle" },
+    ];
+    const live = new Set<string>();
+    const plan = planLayoutRestore(conductors, live, aliveOf(32001), []);
+    expect(plan.alive).toHaveLength(1);
+    expect(plan.alive[0]!.decision).toBe("keep-alive");
+    expect(plan.discarded).toHaveLength(0);
+  });
+});

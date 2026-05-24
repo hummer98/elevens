@@ -85,6 +85,20 @@ export function planLayoutRestore(
     const taskId = typeof c.taskId === "string" ? c.taskId : undefined;
     const runningTask = !!(taskId && resumeByTaskId.has(taskId));
 
+    // T027: broken は surface 実在を pidAlive より優先で判定する。
+    //   broken Conductor は resetConductor が pid をクリアしない
+    //   (conductor.ts:918-921 reserved 経路限定) ため、team.json に live 値が
+    //   残り続け、PID が他プロセスに recycle されると pidAlive で誤って A に
+    //   流入する。surface が tree に無い broken エントリは「現スロットに
+    //   属さない過去 surface の残骸」確定なので E (discard) に倒す。
+    //   surface が tree にあれば従来通り pidAlive 判定に進む（現役 broken
+    //   スロット温存）。E のログは applyDiscardOnly 側で reason に応じて
+    //   conductor_pruned / conductor_discarded を出し分ける。
+    if (c.status === "broken" && !surfaceExists) {
+      discarded.push({ surface: c.surface, reason: "broken_surface_missing" });
+      continue;
+    }
+
     // PID 生存 → A
     if (pidAlive) {
       alive.push({ raw: c, decision: "keep-alive" });

@@ -3572,6 +3572,239 @@ describe("T250 broken status", () => {
   });
 });
 
+// --- T027: CONDUCTOR_CLEAR surface_missing pruning -------------------------
+//
+// surface が c11 tree から消えている broken Conductor は、resetConductor の
+// 内部 surface 実在ガード (conductor.ts:780-782) で `effectiveTargetStatus="broken"`
+// に倒し戻されるため、CONDUCTOR_CLEAR を投げても idle 復帰できない。
+// T027 ではこのケースを「entry 削除」に倒し、再起動後も復活しないようにする。
+// 削除前に pid watcher / mailbox watcher を 2 連停止する (R1) — abort_task /
+// RESET_CONDUCTOR (daemon.ts:1727-1736) / forceCloseDisconnectedConductor
+// (daemon.ts:4518-4527) と同形のシーケンス。
+describe("CONDUCTOR_CLEAR (T027 surface_missing pruning)", () => {
+  test("broken + getPaneForSurface undefined → entry 削除 + conductor_pruned ログ", async () => {
+    const cmux = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const paneSpy = spyOn(cmux, "getPaneForSurface").mockResolvedValue(undefined);
+    try {
+      const state = await createDaemon(testDir);
+      const conductor: ConductorState = {
+        surface: "surface:t027-prune",
+        startedAt: new Date().toISOString(),
+        disconnectedAt: new Date().toISOString(),
+        agents: [],
+        status: "broken",
+        pid: 27001,
+      };
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "CONDUCTOR_CLEAR",
+        surface: conductor.surface,
+        reason: "user_clear",
+        timestamp: new Date().toISOString(),
+      });
+
+      expect(state.conductors.has(conductor.surface)).toBe(false);
+      const logContent = await readFile(join(testDir, ".team/logs/manager.log"), "utf-8");
+      expect(logContent).toContain("conductor_pruned");
+      expect(logContent).toMatch(/reason=user_clear_surface_missing/);
+    } finally {
+      paneSpy.mockRestore();
+    }
+  });
+
+  test("broken + getPaneForSurface 実在 → 既存通り idle 復帰 (regression: ST-1)", async () => {
+    const cmux = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const paneSpy = spyOn(cmux, "getPaneForSurface").mockResolvedValue("pane:1");
+    try {
+      const state = await createDaemon(testDir);
+      const conductor: ConductorState = {
+        surface: "surface:t027-keep",
+        startedAt: new Date().toISOString(),
+        disconnectedAt: new Date().toISOString(),
+        agents: [],
+        status: "broken",
+      };
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "CONDUCTOR_CLEAR",
+        surface: conductor.surface,
+        reason: "user_clear",
+        timestamp: new Date().toISOString(),
+      });
+
+      expect(state.conductors.has(conductor.surface)).toBe(true);
+      expect(conductor.status).toBe("idle");
+    } finally {
+      paneSpy.mockRestore();
+    }
+  });
+
+  test("running + surface_missing → conductor_clear_ignored で state 維持 (regression: 削除されない)", async () => {
+    const cmux = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const paneSpy = spyOn(cmux, "getPaneForSurface").mockResolvedValue(undefined);
+    try {
+      const state = await createDaemon(testDir);
+      const conductor: ConductorState = {
+        surface: "surface:t027-run-missing",
+        startedAt: new Date().toISOString(),
+        taskRunId: "task-x-1",
+        taskId: "1",
+        agents: [],
+        status: "running",
+      };
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "CONDUCTOR_CLEAR",
+        surface: conductor.surface,
+        reason: "user_clear",
+        timestamp: new Date().toISOString(),
+      });
+
+      expect(state.conductors.has(conductor.surface)).toBe(true);
+      expect(conductor.status).toBe("running");
+      const logContent = await readFile(join(testDir, ".team/logs/manager.log"), "utf-8");
+      expect(logContent).toContain("conductor_clear_ignored");
+      expect(logContent).toMatch(/reason=not_broken/);
+    } finally {
+      paneSpy.mockRestore();
+    }
+  });
+
+  test("disconnected + surface_missing → conductor_clear_ignored で state 維持 (regression)", async () => {
+    const cmux = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const paneSpy = spyOn(cmux, "getPaneForSurface").mockResolvedValue(undefined);
+    try {
+      const state = await createDaemon(testDir);
+      const conductor: ConductorState = {
+        surface: "surface:t027-disc-missing",
+        startedAt: new Date().toISOString(),
+        disconnectedAt: new Date().toISOString(),
+        agents: [],
+        status: "disconnected",
+      };
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "CONDUCTOR_CLEAR",
+        surface: conductor.surface,
+        reason: "user_clear",
+        timestamp: new Date().toISOString(),
+      });
+
+      expect(state.conductors.has(conductor.surface)).toBe(true);
+      expect(conductor.status).toBe("disconnected");
+    } finally {
+      paneSpy.mockRestore();
+    }
+  });
+
+  // R4: 再起動経由を模した broken (pid 生存) + surface_missing + CONDUCTOR_CLEAR
+  // applyRestorePlan (daemon.ts:1192-1197) が spawnPidWatcher / spawnConductorMailboxWatcher を
+  // 再 spawn した状態を pre-arrange し、handler が 2 連停止することを assert する。
+  test("R4: broken + pid 生存 + surface_missing → pidWatcherInterval / mailboxWatcherStop 両方クリア", async () => {
+    const cmux = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const paneSpy = spyOn(cmux, "getPaneForSurface").mockResolvedValue(undefined);
+    // pid 生存させる（再起動で pid が再 recycle されていたケース相当）
+    const { __setIsAliveImpl } = cmux;
+    __setIsAliveImpl(() => true);
+    let mailboxStopped = 0;
+    let timerCleared = 0;
+    try {
+      const state = await createDaemon(testDir);
+      const conductor: ConductorState = {
+        surface: "surface:t027-r4",
+        startedAt: new Date().toISOString(),
+        disconnectedAt: new Date().toISOString(),
+        agents: [],
+        status: "broken",
+        pid: 27101,
+      };
+      // pre-arrange: applyRestorePlan が spawn したであろう watcher を模擬する
+      const fakeInterval = setInterval(() => {
+        // 万一 handler が止めなければここで invariant 違反として観測される
+        timerCleared = -1;
+      }, 1000) as any;
+      // 正しくクリアされたかを wrap で検知
+      const origClearInterval = clearInterval;
+      const clearSpy = spyOn(globalThis, "clearInterval").mockImplementation((h: any) => {
+        timerCleared += 1;
+        origClearInterval(h);
+      });
+      conductor.pidWatcherInterval = fakeInterval;
+      conductor.mailboxWatcherStop = () => {
+        mailboxStopped += 1;
+      };
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "CONDUCTOR_CLEAR",
+        surface: conductor.surface,
+        reason: "user_clear",
+        timestamp: new Date().toISOString(),
+      });
+
+      // entry 削除 + watcher 両方クリア
+      expect(state.conductors.has(conductor.surface)).toBe(false);
+      expect(conductor.pidWatcherInterval).toBeUndefined();
+      expect(conductor.mailboxWatcherStop).toBeUndefined();
+      expect(mailboxStopped).toBe(1);
+      expect(timerCleared).toBeGreaterThanOrEqual(1);
+      clearSpy.mockRestore();
+    } finally {
+      paneSpy.mockRestore();
+      __setIsAliveImpl(null);
+    }
+  });
+
+  // R4: watcher tick が delete 後に走っても state mutation が起きないこと
+  // 既存 __testSpawnPidWatcherTick パターン (daemon.ts:3835-) に合わせる。
+  test("R4: delete 後に __testSpawnPidWatcherTick を回しても state.conductors.has は false のまま", async () => {
+    const cmux = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const paneSpy = spyOn(cmux, "getPaneForSurface").mockResolvedValue(undefined);
+    const { __setIsAliveImpl } = cmux;
+    __setIsAliveImpl(() => false);
+    try {
+      const state = await createDaemon(testDir);
+      const conductor: ConductorState = {
+        surface: "surface:t027-r4b",
+        startedAt: new Date().toISOString(),
+        disconnectedAt: new Date().toISOString(),
+        agents: [],
+        status: "broken",
+        pid: 27201,
+      };
+      state.conductors.set(conductor.surface, conductor);
+
+      await handleMessage(state, {
+        type: "CONDUCTOR_CLEAR",
+        surface: conductor.surface,
+        reason: "user_clear",
+        timestamp: new Date().toISOString(),
+      });
+      expect(state.conductors.has(conductor.surface)).toBe(false);
+
+      // delete 後も conductor reference は握れる。tick を回しても entry が
+      // 復活しないこと（mutation は conductor field に対しては起こり得るが
+      // state.conductors への put-back はしない）を確認。
+      const { __testSpawnPidWatcherTick } = await import("./daemon");
+      await __testSpawnPidWatcherTick(state, conductor, 27201);
+      expect(state.conductors.has(conductor.surface)).toBe(false);
+    } finally {
+      paneSpy.mockRestore();
+      __setIsAliveImpl(null);
+    }
+  });
+});
+
 // --- T004: RESET_CONDUCTOR (reset-conductor CLI) ---------------------------
 //
 // `elevens reset-conductor` から daemon に届く RESET_CONDUCTOR メッセージを
@@ -5069,6 +5302,120 @@ describe("initializeLayout: マトリクス復帰 (T255 §8.3 M6〜M16)", () => 
       __setIsAliveImpl(null);
       __setTreeImpl(null);
       newSplitSpy.mockRestore();
+      stubs.send.mockRestore();
+      stubs.sendKey.mockRestore();
+      stubs.closeSurface.mockRestore();
+      stubs.renameTab.mockRestore();
+      stubs.newSplit.mockRestore();
+    }
+  }, 15000);
+
+  // --- T027: initializeLayout 経由の broken+surface_missing prune --------
+  //
+  // planLayoutRestore (layout-restore.ts) で broken && !surfaceExists を
+  // pidAlive 短絡より前に discard する仕様 (T027 B 経路) を boot 経路で検証する。
+  // 結果として state.conductors に該当 entry が登録されず、team.json round-trip
+  // 後も disk から消える。
+  test("T027 boot: team.json に broken (surface 不在 + pid 生存) → 復元後 state に登録されず conductor_pruned ログ", async () => {
+    const { __setIsAliveImpl, __setTreeImpl } = await import("./cmux");
+    __setIsAliveImpl((pid: number) => pid === 27001); // pid 生存（recycle 相当）
+    __setTreeImpl(async () => ""); // surface 消失
+    const stubs = await stubCmuxIO();
+    try {
+      await writeTeamJson([
+        { surface: "surface:27", pid: 27001, status: "broken" },
+      ]);
+
+      const state = await createDaemon(testDir);
+      state.workspace = "ws-test";
+      state.maxConductors = 1;
+      state.mainBranch = "main";
+      state.layout = "wide";
+
+      const { initializeLayout } = await import("./daemon");
+      await initializeLayout(state, undefined, []);
+
+      // entry は復元されない (B 経路で discard 済み)
+      expect(state.conductors.has("surface:27")).toBe(false);
+
+      const logContent = await readFile(join(testDir, ".team/logs/manager.log"), "utf-8");
+      // T027 新 event: broken_surface_missing reason の conductor_pruned
+      expect(logContent).toContain("conductor_pruned");
+      expect(logContent).toMatch(/reason=broken_surface_missing/);
+      // 既存の surface_missing_no_task は出ない（status=broken でこの reason を上書き）
+      expect(logContent).not.toMatch(/conductor_discarded .* surface:27/);
+    } finally {
+      __setIsAliveImpl(null);
+      __setTreeImpl(null);
+      stubs.send.mockRestore();
+      stubs.sendKey.mockRestore();
+      stubs.closeSurface.mockRestore();
+      stubs.renameTab.mockRestore();
+      stubs.newSplit.mockRestore();
+    }
+  }, 15000);
+
+  test("T027 boot: team.json に broken (surface 実在) → 復元後も保持 (regression: 現役 broken スロット温存)", async () => {
+    const { __setIsAliveImpl, __setTreeImpl } = await import("./cmux");
+    __setIsAliveImpl((pid: number) => pid === 27101); // pid 生存
+    __setTreeImpl(async () => "surface:271\n"); // surface 実在
+    const stubs = await stubCmuxIO();
+    try {
+      await writeTeamJson([
+        { surface: "surface:271", pid: 27101, status: "broken" },
+      ]);
+
+      const state = await createDaemon(testDir);
+      state.workspace = "ws-test";
+      state.maxConductors = 1;
+      state.mainBranch = "main";
+
+      const { initializeLayout } = await import("./daemon");
+      await initializeLayout(state, undefined, []);
+
+      // 現役 broken スロットは温存される (A keep-alive)
+      expect(state.conductors.has("surface:271")).toBe(true);
+      expect(state.conductors.get("surface:271")?.status).toBe("broken");
+    } finally {
+      __setIsAliveImpl(null);
+      __setTreeImpl(null);
+      stubs.send.mockRestore();
+      stubs.sendKey.mockRestore();
+      stubs.closeSurface.mockRestore();
+      stubs.renameTab.mockRestore();
+      stubs.newSplit.mockRestore();
+    }
+  }, 15000);
+
+  test("T027 boot: round-trip — pruned 後の updateTeamJson で disk から該当 entry が消える", async () => {
+    const { __setIsAliveImpl, __setTreeImpl } = await import("./cmux");
+    __setIsAliveImpl((pid: number) => pid === 27201);
+    __setTreeImpl(async () => ""); // surface 消失
+    const stubs = await stubCmuxIO();
+    try {
+      await writeTeamJson([
+        { surface: "surface:272", pid: 27201, status: "broken" },
+      ]);
+
+      const state = await createDaemon(testDir);
+      state.workspace = "ws-test";
+      state.maxConductors = 1;
+      state.mainBranch = "main";
+
+      const { initializeLayout } = await import("./daemon");
+      await initializeLayout(state, undefined, []);
+      // pruning 後の next save で disk から消える
+      await updateTeamJson(state);
+
+      const raw = await readFile(join(testDir, ".team/team.json"), "utf-8");
+      const json = JSON.parse(raw);
+      const persisted = (json.conductors ?? []).find(
+        (c: any) => c.surface === "surface:272",
+      );
+      expect(persisted).toBeUndefined();
+    } finally {
+      __setIsAliveImpl(null);
+      __setTreeImpl(null);
       stubs.send.mockRestore();
       stubs.sendKey.mockRestore();
       stubs.closeSurface.mockRestore();

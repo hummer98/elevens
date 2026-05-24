@@ -36,6 +36,14 @@
 `broken` は **終端状態**。`cmux-team clear-conductor` または `cmux-team reset-conductor`（T004、任意状態 → `reserved` の局所復旧 CLI）でのみ解除される。
 `error` は次の `SESSION_STARTED` / `SESSION_IDLE` で自然解除される（`lastApiError` も undefined に戻る）。
 
+追加 (T027): `broken` Conductor の surface が c11 tree から消えた場合（外部 close / cmux session 全終了等）、
+`clear-conductor` は idle 復帰ではなく **team.json からの entry 削除** を行う。daemon 起動時の
+`planLayoutRestore` も同条件 (`status=broken && !surfaceExists`) で entry を discard する。
+削除は state machine の遷移ではなく **machine 外の entry エビクション** であり、
+reducer は引き続き `broken` で全 event no-op を返す。削除イベントは `conductor_pruned` として
+`manager.log` に記録される（CLI 起点は `reason=user_clear_surface_missing`、boot 起点は
+`reason=broken_surface_missing`）。
+
 Master / Agent も同等に `status: "error"` バリアントと `lastApiError` を持つ（`MasterStateSchema` / `AgentState`）。
 
 ### 1.2 遷移表
@@ -145,6 +153,7 @@ stateDiagram-v2
 | C-I3 | `broken` 解除は `clear-conductor` / `reset-conductor`（T004）のみ | reducer は `broken` で全 event no-op |
 | C-I4 | `status=error` ⇒ `lastApiError != null` (T392) | reducer 監視は P3 まで shadow only — 本タスクでは daemon の直接 mutation のみ |
 | C-I5 | `status=asking` ⇒ `askQuestion != null` (T014) | `restoreConductorState` 防御 fallback（違反検出時は idle に倒す）+ shadow log は将来追加 |
+| C-I6 | `status=broken && surface ∉ c11 tree` ⇒ next CONDUCTOR_CLEAR / boot restore で entry 削除 (T027) | `planLayoutRestore` / `CONDUCTOR_CLEAR` handler |
 
 違反は `fsm_invariant_violation` ログに出る (P1 は log only、強制修正しない)。
 

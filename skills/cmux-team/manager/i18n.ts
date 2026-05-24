@@ -508,6 +508,8 @@ Notes:
   - Only Conductors currently in broken state can be cleared
   - For other states, use abort-task / restart-task
   - Worktree / branch residue is already cleaned up at the broken transition; this CLI only resets the status
+  - If the surface is missing from the c11 tree, the conductor entry is pruned
+    from team.json instead of being reset (logged as conductor_pruned)
 `,
 
   help_reset_conductor: `
@@ -1593,6 +1595,8 @@ Notes:
   - broken 状態の Conductor のみクリアできます
   - 他の状態は abort-task / restart-task を使ってください
   - worktree / branch 残骸は broken 遷移時点で既に掃除済みのため、ここでは行いません
+  - surface が c11 tree から消えている場合、idle 復帰ではなく team.json から
+    entry 削除されます（conductor_pruned で記録）
 `,
 
   help_reset_conductor: `
