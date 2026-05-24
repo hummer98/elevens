@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.10.0] - 2026-05-24
+
+### Added
+
+- **surface 不在の broken Conductor 残骸を team.json から自動除去** (T027): surface ごと消滅した broken Conductor が team.json に残り続け、正規 CLI でも消せなくなる問題を解決。daemon 起動時の layout reconcile で `broken && surface 不在` のスロットを pidAlive 判定より前に破棄し（構造的根治）、`clear-conductor` CLI 経由でも surface 不在なら idle 復帰ではなく entry を削除する（pidWatcher / mailboxWatcher を停止してから削除し watcher リークを防止）。除去は必ず `conductor_pruned` でログに残し、起点を `user_clear_surface_missing`（CLI）/ `broken_surface_missing`（boot）で区別する。surface が実在する現役 broken スロットは drop しない（observatory 原則）。state-machine 仕様に invariant C-I6 を追加
+
 ## [0.9.0] - 2026-05-24
 
 ### Fixed
