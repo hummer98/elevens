@@ -228,7 +228,7 @@ Task / Artifact と並ぶ第三のカテゴリ。「達成したいゴール」�
 | コマンド | やること | いつ使う |
 |---------|---------|---------|
 | `/master` | Master ロール再読み込み | `/clear` 後 |
-| `/elevens:watch` | events stream を監視して PR merge / conflict resolve / pull を自動処理（opt-in） | 完了した PR の自動 merge と介入要 event のエスカレーションを Master に任せたい時 |
+| `/elevens:watch` | events stream を監視して PR merge（squash）/ `git pull --ff-only` を自動処理（opt-in）。conflict は自動解決せず escalate して停止 | 完了した PR の自動 merge と介入要 event のエスカレーションを Master に任せたい時 |
 | `/team-spec [概要]` | 要件をブレスト | 何を作るか決める時 |
 | `/team-task [操作]` | タスク管理 | タスクの作成・一覧・クローズ |
 | `/team-archive [範囲]` | 完了タスクのアーカイブ | タスク整理時 |

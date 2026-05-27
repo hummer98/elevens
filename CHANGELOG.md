@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.10.1] - 2026-05-27
+
+### Fixed
+
+- **`/elevens:watch` と Conductor の自動衝突解消による commit drop を構造的に防止** (T028): `task_completed` の自動 PR merge / Conductor の自動 rebase が組み合わさり、feature branch の commit が main から消失する事故（compass-wind 99e23a6e の drop）を受けた対策。3 経路を保守化した — (1) `watch.md` Step 2 の `gh pr merge --squash` から `--delete-branch` を除去し、squash 後も feature branch を残して drop を `git log --all` で追跡可能にする。(2) `watch.md` Step 3 の「Master が Edit ツールで衝突マーカーを自動解消する」経路を全廃し、conflict 検出時点で `git merge --abort` + `[escalation]` 提示で停止する。(3) `conductor-role.md` Step 8 の rebase conflict 自動解消（旧 8-5: conflict-resolution.md 書き出し → Step 9 進行）を廃止し、conflict 検出時点で判断必要レポートを返して worktree を preserve して停止する経路に統一（ja/en 同期）。「LLM/squash に commit-level の整合性判断を委ねず、逸脱しても安全な構造にする」方針。post-mortem は `.team/artifacts/A034-watch-commit-drop-postmortem.md`
+
 ## [0.10.0] - 2026-05-24
 
 ### Added

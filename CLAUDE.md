@@ -312,7 +312,7 @@ Manager daemon は外向け event channel として `.team/logs/events.jsonl` �
 | Manager クラッシュ | Master | Manager が応答なし → 再 spawn |
 | API レート制限 | 各層 | 待機して再試行、同時 Agent 数を削減 |
 
-state 遷移・cascade・CONDUCTOR_DONE 分岐・rebase conflict 自解決の詳細は `docs/spec/07-state-machine.md` を参照。
+state 遷移・cascade・CONDUCTOR_DONE 分岐・rebase conflict escalation（自動解消はせず判断必要レポートで停止、T028）の詳細は `docs/spec/07-state-machine.md` を参照。
 
 ## Post-mortem evidence (T010)
 

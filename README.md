@@ -233,7 +233,7 @@ A third category alongside Task / Artifact. An Epic is a "goal you want to achie
 | Command | What it does | When to use |
 |---------|-------------|-------------|
 | `/master` | Reload Master role | After `/clear` |
-| `/elevens:watch` | Watch events stream and auto-handle PR merge / conflict resolve / pull (opt-in) | When you want Master to auto-merge completed PRs and surface escalations |
+| `/elevens:watch` | Watch events stream and auto-handle PR merge (squash) / `git pull --ff-only` (opt-in); conflicts are escalated, not auto-resolved | When you want Master to auto-merge completed PRs and surface escalations |
 | `/team-spec [summary]` | Brainstorm requirements | Deciding what to build |
 | `/team-task [action]` | Task management | Create / list / close tasks |
 | `/team-archive [range]` | Archive closed tasks | Task cleanup |
