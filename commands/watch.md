@@ -10,7 +10,7 @@ description: "events stream を監視して PR merge / conflict resolve / pull /
 ## 設計方針 / 注意事項
 
 - **opt-in**: user が能動的に `/elevens:watch` を invoke した時のみ動く。常駐させない
-- **自動範囲**: `task_completed` に対する PR merge（squash + delete-branch）/ conflict resolve / main ブランチへの `git pull --ff-only` までを Master が自走する。それ以外の判断は escalate
+- **自動範囲**: `task_completed` に対する PR merge（squash、branch は残す）/ main ブランチへの `git pull --ff-only` までを Master が自走する。**conflict が出た PR の自動 resolve は行わない（drop リスクを避けるため escalate に倒す）**。それ以外の判断も escalate
 - **state は外部に持たない**: 過去 event の遡及処理はしない。Master の context が `/clear` 等で消えた場合は、user に再 invoke してもらう
 - **保守的に**: 迷ったら escalate。複雑な判断を自動化しない
 
@@ -112,35 +112,49 @@ PR_URL=$(gh pr view --json url -q .url 2>/dev/null || true)
 #### Step 2: PR merge 試行（squash）
 
 ```bash
-gh pr merge --squash --delete-branch "$PR_URL" 2>&1 | tee /tmp/cmux-team-watch-merge.txt
+# branch は残す（drop 追跡可能性のため。詳細は本ファイル末尾の cleanup 方針メモを参照）
+gh pr merge --squash "$PR_URL" 2>&1 | tee /tmp/cmux-team-watch-merge.txt
 MERGE_EXIT=${PIPESTATUS[0]}
 ```
 
 - `MERGE_EXIT == 0` → **Step 4（main pull）へ**
-- `MERGE_EXIT != 0` で stderr に `conflict` / `not mergeable` を含む → **Step 3（conflict resolve）へ**
+- `MERGE_EXIT != 0` で stderr に `conflict` / `not mergeable` を含む → **Step 3（conflict 検出時の escalation）へ**
 - それ以外の merge 失敗（review 不足、required check 未通過、permission 不足等） → user に `[escalation]` で「PR merge に失敗しました。手動で確認してください」と提示（PR_URL と stderr 末尾を一緒に出す）。続行はしない
+- **自動の衝突解消は行わない**（drop リスク回避のため、conflict 系は必ず Step 3 へ）
 
-#### Step 3: Conflict 検出時の resolve
+#### Step 3: Conflict 検出時の escalation（自動 resolve は行わない）
+
+Master は **自動で衝突マーカーを解消しない**。Edit による「片方採用」で commit-level の
+変更が drop する事故を構造的に避けるため、conflict 検出時点で merge を中断して
+user に判断を委ねる。
 
 ```bash
 cd "$WT"
-git fetch origin
-git merge origin/main 2>&1 | tee /tmp/cmux-team-watch-conflictmerge.txt
+# merge / rebase が in-progress なら必ず中断する（衝突状態を残さない）
+GIT_DIR=$(git rev-parse --git-dir)
+if [ -f "$GIT_DIR/MERGE_HEAD" ] || [ -d "$GIT_DIR/rebase-merge" ] || [ -d "$GIT_DIR/rebase-apply" ]; then
+  git merge --abort 2>&1 || git rebase --abort 2>&1 || true
+fi
+CONFLICT_FILES=$(git status --short 2>/dev/null | grep -E '^(UU|AA|DD|AU|UA|DU|UD)' | awk '{print $NF}')
 ```
 
-- `git status --short` で衝突ファイルを列挙
-- **Edit ツールで衝突マーカーを解消**する（解消ロジックは task の内容に依存するため Master が判断）
-- 解消できないと判断したら user に `[escalation]` で衝突ファイル一覧 + journal_summary を提示して中止
-- 解消できたら以下を実行:
+その上で user に以下フォーマットで escalate する（Step 2 の他 escalation と同フォーマット）:
 
-  ```bash
-  git add -A
-  git commit -m "Resolve conflicts with main for T<task_id>"
-  git push
-  gh pr merge --squash --delete-branch "$PR_URL"
-  ```
+```text
+[escalation] task_completed (PR conflict — manual resolve required)
+  task_id: T<NNN>
+  pr_url: <PR_URL>
+  worktree_path: <絶対パス>
+  conflict_files:
+    - <ファイル 1>
+    - <ファイル 2>
+  journal_summary:
+    <J を多行表示>
+  → cd <絶対パス> で worktree を確認し、手動で衝突解消・push・merge してください。
+    自動 Edit はしません（drop 事故防止のため）。
+```
 
-  それでも fail した場合は user に `[escalation]` で投げる
+escalate 後は **何もしない**（merge は abort 済み、worktree は温存）。続けて他 event を待つ。
 
 #### Step 4: main checkout + pull --ff-only
 
@@ -312,3 +326,18 @@ events spec §8 に従い、reader である本コマンドは以下のとおり
 | stdout に warn が紛れる | warn は **stderr** に出るので Monitor の通知（stdout 行）には混入しない |
 
 reader の責務は「自分が知っている event を正しく扱う」こと。「未知を遮断する」ことではない（spec §8）。
+
+## Branch cleanup 方針メモ
+
+`gh pr merge` で `--delete-branch` を付けないため merge 後も remote/local の feature
+branch が残る。これは squash merge 後でも `git log --all` / `git branch -a` で元 commit を
+追跡できるようにするための意図的な選択（drop 事故の post-mortem を可能にする）。
+
+cleanup は別タスクで運用する想定:
+- 週次手動 `git branch --merged` ベースの掃除、または
+- `elevens worktree archive prune` 系の整備（別タスク化）
+
+short-term は branch が累積するので、必要なら個別に `git push origin --delete <branch>` で
+削除する。`docs/spec/16-worktree-archive.md` で扱う worktree archive 機能の
+`--delete-branch` フラグは本件とは別系統（worktree archive 専用の cleanup）であり、
+本コマンドの方針変更とは無関係。

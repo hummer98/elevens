@@ -428,7 +428,7 @@ For errors in files you touched (`git diff --cached --name-only`):
 git diff --cached --quiet || git commit -m "feat: <task summary>"
 ```
 
-### Step 8: Rebase onto {{MAIN_BRANCH}} (resolve conflicts semantically)
+### Step 8: Rebase onto {{MAIN_BRANCH}} (stop on conflict with a [Judgment Required] report)
 
 After committing, fetch the latest main inside the worktree and rebase your commits on top of it.
 This prevents conflicts from surfacing on the main side and keeps the delivery path always fast-forwardable.
@@ -437,7 +437,7 @@ This prevents conflicts from surfacing on the main side and keeps the delivery p
 and you want to rebase onto something other than `{{MAIN_BRANCH}}`, skip this step and rebase manually,
 or handle `{{BASE_BRANCH}}` support in a separate task.**
 
-> **Relationship to the Conductor principle (exception)**: Conductor normally does not write code. However, 8-3 (semantic resolution) is the **only exception** — the Conductor itself may use Edit / Write to integrate the two sides, but only on files where conflict markers have appeared. See 8-3 for details.
+> **Conductor principle (strict)**: The Conductor must NOT use Edit / Write to resolve conflicts under any circumstance, even on files with active conflict markers. On rebase conflict, roll back and return a [Judgment Required] report, then exit with the worktree preserved (the `semantic resolution` path was removed in T028).
 
 The rebase target is chosen to prefer the "ahead side" of main: if local `{{MAIN_BRANCH}}` is strictly ahead of `origin/{{MAIN_BRANCH}}` (origin is an ancestor of local and the SHAs differ), the local branch is used as the rebase target; otherwise origin is used. This is required for push-less workflows (where local main runs ahead of origin) so that the ff-only merge in Step 9 can succeed.
 
@@ -452,171 +452,58 @@ else
   REBASE_TARGET=origin/{{MAIN_BRANCH}}
 fi
 
-# Required: capture HEAD **before** the rebase attempt for the 8-6 rollback path
+# Required: capture HEAD **before** the rebase attempt for the 8-2 rollback path
 PRE_REBASE=$(git rev-parse HEAD)
-
-# Snapshot of ALL_CONFLICT_FILES for 8-1 (accumulated across iterations)
-ALL_CONFLICT_FILES=""
 
 git rebase "$REBASE_TARGET"
 ```
 
 If rebase succeeds → proceed to Step 9 (delivery).
 
-If rebase fails due to conflicts → **do not abort immediately. Instead, follow 8-1 through 8-6 below to attempt semantic resolution.**
+If rebase fails due to conflicts → **gather minimal context (8-1), roll back (8-2), and return a [Judgment Required] report (8-3). The Conductor must not attempt semantic resolution.**
 
-#### 8-1. Gather conflict information
+#### 8-1. Gather conflict information (minimal, for the report)
 
-First, accumulate the files that have conflict markers in this iteration into `ALL_CONFLICT_FILES`. `--diff-filter=U` only returns files that are *currently* unmerged, so files drop out once 8-3 resolves them. Snapshot them per iteration into a shell variable so 8-4's scope_violation check can use them as the allowed set later.
-
-```bash
-CUR_CONFLICTS=$(git diff --name-only --diff-filter=U | sort -u)
-ALL_CONFLICT_FILES=$(printf '%s\n%s\n' "$ALL_CONFLICT_FILES" "$CUR_CONFLICTS" | sort -u | sed '/^$/d')
-
-git status
-git log --oneline HEAD..ORIG_HEAD
-for f in $CUR_CONFLICTS; do
-  echo "=== $f ==="
-  git diff "$f"  # show conflict markers and surrounding context
-done
-# Also inspect each cherry-picked commit
-for sha in $(git log --format=%H HEAD..ORIG_HEAD); do
-  git show --stat "$sha"
-done
-```
-
-#### 8-2. Identify the conflicting task and read its spec
-
-Extract the task ID from the commit message on the "other side" and read the related specs.
-
-1. **Primary**: regex-extract `(TXXX)` from the tail of the commit message
-   ```bash
-   CONFLICT_TASK_ID=$(git log --format=%s HEAD..ORIG_HEAD | grep -oE '\(T[0-9]+\)' | head -1 | tr -d '()T')
-   ```
-2. **Fallback**: grep `.team/tasks/<num>-*/task.md` by SHA or PR number
-3. If no task ID can be determined → `failure_mode=missing_context`, escalate via 8-6
-4. If identified, read the following (include `.team/archive/<id>-*/` for archived tasks):
-   - `.team/tasks/<id>-*/task.md`
-   - `.team/tasks/<id>-*/plan.md` (if present)
-   - `.team/tasks/<id>-*/summary.md` (if present)
-   - Your own task's `<OUTPUT_DIR>/plan.md` / `<OUTPUT_DIR>/summary.md`
-   - Relevant sections of CLAUDE.md as needed
-
-#### 8-3. Attempt semantic resolution (**the only place where Conductor may use Edit / Write**)
-
-**Key constraint**: the edit scope in this phase is strictly limited to files with active conflict markers.
-
-> ⚠️ **Do NOT edit any file that has no conflict marker in the current iteration.**
->
-> Edit / Write on files outside the current `git diff --name-only --diff-filter=U` result is forbidden, even if it feels like "a quick fix while I'm here". Any such drift is detected as `failure_mode=scope_violation` in 8-4 and escalated. Creating new files, refactoring existing code, and regenerating generated files are all out of scope for this phase.
-
-Write the integrated resolution with Edit / Write, then continue:
+Collect just enough context to attach to the [Judgment Required] report. Do NOT use Edit.
 
 ```bash
-# Once conflict markers are removed:
-git add <resolved-files>
-git rebase --continue
+CONFLICT_FILES=$(git diff --name-only --diff-filter=U | sort -u)
+git status                                          # for the report
+git log --oneline HEAD..ORIG_HEAD                   # list of conflicting commits
+# Extract task ID from the conflicting commit (trailing (TXXX))
+CONFLICT_TASK_ID=$(git log --format=%s HEAD..ORIG_HEAD | grep -oE '\(T[0-9]+\)' | head -1 | tr -d '()T')
 ```
 
-If the next commit surfaces new conflicts, loop back to 8-1 (recursive). **The iteration limit is 5**:
+Do NOT dump per-file diffs into the report — it bloats the payload. The human can `git diff` directly in the worktree.
 
-```bash
-ITERATION_LIMIT=5
-# Pseudocode: track iteration count in a shell variable ITER;
-# if ITER >= ITERATION_LIMIT, set failure_mode=iteration_limit and go to 8-6.
-```
-
-A conflict that does not converge within 5 iterations is treated as human-judgment territory.
-
-#### 8-4. Verification (mandatory, never skip)
-
-Once rebase completes, run the following in order. Any failure → corresponding `failure_mode` → 8-6.
-
-**(1) Structural scope_violation check (run first)**
-
-Treat the **union** of "files with conflict markers" and "files changed by the cherry-picked commits" as the allowed set, and verify the actual change set does not exceed it:
-
-```bash
-# Allowed = ALL_CONFLICT_FILES ∪ (diff between PRE_REBASE and ORIG_HEAD)
-CHERRY_PICK_CHANGES=$(git diff --name-only "$PRE_REBASE"..ORIG_HEAD | sort -u)
-ALLOWED=$(printf '%s\n%s\n' "$ALL_CONFLICT_FILES" "$CHERRY_PICK_CHANGES" | sort -u | sed '/^$/d')
-
-# Actual change set
-CHANGED=$(git diff --name-only "$PRE_REBASE"..HEAD | sort -u)
-
-# Diff check
-EXTRA=$(comm -23 <(printf '%s\n' "$CHANGED") <(printf '%s\n' "$ALLOWED"))
-if [ -n "$EXTRA" ]; then
-  # CHANGED has files outside ALLOWED → scope_violation
-  failure_mode=scope_violation
-  # → go to 8-6
-fi
-```
-
-(The reason we compare against "`U` ∪ files changed by cherry-picked commits", not just "`U` itself", is that any file touched by a cherry-picked commit is naturally in `CHANGED`. Without the union, we would see false positives.)
-
-**(2) Tests**
-
-```bash
-cd <WORKTREE_PATH>
-bun test --timeout 600000  # 10 min upper bound
-```
-
-Failure → `failure_mode=test_failed` → 8-6.
-
-**(3) TypeScript type check**
-
-```bash
-bunx tsc --noEmit
-```
-
-Compare before/after rebase — pass is **zero new errors**. If new errors appear → `failure_mode=tsc_failed` → 8-6.
-
-→ If all three pass (no scope_violation, 0 test failures, 0 new tsc errors), go to 8-5.
-
-#### 8-5. Success — write conflict-resolution.md and proceed to Step 9
-
-Write the audit trail to `<OUTPUT_DIR>/conflict-resolution.md` (= `runs/<taskRunId>/conflict-resolution.md`). For the format, see the "conflict-resolution.md format" section of `docs/spec/04-templates.md` (taskRunId / branch / rebase target / pre-rebase HEAD / conflicting commits table / per-file resolution strategy / Resolution Strategy / Verification / Iterations).
-
-After writing it, proceed to Step 9 (delivery).
-
-#### 8-6. Escalation (when the LLM cannot resolve)
-
-Escalate when any of the following applies:
-- `failure_mode=spec_divergence` (the two sides' specs are mutually contradictory and cannot be integrated)
-- `failure_mode=test_failed` (verification (2) failed)
-- `failure_mode=tsc_failed` (verification (3) failed)
-- `failure_mode=missing_context` (could not determine task ID in 8-2, or spec was insufficient)
-- `failure_mode=scope_violation` (verification (1) failed)
-- `failure_mode=iteration_limit` (8-3 exceeded the 5-iteration limit)
-
-**Rollback (mandatory, branched on whether rebase is in progress)**:
+#### 8-2. Rollback
 
 ```bash
 GIT_DIR=$(git rev-parse --git-dir)
 if [ -d "$GIT_DIR/rebase-merge" ] || [ -d "$GIT_DIR/rebase-apply" ]; then
-  # Rebase in progress (8-3 iteration_limit or mid-iteration re-conflict)
   git rebase --abort
 else
-  # Rebase already completed (8-4 test/tsc/scope_violation failure)
-  # PRE_REBASE was captured right before 8-1
+  # PRE_REBASE was captured at the top of Step 8 (still required, unchanged)
   git reset --hard "$PRE_REBASE"
 fi
 ```
 
-Send the completion notification with `--success false --reason "<short English summary>"` (**reason is required**; an empty reason ends up as `reason=-` in `conductor_done_unresolved` in `manager.log` and makes debugging impossible):
+#### 8-3. Escalation ([Judgment Required] report)
+
+Send the completion notification with `--success false --reason "<short English summary>"` (**reason is required**;
+an empty reason ends up as `reason=-` in `conductor_done_unresolved` in `manager.log` and makes debugging impossible):
 
 ```bash
 elevens send CONDUCTOR_DONE --surface $CMUX_SURFACE \
   --success false \
-  --reason "Step 8 semantic resolution unresolvable: <failure_mode short summary>"
+  --reason "Step 8 rebase conflict: <conflicting task ID / branch / conflict file summary>"
 ```
 
 The completion report must be marked [Judgment Required] and must include **structured** fields:
-- `conflict_summary`: list of conflicting files + rebase target + short summary of the other-side commits
-- `resolution_attempted`: the integration strategy you tried (and why it failed)
-- `failure_mode`: one of `spec_divergence` / `test_failed` / `tsc_failed` / `missing_context` / `scope_violation` / `iteration_limit`
-- `required_input`: what human judgment is required (e.g. which side to adopt)
+
+- `conflict_summary`: list of conflicting files + rebase target + short summary of the other-side commits (include the task ID)
+- `failure_mode`: `rebase_conflict` (the single value used from T028 onward; `spec_divergence` / `iteration_limit` etc. are retired)
+- `required_input`: what human judgment is required (which branch to merge / rebase, and how)
 - The worktree is kept (not removed) so a human can rebase manually or re-queue the task
 - Task state: transitions to `aborted` (worktree / branch preserved). To re-run, execute `elevens restart-task --task-id <TASK_ID>`. To cancel, leave it aborted or run `elevens delete-task --task-id <TASK_ID>`.
 

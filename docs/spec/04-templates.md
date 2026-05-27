@@ -208,13 +208,16 @@ conductor.md と同等の構造だが、`{{WORKTREE_PATH}}` 等のパス情報�
 
 **調査系タスクの summary artifact 化:** コード改変を伴わない調査・リサーチ系タスクでは、完了直前に `runs/<taskRunId>/summary.md` を artifact として登録する（`cmux-team artifacts add` 経由）。後続セッションが内容を参照できるようにするための必須ステップ。
 
-**Step 8 semantic resolution（T284）:** rebase conflict 発生時、Conductor は即 abort せず semantic 自解決を試みる。衝突元 commit から task ID（`(TXXX)`）を抽出して両側の仕様を読み、conflict marker のあるファイルのみを Edit / Write で統合する（Conductor が直接編集できる唯一の例外）。検証（scope_violation / `bun test` / `bunx tsc --noEmit`）がすべて pass すれば `runs/<taskRunId>/conflict-resolution.md` を書き出して Step 9 へ。いずれか失敗した場合は `failure_mode`（`spec_divergence` / `test_failed` / `tsc_failed` / `missing_context` / `scope_violation` / `iteration_limit`）を含む【判断必要】レポートを返し、`rebase-merge` / `rebase-apply` ディレクトリ有無で分岐した rollback（進行中 → `git rebase --abort`、完了済 → `git reset --hard "$PRE_REBASE"`）を行う。worktree / branch は温存する。
+**Step 8 conflict handling（T028 で semantic resolution は廃止）:** rebase conflict 発生時、Conductor は Edit / Write を使った semantic 自解決を行わず、最小情報（conflict file 一覧 + ORIG_HEAD..HEAD commit list + 衝突元 task ID）を集めて rollback し、`failure_mode=rebase_conflict` の【判断必要】レポートを返して worktree / branch を温存して終了する。rollback は `rebase-merge` / `rebase-apply` ディレクトリ有無で分岐（進行中 → `git rebase --abort`、完了済 → `git reset --hard "$PRE_REBASE"`）。旧 T284 で導入した semantic resolution path（8-1 ALL_CONFLICT_FILES iteration スナップショット / 8-3 Edit による自動解消 / 8-4 scope_violation・bun test・tsc 検証 / 8-5 conflict-resolution.md 書き出し / `failure_mode` の `spec_divergence` / `test_failed` / `tsc_failed` / `missing_context` / `scope_violation` / `iteration_limit` 区分）は T028 で削除した。経緯は `.team/artifacts/A034-watch-commit-drop-postmortem.md` を参照。
 
 **テンプレート変数:** `{{PROJECT_ROOT}}`, `{{CONDUCTOR_ID}}`, `{{MAIN_BRANCH}}`, `{{PROJECT_COMMON_INSTRUCTIONS}}`（T413: 全 sub-agent 共通 overlay、冒頭の 1 件のみ daemon 起動時に展開）, `{{PROJECT_INSTRUCTIONS}}`（T342: 冒頭の 1 件のみ daemon 起動時に展開、heredoc サンプル内のものは Agent 用 literal として保護される）。パス情報はタスク割り当て時に付与。
 
-### conflict-resolution.md フォーマット（runs/<taskRunId>/ 配下、T284）
+### conflict-resolution.md フォーマット（廃止: T028）
 
-Conductor は Step 8-5 で semantic resolution が成功したときに、以下のフォーマットで `<OUTPUT_DIR>/conflict-resolution.md` を書き出す。監査証跡として worktree 削除後も `runs/<taskRunId>/` に残り、task-state.json の journal から辿れる。
+> **廃止 (T028):** Step 8-5（semantic resolution 成功時の `<OUTPUT_DIR>/conflict-resolution.md` 書き出し）が
+> 廃止されたため、本フォーマットは現在 Conductor によって書き出されない。新規実装は本節を参照しないこと。
+> 歴史的経緯として残す（旧 T284 当時の audit trail フォーマット）。Conductor の現行挙動は上記
+> 「Step 8 conflict handling」を参照。
 
 ```markdown
 # Conflict Resolution Report
