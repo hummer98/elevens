@@ -21,7 +21,11 @@ import { join } from "path";
 import { setTimeout as wait } from "node:timers/promises";
 import { createInterface } from "node:readline";
 import { Buffer } from "node:buffer";
-import { EVENTS_SCHEMA_VERSION } from "./events-writer";
+import {
+  EVENTS_SCHEMA_VERSION,
+  RESERVED_EVENTS,
+  emitUserSignal,
+} from "./events-writer";
 import { t } from "./i18n";
 
 export interface RunEventsCliOpts {
@@ -301,10 +305,15 @@ function processLine(rawLine: string, ctx: LineCtx): void {
     return;
   }
   if (!KNOWN_EVENTS.has(event)) {
-    ctx.stderr.write(
-      `warn: skipping record with unknown event=${event} at line ${ctx.lineNumber.value}\n`,
-    );
-    return;
+    // T029 / spec §8.1: --types で明示購読された event 名は通す（free-form
+    // user-signal の Done 条件「--types signal:x で別セッションが拾える」を満たすため）。
+    // --types 無指定時は従来どおり skip + warn（regression なし）。
+    if (!(ctx.parsed.types && ctx.parsed.types.has(event))) {
+      ctx.stderr.write(
+        `warn: skipping record with unknown event=${event} at line ${ctx.lineNumber.value}\n`,
+      );
+      return;
+    }
   }
 
   // --types filter
@@ -472,6 +481,12 @@ async function runFollowLoop(
 // ────────────────────────────────────────────────────────────────────────
 
 export async function runEventsCli(opts: RunEventsCliOpts): Promise<number> {
+  // T029: `emit` サブコマンドへの routing。既存 parser とは引数集合が完全に
+  // 別なので、入口 1 行で振り分けて parser を二系統に分ける。
+  if (opts.args[0] === "emit") {
+    return runEmitSubcommand({ ...opts, args: opts.args.slice(1) });
+  }
+
   let parsed: ParsedArgs;
   try {
     parsed = parseArgs(opts.args);
@@ -510,5 +525,155 @@ export async function runEventsCli(opts: RunEventsCliOpts): Promise<number> {
   }
 
   await runOnce(filePath, ctx);
+  return 0;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// T029: `events emit` サブコマンド
+// ──────────────────────────────────────────────────────────────────────────
+
+interface ParsedEmitArgs {
+  type: string;
+  message?: string;
+  actor?: string;
+  data: Record<string, string>;
+  help: boolean;
+}
+
+const EMIT_KNOWN_FLAGS = new Set([
+  "--type",
+  "--message",
+  "--actor",
+  "--data",
+  "--help",
+  "-h",
+]);
+
+const EMIT_FLAGS_WITH_VALUE = new Set([
+  "--type",
+  "--message",
+  "--actor",
+  "--data",
+]);
+
+/**
+ * T029: emit サブコマンド専用の引数 parser。
+ *
+ * 既存 `parseArgs`（reader 側 --follow/--types/--since/--format）とは
+ * 引数集合が完全に交わらないので別関数で持つ（相互排他チェックの爆発を避ける）。
+ *
+ * - `--type` は必須・空文字不可
+ * - `--data k=v` は repeatable、最初の `=` で split、値は string 固定
+ * - 値に `=` が無い (`--data foo`) や空キー (`--data =v`) は ArgError
+ */
+function parseEmitArgs(argv: string[]): ParsedEmitArgs {
+  let type: string | undefined;
+  let message: string | undefined;
+  let actor: string | undefined;
+  let help = false;
+  const data: Record<string, string> = {};
+
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!;
+    if (a === "--help" || a === "-h") {
+      help = true;
+      continue;
+    }
+    if (!EMIT_KNOWN_FLAGS.has(a)) {
+      throw new ArgError(`unknown flag: ${a}`);
+    }
+    if (!EMIT_FLAGS_WITH_VALUE.has(a)) continue;
+
+    const v = argv[i + 1];
+    if (v === undefined || EMIT_KNOWN_FLAGS.has(v)) {
+      throw new ArgError(`${a} requires a value`);
+    }
+    i++;
+
+    if (a === "--type") type = v;
+    else if (a === "--message") message = v;
+    else if (a === "--actor") actor = v;
+    else if (a === "--data") {
+      const eq = v.indexOf("=");
+      if (eq < 0) {
+        throw new ArgError(`--data requires k=v format (got: ${v})`);
+      }
+      const k = v.slice(0, eq);
+      if (k.length === 0) {
+        throw new ArgError(`--data key cannot be empty (got: ${v})`);
+      }
+      const dv = v.slice(eq + 1);
+      data[k] = dv;
+    }
+  }
+
+  if (!help) {
+    if (type === undefined || type.length === 0) {
+      throw new ArgError(`--type <name> is required`);
+    }
+  }
+
+  return {
+    type: type ?? "",
+    message,
+    actor,
+    data,
+    help,
+  };
+}
+
+/**
+ * T029: `--actor` 明示 > `CMUX_SURFACE` env > 省略。
+ * `CMUX_ROLE` 等の追加 env は本プロジェクトには存在しない（main.test.ts:2740 regression 確認済み）。
+ */
+function resolveActor(explicit: string | undefined): string | undefined {
+  if (explicit !== undefined && explicit.length > 0) return explicit;
+  const env = process.env.CMUX_SURFACE;
+  return env !== undefined && env.length > 0 ? env : undefined;
+}
+
+/**
+ * T029: `elevens events emit ...` の本体。
+ *
+ * - parser → 予約名衝突 warn → actor 解決 → `emitUserSignal` を 1 回呼ぶ
+ * - daemon 停止中でも動く（writer が `mkdir → appendFile` で初回ファイル生成）
+ * - `--follow` 等の loop は持たない（同期的に 1 record 投稿のみ）
+ */
+async function runEmitSubcommand(opts: RunEventsCliOpts): Promise<number> {
+  let parsed: ParsedEmitArgs;
+  try {
+    parsed = parseEmitArgs(opts.args);
+  } catch (e) {
+    if (e instanceof ArgError) {
+      opts.stderr.write(`Error: ${e.message}\n`);
+      opts.stderr.write(`Run 'elevens events emit --help' for usage.\n`);
+      return 1;
+    }
+    throw e;
+  }
+
+  if (parsed.help) {
+    opts.stdout.write(t("help_events_emit"));
+    opts.stdout.write("\n");
+    return 0;
+  }
+
+  // 予約名衝突 warn（hard block しない）
+  if (RESERVED_EVENTS.has(parsed.type as never)) {
+    opts.stderr.write(
+      `warn: --type ${parsed.type} は typed daemon event 名と衝突します（投稿は通します）。\n` +
+        `      \`signal:\` prefix の使用を推奨します。例: --type signal:${parsed.type}\n`,
+    );
+  }
+
+  const actor = resolveActor(parsed.actor);
+
+  await emitUserSignal({
+    event: parsed.type,
+    message: parsed.message,
+    actor,
+    data: parsed.data,
+  });
+
   return 0;
 }

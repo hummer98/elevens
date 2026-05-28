@@ -6,8 +6,9 @@
  * in-process で呼んで stdout / stderr / exit code を assert する。
  */
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdir, rename, rm, writeFile, appendFile } from "fs/promises";
+import { mkdir, readFile, rename, rm, writeFile, appendFile } from "fs/promises";
 import { dirname, join } from "path";
+import { existsSync } from "node:fs";
 import { runEventsCli } from "./events-cli";
 import { EVENTS_SCHEMA_VERSION } from "./events-writer";
 import { createDummyProject, type DummyProject } from "./test-project";
@@ -720,3 +721,402 @@ async function waitUntil(
     await new Promise((r) => setTimeout(r, 10));
   }
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// T029: `elevens events emit` サブコマンド + reader 互換
+// ──────────────────────────────────────────────────────────────────────────
+
+async function readJsonl(root: string): Promise<unknown[]> {
+  const content = await readFile(eventsPath(root), "utf-8");
+  return content
+    .split("\n")
+    .filter((l) => l.length > 0)
+    .map((l) => JSON.parse(l));
+}
+
+describe("T029 emit: writer", () => {
+  test("E1 minimal: --type signal:deploy_started --message で 1 行 append、exit 0、stderr 空", async () => {
+    const { stdout, stderr, errText } = captureStreams();
+    const ac = new AbortController();
+    const code = await runEventsCli({
+      args: ["emit", "--type", "signal:deploy_started", "--message", "started"],
+      projectRoot: project.root,
+      stdout,
+      stderr,
+      abortSignal: ac.signal,
+    });
+    expect(code).toBe(0);
+    expect(errText()).toBe("");
+    const lines = await readJsonl(project.root);
+    expect(lines).toHaveLength(1);
+    const rec = lines[0] as Record<string, unknown>;
+    expect(rec.event).toBe("signal:deploy_started");
+    expect(rec.message).toBe("started");
+    expect(rec.schema_version).toBe(EVENTS_SCHEMA_VERSION);
+    expect(typeof rec.ts).toBe("string");
+  });
+
+  test("E2 emit → reader: --types signal:deploy_started で別 invocation がその 1 行を拾う", async () => {
+    // 投稿
+    {
+      const { stdout, stderr } = captureStreams();
+      const ac = new AbortController();
+      const code = await runEventsCli({
+        args: ["emit", "--type", "signal:deploy_started", "--message", "started"],
+        projectRoot: project.root,
+        stdout,
+        stderr,
+        abortSignal: ac.signal,
+      });
+      expect(code).toBe(0);
+    }
+    // 受信（--types 明示購読）
+    const { stdout, stderr, outText, errText } = captureStreams();
+    const ac = new AbortController();
+    const code = await runEventsCli({
+      args: ["--types", "signal:deploy_started"],
+      projectRoot: project.root,
+      stdout,
+      stderr,
+      abortSignal: ac.signal,
+    });
+    expect(code).toBe(0);
+    const lines = outText().split("\n").filter((l) => l.length > 0);
+    expect(lines).toHaveLength(1);
+    const rec = JSON.parse(lines[0]!);
+    expect(rec.event).toBe("signal:deploy_started");
+    expect(rec.message).toBe("started");
+    // unknown event の warn は出ない（--types で明示購読しているため）
+    expect(errText()).toBe("");
+  });
+
+  test("E3 予約名衝突: --type task_completed → stderr に warn、exit 0、行は追加", async () => {
+    const { stdout, stderr, errText } = captureStreams();
+    const ac = new AbortController();
+    const code = await runEventsCli({
+      args: ["emit", "--type", "task_completed", "--message", "fake"],
+      projectRoot: project.root,
+      stdout,
+      stderr,
+      abortSignal: ac.signal,
+    });
+    expect(code).toBe(0);
+    expect(errText()).toMatch(/typed daemon event/);
+    expect(errText()).toMatch(/signal:/);
+    const lines = await readJsonl(project.root);
+    expect(lines).toHaveLength(1);
+    expect((lines[0] as Record<string, unknown>).event).toBe("task_completed");
+  });
+
+  test("E4 actor 自動補完: CMUX_SURFACE=surface:42 → record.actor === surface:42", async () => {
+    const prev = process.env.CMUX_SURFACE;
+    process.env.CMUX_SURFACE = "surface:42";
+    try {
+      const { stdout, stderr } = captureStreams();
+      const ac = new AbortController();
+      const code = await runEventsCli({
+        args: ["emit", "--type", "signal:x"],
+        projectRoot: project.root,
+        stdout,
+        stderr,
+        abortSignal: ac.signal,
+      });
+      expect(code).toBe(0);
+      const [rec] = (await readJsonl(project.root)) as [Record<string, unknown>];
+      expect(rec.actor).toBe("surface:42");
+    } finally {
+      if (prev === undefined) delete process.env.CMUX_SURFACE;
+      else process.env.CMUX_SURFACE = prev;
+    }
+  });
+
+  test("E5 --actor 明示は env より優先", async () => {
+    const prev = process.env.CMUX_SURFACE;
+    process.env.CMUX_SURFACE = "surface:42";
+    try {
+      const { stdout, stderr } = captureStreams();
+      const ac = new AbortController();
+      const code = await runEventsCli({
+        args: ["emit", "--type", "signal:x", "--actor", "manual"],
+        projectRoot: project.root,
+        stdout,
+        stderr,
+        abortSignal: ac.signal,
+      });
+      expect(code).toBe(0);
+      const [rec] = (await readJsonl(project.root)) as [Record<string, unknown>];
+      expect(rec.actor).toBe("manual");
+    } finally {
+      if (prev === undefined) delete process.env.CMUX_SURFACE;
+      else process.env.CMUX_SURFACE = prev;
+    }
+  });
+
+  test("E6 env 未設定 + --actor 省略 → record に actor field 無し", async () => {
+    const prev = process.env.CMUX_SURFACE;
+    delete process.env.CMUX_SURFACE;
+    try {
+      const { stdout, stderr } = captureStreams();
+      const ac = new AbortController();
+      const code = await runEventsCli({
+        args: ["emit", "--type", "signal:x"],
+        projectRoot: project.root,
+        stdout,
+        stderr,
+        abortSignal: ac.signal,
+      });
+      expect(code).toBe(0);
+      const [rec] = (await readJsonl(project.root)) as [Record<string, unknown>];
+      expect("actor" in rec).toBe(false);
+    } finally {
+      if (prev !== undefined) process.env.CMUX_SURFACE = prev;
+    }
+  });
+
+  test("E7 --data foo=bar --data x=1 → data: {foo:'bar', x:'1'}", async () => {
+    const { stdout, stderr } = captureStreams();
+    const ac = new AbortController();
+    const code = await runEventsCli({
+      args: [
+        "emit",
+        "--type",
+        "signal:x",
+        "--data",
+        "foo=bar",
+        "--data",
+        "x=1",
+      ],
+      projectRoot: project.root,
+      stdout,
+      stderr,
+      abortSignal: ac.signal,
+    });
+    expect(code).toBe(0);
+    const [rec] = (await readJsonl(project.root)) as [Record<string, unknown>];
+    expect(rec.data).toEqual({ foo: "bar", x: "1" });
+  });
+
+  test("E8 --data の値内 '=' は最初の '=' で split、残りは値全体", async () => {
+    const { stdout, stderr } = captureStreams();
+    const ac = new AbortController();
+    const code = await runEventsCli({
+      args: [
+        "emit",
+        "--type",
+        "signal:x",
+        "--data",
+        "url=https://example.com/?a=1&b=2",
+      ],
+      projectRoot: project.root,
+      stdout,
+      stderr,
+      abortSignal: ac.signal,
+    });
+    expect(code).toBe(0);
+    const [rec] = (await readJsonl(project.root)) as [Record<string, unknown>];
+    expect((rec.data as Record<string, string>).url).toBe(
+      "https://example.com/?a=1&b=2",
+    );
+  });
+
+  test("E9 --type 欠落 → exit 1、説明あり", async () => {
+    const { stdout, stderr, errText } = captureStreams();
+    const ac = new AbortController();
+    const code = await runEventsCli({
+      args: ["emit", "--message", "hi"],
+      projectRoot: project.root,
+      stdout,
+      stderr,
+      abortSignal: ac.signal,
+    });
+    expect(code).toBe(1);
+    expect(errText()).toMatch(/--type/);
+  });
+
+  test("E9b --type '' → exit 1 (--type に値なし)", async () => {
+    const { stdout, stderr, errText } = captureStreams();
+    const ac = new AbortController();
+    const code = await runEventsCli({
+      args: ["emit", "--type", ""],
+      projectRoot: project.root,
+      stdout,
+      stderr,
+      abortSignal: ac.signal,
+    });
+    // 空文字は valueless 扱いはせず引数として受け取るが、parseEmitArgs で type.length === 0 を拒否
+    expect(code).toBe(1);
+    expect(errText()).toMatch(/--type/);
+  });
+
+  test("E10 --data に '=' 無し → exit 1", async () => {
+    const { stdout, stderr, errText } = captureStreams();
+    const ac = new AbortController();
+    const code = await runEventsCli({
+      args: ["emit", "--type", "signal:x", "--data", "foo"],
+      projectRoot: project.root,
+      stdout,
+      stderr,
+      abortSignal: ac.signal,
+    });
+    expect(code).toBe(1);
+    expect(errText()).toMatch(/--data/);
+  });
+
+  test("E11 --data 空キー (=v) → exit 1", async () => {
+    const { stdout, stderr, errText } = captureStreams();
+    const ac = new AbortController();
+    const code = await runEventsCli({
+      args: ["emit", "--type", "signal:x", "--data", "=v"],
+      projectRoot: project.root,
+      stdout,
+      stderr,
+      abortSignal: ac.signal,
+    });
+    expect(code).toBe(1);
+    expect(errText()).toMatch(/--data/);
+  });
+
+  test("E12 emit 未知 flag → exit 1", async () => {
+    const { stdout, stderr, errText } = captureStreams();
+    const ac = new AbortController();
+    const code = await runEventsCli({
+      args: ["emit", "--bogus", "x"],
+      projectRoot: project.root,
+      stdout,
+      stderr,
+      abortSignal: ac.signal,
+    });
+    expect(code).toBe(1);
+    expect(errText()).toMatch(/--bogus|unknown/i);
+  });
+
+  test("E13 --help → exit 0、usage 出力 (events emit help)", async () => {
+    const { stdout, stderr, outText, errText } = captureStreams();
+    const ac = new AbortController();
+    const code = await runEventsCli({
+      args: ["emit", "--help"],
+      projectRoot: project.root,
+      stdout,
+      stderr,
+      abortSignal: ac.signal,
+    });
+    expect(code).toBe(0);
+    expect(outText()).toMatch(/events emit/);
+    expect(outText()).toMatch(/--type/);
+    expect(errText()).toBe("");
+  });
+
+  test("E14 daemon 停止相当: events.jsonl 不在 → emit が初回生成 + append", async () => {
+    // 既定 createDummyProject では .team/logs/ は作られるが events.jsonl は無い。
+    const path = eventsPath(project.root);
+    expect(existsSync(path)).toBe(false);
+    const { stdout, stderr } = captureStreams();
+    const ac = new AbortController();
+    const code = await runEventsCli({
+      args: ["emit", "--type", "signal:first", "--message", "init"],
+      projectRoot: project.root,
+      stdout,
+      stderr,
+      abortSignal: ac.signal,
+    });
+    expect(code).toBe(0);
+    expect(existsSync(path)).toBe(true);
+    const lines = await readJsonl(project.root);
+    expect(lines).toHaveLength(1);
+    expect((lines[0] as Record<string, unknown>).event).toBe("signal:first");
+  });
+
+  test("E15 regression: --types なしでの未知 event は依然 skip + warn（#10 同等）", async () => {
+    await writeFixture(project.root, [
+      rec("task_ready", { task_id: "T1" }),
+      rec("signal:unsubscribed", { whatever: 1 }),
+      rec("task_ready", { task_id: "T2" }),
+    ]);
+    const { stdout, stderr, outText, errText } = captureStreams();
+    const ac = new AbortController();
+    const code = await runEventsCli({
+      args: [],
+      projectRoot: project.root,
+      stdout,
+      stderr,
+      abortSignal: ac.signal,
+    });
+    expect(code).toBe(0);
+    const lines = outText().split("\n").filter((l) => l.length > 0);
+    expect(lines).toHaveLength(2);
+    expect(JSON.parse(lines[0]!).task_id).toBe("T1");
+    expect(JSON.parse(lines[1]!).task_id).toBe("T2");
+    expect(errText()).toMatch(/unknown event=signal:unsubscribed/);
+  });
+});
+
+describe("T029 emit: integration with --follow", () => {
+  test("E16 daemon 停止中の --follow integration: events.jsonl 不在 → 別経路の emit を follow reader が拾う", async () => {
+    // events.jsonl が無い状態で reader を起動するとそもそも exit 1 なので、
+    // emit を先に行って 1 件目を生成し、その後 follow reader を起動して
+    // 後続の emit を pickup できることを確認する（daemon round-trip 無し）。
+    // これにより「daemon 停止中でも投稿・監視が機能する」(Done 条件) を E2E 相当で押さえる。
+
+    // 先行 emit（events.jsonl 初回生成）
+    {
+      const { stdout, stderr } = captureStreams();
+      const ac = new AbortController();
+      const code = await runEventsCli({
+        args: ["emit", "--type", "signal:x", "--message", "first"],
+        projectRoot: project.root,
+        stdout,
+        stderr,
+        abortSignal: ac.signal,
+      });
+      expect(code).toBe(0);
+    }
+
+    // follow reader を起動
+    const { stdout, stderr, outText } = captureStreams();
+    const ac = new AbortController();
+    const followPromise = runEventsCli({
+      args: ["--follow", "--types", "signal:x"],
+      projectRoot: project.root,
+      stdout,
+      stderr,
+      abortSignal: ac.signal,
+      pollIntervalMs: 20,
+    });
+
+    // 初回 1 件が拾われるまで待つ
+    await waitUntil(
+      () => outText().split("\n").filter(Boolean).length >= 1,
+      2000,
+    );
+
+    // 後続 emit（別 invocation = 別「プロセス」相当）
+    {
+      const { stdout: out2, stderr: err2 } = captureStreams();
+      const ac2 = new AbortController();
+      const code2 = await runEventsCli({
+        args: ["emit", "--type", "signal:x", "--message", "second"],
+        projectRoot: project.root,
+        stdout: out2,
+        stderr: err2,
+        abortSignal: ac2.signal,
+      });
+      expect(code2).toBe(0);
+    }
+
+    // 2 件目が拾われるまで待つ
+    await waitUntil(
+      () => outText().split("\n").filter(Boolean).length >= 2,
+      2000,
+    );
+
+    ac.abort();
+    const code = await followPromise;
+    expect(code).toBe(0);
+
+    const lines = outText().split("\n").filter((l) => l.length > 0);
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+    const msgs = lines.map((l) => JSON.parse(l).message);
+    expect(msgs).toContain("first");
+    expect(msgs).toContain("second");
+  });
+});

@@ -622,6 +622,7 @@ elevens events -- tail / filter the events stream
 
 Usage:
   elevens events [options]
+  elevens events emit --type <name> [--message <text>] [--actor <id>] [--data k=v]...
 
 Options:
   --follow, -f             tail -F equivalent (rotate aware). Stream new lines until SIGINT.
@@ -635,17 +636,53 @@ Options:
                            text: <ts> <event> <key=value...> (debug only)
 
 Notes:
-  - Records that fail to parse, have unknown event, or unsupported schema_version
-    are skipped with a warning to stderr (spec section 8 forward-compat).
+  - Records that fail to parse or have unsupported schema_version are skipped
+    with a warning to stderr (spec section 8 forward-compat).
+  - Unknown event records are skipped with a warning unless their event name is
+    explicitly subscribed via --types (spec section 8.1 / 6.20 user-signal).
   - --format text omits journal_summary fields to keep one record per line.
   - --follow re-opens the file after rotate (inode change or size shrink),
     re-emitting from the new file's head; the consumer must dedupe if needed.
   - SIGINT exits with code 0 (graceful shutdown). If your CI scripts need to
     distinguish SIGINT from normal EOF, this is a follow-up consideration.
+  - 'emit' subcommand posts a free-form user signal directly to events.jsonl
+    (no daemon round-trip; works while daemon is stopped). See 'emit --help'.
 
 Exit codes:
   0  normal exit (EOF without --follow, or SIGINT during --follow)
   1  argument error / events.jsonl not found
+`,
+
+  help_events_emit: `
+elevens events emit -- append a free-form user signal to events.jsonl
+
+Usage:
+  elevens events emit --type <name> [--message <text>] [--actor <id>] [--data k=v]...
+
+Options:
+  --type <name>            (required) event type name. snake_case recommended.
+                           'signal:' prefix is strongly recommended (e.g. signal:deploy_started).
+  --message <text>         short human-readable description (optional).
+  --actor <id>             actor identifier (optional). Default: $CMUX_SURFACE.
+                           Omitted entirely from the record if neither --actor nor
+                           CMUX_SURFACE is set.
+  --data k=v               key/value metadata. Repeatable. Split on the first '='.
+                           Values are stored as strings (no type inference).
+  --help, -h               show this help.
+
+Examples:
+  elevens events emit --type signal:deploy_started --message "rolling out v1.2.3"
+  elevens events emit --type signal:deploy_finished --data version=v1.2.3 --data env=prod
+
+Notes:
+  - best-effort: no lock / lease / mutex. POSIX O_APPEND atomicity is the only guarantee.
+  - works while the daemon is stopped (CLI writes events.jsonl directly).
+  - If --type matches a reserved typed daemon event name (e.g. task_completed), a
+    warning is printed to stderr but the record is still appended (exit 0).
+
+Exit codes:
+  0  normal exit (record appended; reserved-name warning still exits 0)
+  1  argument error (missing --type, malformed --data, unknown flag, etc.)
 `,
 
   help_metrics: `
@@ -1706,34 +1743,71 @@ Notes:
 `,
 
   help_events: `
-elevens events -- tail / filter the events stream
+elevens events -- events stream の tail / filter
 
 Usage:
   elevens events [options]
+  elevens events emit --type <name> [--message <text>] [--actor <id>] [--data k=v]...
 
 Options:
-  --follow, -f             tail -F equivalent (rotate aware). Stream new lines until SIGINT.
-  --types <list>           comma-separated event type filter (exact match).
-                           e.g. --types task_completed,task_aborted
-                           (empty list "" / ", ," is rejected with exit 1)
-  --since <when>           filter records older than the given threshold.
+  --follow, -f             tail -F 相当（rotate 対応）。SIGINT までストリーミング
+  --types <list>           カンマ区切りで event type を絞る（完全一致）
+                           例: --types task_completed,task_aborted
+                           空 ("" / ", ,") は exit 1
+  --since <when>           しきい値より古いレコードを除外
                            duration: 5m / 1h / 2d
                            ISO 8601: 2026-04-27T12:00:00Z
-  --format json|text       output format (default: json -- raw JSONL)
-                           text: <ts> <event> <key=value...> (debug only)
+  --format json|text       出力形式（既定: json -- 生の JSONL）
+                           text: <ts> <event> <key=value...>（デバッグ用）
 
-Notes:
-  - Records that fail to parse, have unknown event, or unsupported schema_version
-    are skipped with a warning to stderr (spec section 8 forward-compat).
-  - --format text omits journal_summary fields to keep one record per line.
-  - --follow re-opens the file after rotate (inode change or size shrink),
-    re-emitting from the new file's head; the consumer must dedupe if needed.
-  - SIGINT exits with code 0 (graceful shutdown). If your CI scripts need to
-    distinguish SIGINT from normal EOF, this is a follow-up consideration.
+注意:
+  - JSON パース失敗 / schema_version 不一致のレコードは stderr に warn を出して skip
+    （spec §8 forward-compat）
+  - 未知 event のレコードは stderr に warn を出して skip。ただし --types で
+    明示購読された event 名は通る（spec §8.1 / §6.20 user-signal）
+  - --format text は journal_summary を省略し 1 行 1 record を保つ
+  - --follow は rotate 検知（inode 変化 or サイズ縮小）で新ファイル先頭から
+    再出力する（重複は consumer 側で dedupe）
+  - SIGINT は exit 0（graceful shutdown）。CI で SIGINT と通常 EOF を区別したい場合は
+    follow-up 課題
+
+  - 'emit' サブコマンドは free-form user signal を events.jsonl に直接 append する
+    （daemon round-trip 不要 / daemon 停止中でも動く）。詳細は 'emit --help'。
 
 Exit codes:
-  0  normal exit (EOF without --follow, or SIGINT during --follow)
-  1  argument error / events.jsonl not found
+  0  正常終了（非 follow 時の EOF / follow 時の SIGINT）
+  1  引数エラー / events.jsonl が無い
+`,
+
+  help_events_emit: `
+elevens events emit -- free-form user signal を events.jsonl に append する
+
+Usage:
+  elevens events emit --type <name> [--message <text>] [--actor <id>] [--data k=v]...
+
+Options:
+  --type <name>            (必須) event type 名。snake_case 推奨。
+                           'signal:' prefix を強く推奨（例: signal:deploy_started）。
+  --message <text>         短い説明文（任意）
+  --actor <id>             投稿主の識別子（任意）。既定: $CMUX_SURFACE。
+                           --actor も CMUX_SURFACE も未設定なら record から field ごと省略
+  --data k=v               メタデータ key/value。複数指定可。最初の '=' で split。
+                           値は文字列固定（型推論しない）
+  --help, -h               このヘルプを表示
+
+例:
+  elevens events emit --type signal:deploy_started --message "rolling out v1.2.3"
+  elevens events emit --type signal:deploy_finished --data version=v1.2.3 --data env=prod
+
+注意:
+  - best-effort: lock / lease / mutex なし。POSIX O_APPEND atomicity に依存
+  - daemon 停止中でも動く（CLI が events.jsonl を直接 write）
+  - --type が typed daemon event の予約名（例: task_completed）と一致した場合は
+    stderr に warn を出すが投稿は通す（exit 0）
+
+Exit codes:
+  0  正常終了（record append 完了 / 予約名 warn でも exit 0）
+  1  引数エラー（--type 欠落 / --data 不正形式 / 未知 flag 等）
 `,
 
   help_metrics: `

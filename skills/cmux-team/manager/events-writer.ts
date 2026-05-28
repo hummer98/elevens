@@ -239,20 +239,14 @@ function eventsFilePath(): string {
 }
 
 /**
- * record を 1 行 JSON にエンコードして events.jsonl に append する。
+ * 1 行 JSONL を events.jsonl に append する内部共通実装。
  *
- * - `schema_version` / `ts` は呼び出し側に書かせず writer が注入する
- * - 書き込み失敗時は throw せず、manager.log に `events_writer_error` を残す
- *   (daemon 全体の availability を最優先する best-effort)
+ * `emitEvent`（typed daemon event）と `emitUserSignal`（free-form user signal）の
+ * 両者がここを通る。失敗時は throw せず `manager.log` に `events_writer_error` を残す。
+ * daemon 全体の availability を最優先する best-effort 設計（旧 `emitEvent` の挙動を保つ）。
  */
-export async function emitEvent(record: EventStreamRecord): Promise<void> {
+async function writeJsonlLine(line: string, eventName: string): Promise<void> {
   const filePath = eventsFilePath();
-  const enriched = {
-    ts: new Date().toISOString(),
-    schema_version: EVENTS_SCHEMA_VERSION,
-    ...record,
-  };
-  const line = JSON.stringify(enriched) + "\n";
   try {
     await mkdir(dirname(filePath), { recursive: true });
     await appendFile(filePath, line);
@@ -263,11 +257,127 @@ export async function emitEvent(record: EventStreamRecord): Promise<void> {
     try {
       await log(
         "events_writer_error",
-        `event=${record.event} message=${err?.message ?? String(e)}${code}${stackHead}`,
+        `event=${eventName} message=${err?.message ?? String(e)}${code}${stackHead}`,
       );
     } catch {
       // logger も失敗するケース（例: PROJECT_ROOT strict + 未設定）は完全に飲む。
       // events.jsonl の不達は daemon 機能要件ではない（best-effort）。
     }
   }
+}
+
+/**
+ * record を 1 行 JSON にエンコードして events.jsonl に append する。
+ *
+ * - `schema_version` / `ts` は呼び出し側に書かせず writer が注入する
+ * - 書き込み失敗時は throw せず、manager.log に `events_writer_error` を残す
+ *   (daemon 全体の availability を最優先する best-effort)
+ */
+export async function emitEvent(record: EventStreamRecord): Promise<void> {
+  const enriched = {
+    ts: new Date().toISOString(),
+    schema_version: EVENTS_SCHEMA_VERSION,
+    ...record,
+  };
+  const line = JSON.stringify(enriched) + "\n";
+  await writeJsonlLine(line, record.event);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// T029: User signal（free-form event）
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * T029: user-signal record の最小 shape。typed `EventStreamRecord` とは別経路で、
+ * `event` は自由文字列（snake_case 推奨 / `signal:` prefix 推奨）。
+ * 詳細仕様は `docs/spec/10-events-stream.md` §6.20。
+ */
+export interface UserSignalRecord {
+  /** event 種別（自由文字列）。snake_case 推奨、`signal:` prefix 推奨。 */
+  event: string;
+  /** 短い説明。任意。 */
+  message?: string;
+  /** 投稿主の識別子。任意。CLI 側で env から自動補完されることがある。 */
+  actor?: string;
+  /** 追加メタデータ。任意。値型は最小公約数として string で固定。 */
+  data?: Record<string, string>;
+}
+
+/**
+ * T029: 予約名（typed daemon event の event 名）。CLI 側で `--type <name>` が
+ * これらと衝突した場合は stderr に warn を出してから投稿を通す（hard block しない）。
+ *
+ * **重要**: `EventStreamRecord["event"]` union と同期する必要がある。下記の
+ * `_AssertReservedCoversUnion` 型チェックが乖離を即時 fail させる。
+ *
+ * `as const` literal tuple を中継して narrowed name 型を作っているのは、
+ * `new Set<string>([...])` だと型が `Set<string>` に潰れて exhaustiveness check が
+ * 常に `true` になってしまうため。
+ */
+const RESERVED_EVENTS_LIST = [
+  "task_created",
+  "task_ready",
+  "task_assigned",
+  "task_completed",
+  "task_completed_state_mismatch",
+  "task_aborted",
+  "task_sync_guard_rejected",
+  "task_reverted_to_ready",
+  "conductor_running",
+  "conductor_recovered",
+  "conductor_disconnected",
+  "conductor_asking",
+  "conductor_done_unresolved",
+  "conductor_start_timeout",
+  "conductor_assign_timeout",
+  "conductor_disconnect_timeout",
+  "api_error_received",
+  "mailbox_changed",
+  "artifact_added",
+  "reload_failed",
+  "worktree_archived",
+] as const;
+export type ReservedEventName = (typeof RESERVED_EVENTS_LIST)[number];
+export const RESERVED_EVENTS: ReadonlySet<ReservedEventName> = new Set(
+  RESERVED_EVENTS_LIST,
+);
+
+// EventStreamRecord["event"] のうち RESERVED_EVENTS_LIST に無いものがあれば型エラー。
+// 新しい typed event を `EventStreamRecord` union に追加した際は RESERVED_EVENTS_LIST も
+// 更新する必要がある。
+type _AssertReservedCoversUnion =
+  Exclude<EventStreamRecord["event"], ReservedEventName> extends never
+    ? true
+    : never;
+const _reservedExhaustivenessCheck: _AssertReservedCoversUnion = true;
+void _reservedExhaustivenessCheck;
+
+/**
+ * T029: free-form user-signal を 1 行 events.jsonl に append する。
+ *
+ * `emitEvent`（typed daemon event）と並んで存在するもう一つの writer。
+ * discriminated union を一切壊さないために別 export として独立させている。
+ *
+ * - `schema_version` / `ts` は writer 側で自動注入（`emitEvent` と同じ振る舞い）
+ * - optional field（`message` / `actor` / `data`）は undefined のとき key ごと省略
+ * - `data` が空 `{}` のときも `data` key を省略（observer が typed event との区別を data 有無でできるように）
+ * - 書き込み失敗は throw せず `manager.log` に `events_writer_error` を残す
+ *
+ * 詳細仕様は `docs/spec/10-events-stream.md` §6.20。
+ */
+export async function emitUserSignal(record: UserSignalRecord): Promise<void> {
+  const enriched: Record<string, unknown> = {
+    ts: new Date().toISOString(),
+    schema_version: EVENTS_SCHEMA_VERSION,
+    event: record.event,
+  };
+  if (record.message !== undefined) enriched.message = record.message;
+  if (record.actor !== undefined && record.actor.length > 0) {
+    enriched.actor = record.actor;
+  }
+  if (record.data !== undefined && Object.keys(record.data).length > 0) {
+    enriched.data = record.data;
+  }
+  const line = JSON.stringify(enriched) + "\n";
+  await writeJsonlLine(line, record.event);
 }

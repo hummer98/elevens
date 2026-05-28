@@ -227,6 +227,7 @@ A third category alongside Task / Artifact. An Epic is a "goal you want to achie
 | `elevens metrics [--since <range>] [--group-by day]` | Show task lifecycle / tool call / token aggregates (see `docs/spec/11-metrics.md`) |
 | `elevens metrics snapshot\|compare\|health\|query` | Daily snapshot, cohort comparison, health check, and DuckDB ad-hoc query |
 | `elevens events [--follow] [--types <names>] [--format json\|tsv]` | Tail / filter the events stream (`.team/logs/events.jsonl`) |
+| `elevens events emit --type <name> [--message <text>] [--actor <id>] [--data k=v]...` | Append a free-form user signal to the events stream (best-effort; works while daemon is stopped). See `docs/spec/10-events-stream.md` §6.20 |
 
 #### Slash Commands (run within Claude)
 

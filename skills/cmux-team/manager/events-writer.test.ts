@@ -3,7 +3,9 @@ import { readFile, stat, writeFile, chmod } from "fs/promises";
 import { join } from "path";
 import {
   emitEvent,
+  emitUserSignal,
   mapAbortReason,
+  RESERVED_EVENTS,
   EVENTS_SCHEMA_VERSION,
   type EventStreamRecord,
   type SpecAbortReason,
@@ -296,6 +298,145 @@ describe("emitEvent: payload type 動作", () => {
     const [rec] = (await readJsonl()) as [Record<string, unknown>];
     expect(rec.event).toBe("worktree_archived");
     expect("last_commit_sha" in rec).toBe(false);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// T029: emitUserSignal（free-form user-signal）
+// ──────────────────────────────────────────────────────────────────────────
+
+describe("T029: emitUserSignal", () => {
+  test("W1 最小: event のみで 1 行 append、schema_version=2 / ts ISO 8601、他 field 無し", async () => {
+    await emitUserSignal({ event: "signal:deploy_started" });
+    const lines = await readJsonl();
+    expect(lines).toHaveLength(1);
+    const rec = lines[0] as Record<string, unknown>;
+    expect(rec.event).toBe("signal:deploy_started");
+    expect(rec.schema_version).toBe(EVENTS_SCHEMA_VERSION);
+    expect(typeof rec.ts).toBe("string");
+    expect(rec.ts as string).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect("message" in rec).toBe(false);
+    expect("actor" in rec).toBe(false);
+    expect("data" in rec).toBe(false);
+  });
+
+  test("W2 全 field round-trip: event / message / actor / data", async () => {
+    await emitUserSignal({
+      event: "signal:deploy_finished",
+      message: "rolled out v1.2.3",
+      actor: "surface:42",
+      data: { version: "v1.2.3", env: "prod" },
+    });
+    const [rec] = (await readJsonl()) as [Record<string, unknown>];
+    expect(rec.event).toBe("signal:deploy_finished");
+    expect(rec.message).toBe("rolled out v1.2.3");
+    expect(rec.actor).toBe("surface:42");
+    expect(rec.data).toEqual({ version: "v1.2.3", env: "prod" });
+  });
+
+  test("W3 optional field 省略時に record key ごと省略される", async () => {
+    await emitUserSignal({ event: "signal:x", message: "only msg" });
+    const [rec] = (await readJsonl()) as [Record<string, unknown>];
+    expect(rec.event).toBe("signal:x");
+    expect(rec.message).toBe("only msg");
+    expect("actor" in rec).toBe(false);
+    expect("data" in rec).toBe(false);
+  });
+
+  test("W4 data が空 {} のときは data key を省略", async () => {
+    await emitUserSignal({ event: "signal:x", data: {} });
+    const [rec] = (await readJsonl()) as [Record<string, unknown>];
+    expect("data" in rec).toBe(false);
+  });
+
+  test("W5 並行 5 件 → 全行 JSON.parse 成功 + 行数一致", async () => {
+    const tasks: Promise<void>[] = [];
+    for (let i = 0; i < 5; i++) {
+      tasks.push(
+        emitUserSignal({
+          event: "signal:burst",
+          message: `m${i}`,
+          data: { i: String(i) },
+        }),
+      );
+    }
+    await Promise.all(tasks);
+    const lines = await readJsonl();
+    expect(lines).toHaveLength(5);
+    const msgs = new Set<string>();
+    for (const l of lines) {
+      const rec = l as Record<string, unknown>;
+      expect(rec.event).toBe("signal:burst");
+      msgs.add(rec.message as string);
+    }
+    expect(msgs.size).toBe(5);
+  });
+
+  test("W6 typed emitEvent と user signal の混在 append、行順保持、全件パース可", async () => {
+    await emitEvent({ event: "task_ready", task_id: "T1" });
+    await emitUserSignal({ event: "signal:checkpoint", message: "between" });
+    await emitEvent({ event: "task_ready", task_id: "T2" });
+    const lines = (await readJsonl()) as Record<string, unknown>[];
+    expect(lines).toHaveLength(3);
+    expect(lines[0]!.event).toBe("task_ready");
+    expect(lines[0]!.task_id).toBe("T1");
+    expect(lines[1]!.event).toBe("signal:checkpoint");
+    expect(lines[1]!.message).toBe("between");
+    expect(lines[2]!.event).toBe("task_ready");
+    expect(lines[2]!.task_id).toBe("T2");
+  });
+
+  test("W7 書き込み失敗時に throw しない / manager.log に events_writer_error を残す", async () => {
+    const filePath = join(project.root, ".team/logs/events.jsonl");
+    const { mkdir } = await import("fs/promises");
+    await mkdir(filePath, { recursive: true });
+    let threw = false;
+    try {
+      await emitUserSignal({ event: "signal:err", message: "boom" });
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
+    const managerLog = await readFile(
+      join(project.root, ".team/logs/manager.log"),
+      "utf-8",
+    );
+    expect(managerLog).toContain("events_writer_error");
+    expect(managerLog).toContain("event=signal:err");
+    expect(managerLog).toMatch(/message=/);
+  });
+
+  test("W8 RESERVED_EVENTS には全 typed event 名が runtime でも含まれる", async () => {
+    // 既存の typed event 名 21 種（events-writer.ts EventStreamRecord union と一致）を確認。
+    const expected = [
+      "task_created",
+      "task_ready",
+      "task_assigned",
+      "task_completed",
+      "task_completed_state_mismatch",
+      "task_aborted",
+      "task_sync_guard_rejected",
+      "task_reverted_to_ready",
+      "conductor_running",
+      "conductor_recovered",
+      "conductor_disconnected",
+      "conductor_asking",
+      "conductor_done_unresolved",
+      "conductor_start_timeout",
+      "conductor_assign_timeout",
+      "conductor_disconnect_timeout",
+      "api_error_received",
+      "mailbox_changed",
+      "artifact_added",
+      "reload_failed",
+      "worktree_archived",
+    ];
+    expect(RESERVED_EVENTS.size).toBe(expected.length);
+    for (const name of expected) {
+      expect(RESERVED_EVENTS.has(name as never)).toBe(true);
+    }
+    // 自由 type は含まれない
+    expect(RESERVED_EVENTS.has("signal:deploy_started" as never)).toBe(false);
   });
 });
 

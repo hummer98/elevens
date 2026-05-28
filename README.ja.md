@@ -222,6 +222,7 @@ Task / Artifact と並ぶ第三のカテゴリ。「達成したいゴール」�
 | `elevens metrics [--since <range>] [--group-by day]` | タスク lifecycle / tool call / token の集計サマリ（詳細は `docs/spec/11-metrics.md`） |
 | `elevens metrics snapshot\|compare\|health\|query` | daily snapshot / cohort 比較 / health check / DuckDB ad-hoc query |
 | `elevens events [--follow] [--types <names>] [--format json\|tsv]` | events stream（`.team/logs/events.jsonl`）を tail / filter |
+| `elevens events emit --type <name> [--message <text>] [--actor <id>] [--data k=v]...` | events stream に free-form な user signal を append（best-effort、daemon 停止中でも動作）。`docs/spec/10-events-stream.md` §6.20 参照 |
 
 #### スラッシュコマンド（Claude 内で実行）
 

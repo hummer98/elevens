@@ -319,7 +319,7 @@ events spec §8 に従い、reader である本コマンドは以下のとおり
 | 異常 | 動作 |
 |---|---|
 | `schema_version` が `2` 以外 | `elevens events` 側で skip + warn（events-cli 実装済み）。Master 側では何もしない |
-| 未知 `event` | `elevens events` の `KNOWN_EVENTS` で skip + warn。本コマンドの `--types` filter で更に絞られる |
+| 未知 `event` | `elevens events` で `--types` 無指定なら `KNOWN_EVENTS` で skip + warn。本コマンドは `--types` で明示購読しているので、購読中の event 名は typed / user-signal を問わず通り、警告には出ない（spec §8.1） |
 | 未知 `reason` / `kind` enum 値 | Master が exhaustive switch を **書かない**。default branch で `[log]` に流す（`task_aborted` の方針を `task_sync_guard_rejected.kind` 等にも適用） |
 | 必須 field 欠損 | `elevens events` 側で skip + warn。Master は受信しない |
 | JSON parse 失敗 | `elevens events` 側で skip + warn |
