@@ -796,21 +796,16 @@ export async function resetConductor(
       await _backend.killClaudeProcess(_backend.surfaceToRef(conductor.surface), conductor.pid);
     }
 
-    // 1. タブ内のサブ surface を閉じる（T207: pane キャッシュ永続化を廃止し on-demand 解決）
-    //    cmux tree 1 回で Conductor の所属 pane と同 pane の全 surface を取得し、
-    //    Conductor 自身を除いた sibling surface を閉じる。
-    //    取得失敗時 / 結果 0 件時は agents の surface を個別に閉じる safety net に落ちる。
-    //    peer discovery（listSiblingSurfaces）は cmux 固有のため backend 切り替え対象外（M3-b で対応予定）。
-    const siblings = await cmux.listSiblingSurfaces(conductor.surface, workspace);
-    if (siblings.length > 0) {
-      for (const s of siblings) {
-        if (s !== conductor.surface) {
-          await _backend.kill(_backend.surfaceToRef(s));
-        }
-      }
-    } else {
-      // safety net: tree 取得失敗 or sibling 0 件 → 既知の agents を個別に閉じる
-      for (const agent of conductor.agents) {
+    // 1. この Conductor が spawn した Agent surface のみを閉じる。
+    //    旧実装は `cmux.listSiblingSurfaces`（= Conductor と同 pane の全 surface）を
+    //    「自分の Agent 群」とみなして閉じていたが、listSiblingSurfaces は pane の
+    //    同居判定しかできず所有を保証しない。pane に同居する無関係 surface（ユーザーが
+    //    手動で積んだ surface 等）まで巻き添えで閉じる事故があったため、所有判定を
+    //    daemon が把握している `conductor.agents` に限定する。
+    //    トレードオフ: agents リストが不完全な場合（daemon 再起動直後など）は孤児 Agent
+    //    surface が閉じ残りうるが、「未知 surface を巻き込む」害より明確に小さいので許容する。
+    for (const agent of conductor.agents) {
+      if (agent.surface !== conductor.surface) {
         await _backend.kill(_backend.surfaceToRef(agent.surface));
       }
     }

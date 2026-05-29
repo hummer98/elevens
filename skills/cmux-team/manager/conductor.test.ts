@@ -727,6 +727,71 @@ describe("resetConductor targetStatus オプション (T250)", () => {
   });
 });
 
+// --- resetConductor は conductor.agents のみ閉じ、同 pane の未知 surface は閉じない ---
+//
+// 旧実装は listSiblingSurfaces（= Conductor と同 pane の全 surface）を所有とみなして
+// 全 close していたため、pane に同居する無関係 surface（ユーザーが手動で積んだ surface 等）
+// を巻き添えで閉じる事故があった。所有判定を conductor.agents に限定したことの回帰防止。
+describe("resetConductor agents 限定 close（巻き添え回帰防止）", () => {
+  let listSiblingsSpy: ReturnType<typeof spyOn>;
+  let closeSurfaceSpy: ReturnType<typeof spyOn>;
+  let getPaneForSurfaceSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    // listSiblingSurfaces は「無関係 surface を含む同 pane の全 surface」を返すが、
+    // 新実装はこれを所有判定に使わない（呼ばれても結果は無視される）。
+    listSiblingsSpy = spyOn(cmux, "listSiblingSurfaces").mockResolvedValue([
+      "surface:cond-own",
+      "surface:agent-a",
+      "surface:user-bystander",
+    ]);
+    closeSurfaceSpy = spyOn(cmux, "closeSurface").mockResolvedValue(undefined as any);
+    getPaneForSurfaceSpy = spyOn(cmux, "getPaneForSurface").mockResolvedValue("pane:1");
+  });
+
+  afterEach(() => {
+    listSiblingsSpy.mockRestore();
+    closeSurfaceSpy.mockRestore();
+    getPaneForSurfaceSpy.mockRestore();
+  });
+
+  test("conductor.agents の surface のみ閉じ、無関係 sibling と Conductor 自身は閉じない", async () => {
+    const conductor: ConductorState = {
+      surface: "surface:cond-own",
+      startedAt: new Date().toISOString(),
+      agents: [
+        { surface: "surface:agent-a", spawnedAt: new Date().toISOString(), status: "running" },
+      ],
+      status: "running",
+      taskRunId: "task-1-own",
+      taskId: "1",
+    };
+
+    await resetConductor(conductor, testDir);
+
+    const closed = closeSurfaceSpy.mock.calls.map((c: unknown[]) => c[0]);
+    // agent は閉じる
+    expect(closed).toContain("surface:agent-a");
+    // 同 pane に居るが agents に無い無関係 surface は絶対に閉じない（巻き添え防止）
+    expect(closed).not.toContain("surface:user-bystander");
+    // Conductor 自身も閉じない（idle 復帰 / reserved 復帰のため）
+    expect(closed).not.toContain("surface:cond-own");
+  });
+
+  test("agents 空なら surface を 1 つも閉じない（同 pane に sibling が居ても巻き込まない）", async () => {
+    const conductor: ConductorState = {
+      surface: "surface:cond-own",
+      startedAt: new Date().toISOString(),
+      agents: [],
+      status: "broken",
+    };
+
+    await resetConductor(conductor, testDir, undefined, { targetStatus: "idle" });
+
+    expect(closeSurfaceSpy).not.toHaveBeenCalled();
+  });
+});
+
 // --- T251: resetConductor surface 実在確認 ---
 describe("resetConductor surface 実在確認 (T251)", () => {
   // surface 実在確認 (getPaneForSurface) の返り値をケース毎に切り替える。
