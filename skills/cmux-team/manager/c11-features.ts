@@ -12,7 +12,7 @@ import { execFile as execFileCb } from "child_process";
 import { promisify } from "util";
 import { SUBSTRATE_BINARY } from "./cmux";
 import { validateMailboxPayload } from "./mailbox-schema";
-import { warn as logWarn } from "./logger";
+import { warn as logWarn, log as logInfo } from "./logger";
 
 const execFile = promisify(execFileCb);
 
@@ -220,6 +220,36 @@ export async function clearMailbox(target: MailboxTarget, key: string): Promise<
 }
 
 /**
+ * execFile の reject error から timeout / signal / 非0 exit を切り分けられる
+ * 1 行 detail を組み立てる。
+ *
+ * - timeout で c11 を kill した場合: `killed=true signal=SIGTERM`（stderr 空）になる ＝ 混雑による遅延
+ * - 非0 exit の場合: `code=N stderr=...` が乗る ＝ c11 側の実エラー
+ *
+ * CLAUDE.md ガードレール「外部コマンド失敗時は stderr/stdout を必ず detail に含める」対応。
+ */
+function describeExecError(e: Error): string {
+  const anyE = e as {
+    message?: string;
+    killed?: boolean;
+    signal?: string | null;
+    code?: number | string | null;
+    stderr?: unknown;
+  };
+  const parts: string[] = [(anyE.message ?? String(e)).split("\n")[0]];
+  if (anyE.killed) parts.push("killed=true");
+  if (anyE.signal) parts.push(`signal=${anyE.signal}`);
+  if (anyE.code !== undefined && anyE.code !== null) parts.push(`code=${anyE.code}`);
+  const stderr = (anyE.stderr ?? "").toString().trim();
+  if (stderr) parts.push(`stderr=${stderr.slice(0, 500)}`);
+  return parts.join(" ");
+}
+
+// 連続失敗時に同一 target の MAILBOX_FETCH_ERROR を 1 本/この間隔 に間引く。
+// 抑制した件数は次に出すログ行・復帰サマリに集計して載せるので「埋もれて気づかない」ことはない。
+const MAILBOX_ERROR_LOG_THROTTLE_MS = 60_000;
+
+/**
  * `mailbox.*` キーが追加・変更・削除されたら onChange を呼び出す poll loop。
  *
  * - mailbox 非対応 c11 では即 resolve（poll loop は走らない）
@@ -238,6 +268,10 @@ export async function watchMailbox(
   let stopped = false;
   let prev: Record<string, MailboxValue> = {};
   let firstTick = true;
+  // 連続失敗のログ間引き状態。エピソード = 「ok を挟まずに続く（または断続的に繰り返す）失敗の連なり」。
+  let errTotal = 0; // 現エピソードの総失敗数
+  let errSuppressed = 0; // 直近に出したログ行以降に抑制した失敗数
+  let lastErrLogAt = 0; // 直近に MAILBOX_FETCH_ERROR を出した時刻
   const stop = (): void => {
     stopped = true;
   };
@@ -249,9 +283,36 @@ export async function watchMailbox(
     if (r.kind === "error") {
       // A031 §2 e2e smoke で発覚した永続 desync を回避: error 時は prev を触らず
       // diff 計算もスキップ。次 tick で正常取得できれば自然に diff が再開する。
-      await logWarn("MAILBOX_FETCH_ERROR", `target=${target.kind}:${target.ref} ${r.error.message}`).catch(() => {});
+      errTotal++;
+      const now = Date.now();
+      if (now - lastErrLogAt >= MAILBOX_ERROR_LOG_THROTTLE_MS) {
+        // throttle window 先頭（初回は lastErrLogAt=0 で必ず通る）だけ実ログを出す。
+        const suffix =
+          errSuppressed > 0
+            ? ` (直近 ${Math.round((now - lastErrLogAt) / 1000)}s で同一 target の失敗 ${errSuppressed} 件を抑制)`
+            : "";
+        await logWarn(
+          "MAILBOX_FETCH_ERROR",
+          `target=${target.kind}:${target.ref} ${describeExecError(r.error)}${suffix}`
+        ).catch(() => {});
+        lastErrLogAt = now;
+        errSuppressed = 0;
+      } else {
+        errSuppressed++;
+      }
       if (!stopped) setTimeout(() => void tick(), interval);
       return;
+    }
+    if (errTotal > 0) {
+      // 失敗エピソードからの復帰。総数（と未集計の抑制分）を 1 行に畳んで残す。
+      const tail = errSuppressed > 0 ? `, うち未集計の抑制 ${errSuppressed} 件` : "";
+      await logInfo(
+        "MAILBOX_FETCH_RECOVERED",
+        `target=${target.kind}:${target.ref} 失敗 ${errTotal} 件のあと復帰${tail}`
+      ).catch(() => {});
+      errTotal = 0;
+      errSuppressed = 0;
+      lastErrLogAt = 0;
     }
     if (r.kind === "unsupported") {
       // 起動時には support されていたが途中で capability が消えるケースは想定外。

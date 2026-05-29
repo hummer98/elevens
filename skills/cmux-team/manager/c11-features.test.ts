@@ -188,6 +188,52 @@ describe("watchMailbox の error 経路で prev を破壊しない (A031 §2 fol
     // 1 回の呼び出しで unsupported を確認したら停止しているはず
     expect(calls).toBeLessThanOrEqual(2);
   });
+
+  test("連続失敗は 1 本に間引かれ、詳細(signal/killed)が載り、復帰で集計サマリが出る", async () => {
+    const { readFile } = await import("fs/promises");
+    const c11 = await import("./c11-features");
+    c11.__resetCapabilitiesCache();
+
+    // logger は PROJECT_ROOT 配下の .team/logs/manager.log に書く。dummy project に向ける。
+    const origRoot = process.env.PROJECT_ROOT;
+    process.env.PROJECT_ROOT = testDir;
+    await mkdir(join(testDir, ".team/logs"), { recursive: true });
+
+    // tick 1..4: timeout kill 相当の error（killed/signal 付き）、tick 5+: ok で復帰
+    let phase = 0;
+    c11.__setFetchMailboxImpl(async () => {
+      phase++;
+      if (phase <= 4) {
+        const err = Object.assign(new Error("Command failed: c11 --json get-metadata"), {
+          killed: true,
+          signal: "SIGTERM",
+        });
+        return { kind: "error" as const, error: err };
+      }
+      return { kind: "ok" as const, data: { "mailbox.x": "foo" } as Record<string, any> };
+    });
+
+    const handle = await c11.watchMailbox({ kind: "surface", ref: "surface:1" }, () => {}, {
+      intervalMs: 30, // 250ms に clamp
+    });
+    await new Promise((r) => setTimeout(r, 1500));
+    handle.stop();
+    c11.__setFetchMailboxImpl(null);
+    process.env.PROJECT_ROOT = origRoot;
+
+    const log = await readFile(join(testDir, ".team/logs/manager.log"), "utf8");
+    const errLines = log.split("\n").filter((l) => l.includes("MAILBOX_FETCH_ERROR"));
+    const recLines = log.split("\n").filter((l) => l.includes("MAILBOX_FETCH_RECOVERED"));
+
+    // 複数 tick 失敗しても 60s window 内なので ERROR は 1 本に間引かれる
+    expect(errLines.length).toBe(1);
+    // execFile error の signal/killed が detail に載る（timeout 切り分け用）
+    expect(errLines[0]).toContain("killed=true");
+    expect(errLines[0]).toContain("signal=SIGTERM");
+    // 復帰時に総失敗数を畳んだサマリが 1 本出る
+    expect(recLines.length).toBe(1);
+    expect(recLines[0]).toMatch(/失敗 \d+ 件のあと復帰/);
+  });
 });
 
 describe("isMailboxSupported は capabilities methods を見る (T016)", () => {
