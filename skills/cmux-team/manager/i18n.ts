@@ -495,12 +495,14 @@ Notes:
 elevens clear-conductor -- remove a broken Conductor from the pool (does NOT close the surface)
 
 Usage:
-  elevens clear-conductor --surface <id>
+  elevens clear-conductor [--surface <id>]
 
 Options:
-  --surface <id>   surface ID (e.g. 112 or surface:112)
+  --surface <id>   surface ID (e.g. 112 or surface:112). When omitted, resolves
+                   from CMUX_SURFACE env or "cmux identify" (the pane shell)
 
 Examples:
+  elevens clear-conductor                       # clear the surface running this shell
   elevens clear-conductor --surface 112
   elevens clear-conductor --surface surface:112
 
@@ -1621,12 +1623,14 @@ Notes:
 elevens clear-conductor -- broken Conductor をプールから外す（surface は閉じません）
 
 Usage:
-  elevens clear-conductor --surface <id>
+  elevens clear-conductor [--surface <id>]
 
 Options:
-  --surface <id>   surface ID（例: 112 または surface:112）
+  --surface <id>   surface ID（例: 112 または surface:112）。省略時は
+                   CMUX_SURFACE 環境変数 → "cmux identify"（pane の shell）の順で解決
 
 Examples:
+  elevens clear-conductor                       # このシェルが動いている surface をクリア
   elevens clear-conductor --surface 112
   elevens clear-conductor --surface surface:112
 
