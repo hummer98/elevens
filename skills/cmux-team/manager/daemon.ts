@@ -1015,7 +1015,7 @@ export async function startMaster(state: DaemonState, daemonSurface?: string): P
         `${formatSurface(surface, "U")} newPort=${state.proxyPort}`
       );
       await removeMaster(state, surface, "proxy_port_changed");
-      await cmux.closeSurface(surface).catch(() => {});
+      await cmux.closeSurface(surface, "master_respawn_proxy_changed").catch(() => {});
     }
     state.proxyPortChanged = false;
     restored = 0;
@@ -1350,7 +1350,7 @@ async function applyDiscardOnly(
 ): Promise<void> {
   // C: cleanup-stale — pid_dead + idle の残骸 pane を close（sequential）
   for (const surface of plan.cleanup) {
-    await cmux.closeSurface(surface);
+    await cmux.closeSurface(surface, "conductor_stale_pid_dead_idle");
     await log(
       "conductor_stale_surface_closed",
       `${formatSurface(surface, "C")} reason=pid_dead_idle`,

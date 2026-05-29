@@ -1360,7 +1360,7 @@ async function cmdStart(): Promise<void> {
       // 1. 全 Agent を close
       for (const [, conductor] of state.conductors) {
         for (const agent of conductor.agents) {
-          await cmux.closeSurface(agent.surface).catch(() => {});
+          await cmux.closeSurface(agent.surface, "full_quit").catch(() => {});
         }
       }
 
@@ -1369,14 +1369,14 @@ async function cmdStart(): Promise<void> {
       for (const [, conductor] of state.conductors) {
         const siblings = await cmux.listSiblingSurfaces(conductor.surface, state.workspace ?? undefined);
         for (const s of siblings) {
-          await cmux.closeSurface(s).catch(() => {});
+          await cmux.closeSurface(s, "full_quit").catch(() => {});
         }
-        await cmux.closeSurface(conductor.surface).catch(() => {});
+        await cmux.closeSurface(conductor.surface, "full_quit").catch(() => {});
       }
 
       // 3. Master surface を close（T229: 複数 Master 対応）
       for (const surface of [...state.masters.keys()]) {
-        await cmux.closeSurface(surface).catch(() => {});
+        await cmux.closeSurface(surface, "full_quit").catch(() => {});
       }
 
       // 4. 閉じた surface を state から除去してから team.json を永続化する。
@@ -3938,7 +3938,7 @@ async function cmdKillAgent(): Promise<void> {
   }
 
   // surface を閉じる（closeSurface は SESSION_ENDED を送信しないため、明示的に通知する）
-  await cmux.closeSurface(surface);
+  await cmux.closeSurface(surface, "kill-agent");
 
   // daemon に SESSION_ENDED を通知して agents リストから削除させる
   await postMessage({
@@ -3962,7 +3962,7 @@ async function cmdCloseAgent(): Promise<void> {
   }
 
   // surface を閉じる（closeSurface は SESSION_ENDED を送信しないため、明示的に通知する）
-  await cmux.closeSurface(surface);
+  await cmux.closeSurface(surface, "close-agent");
 
   // daemon に SESSION_ENDED を通知して agents リストから削除させる。
   // reason="close-agent" により daemon 側で status="completed" として done マーカーが書かれる。
@@ -5154,7 +5154,7 @@ async function cleanupAssignedTask(conductor: any): Promise<CleanupResult> {
   if (conductor.agents?.length > 0) {
     for (const agent of conductor.agents) {
       try {
-        await cmux.closeSurface(agent.surface);
+        await cmux.closeSurface(agent.surface, "restart_task_cleanup");
       } catch {}
     }
     method = "surface_close";

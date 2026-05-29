@@ -214,8 +214,20 @@ export async function readScreen(
   return stdout;
 }
 
-/** surface を閉じる。SESSION_ENDED は送信しないため、呼び出し元が必要に応じて明示的に送信すること */
-export async function closeSurface(surface: string): Promise<void> {
+/**
+ * surface を閉じる。SESSION_ENDED は送信しないため、呼び出し元が必要に応じて明示的に送信すること。
+ *
+ * elevens 自身が surface を close した事実を必ず追跡できるよう、この単一チョークポイントで
+ * `surface_closed surface=... reason=...` を記録する。reason は必須引数とし、呼び出し側に
+ * 「なぜ閉じたか」の明示を強制する（無言の消失を構造的に排除する。observatory 原則）。
+ * 外部要因（c11 / Agent crash / 手動 pane close）による消失はこの関数を通らないため、
+ * ここに出る行はすべて「elevens が意図的に閉じた」ことを意味する。
+ */
+export async function closeSurface(
+  surface: string,
+  reason: string
+): Promise<void> {
+  await log("surface_closed", `surface=${surface} reason=${reason}`);
   await runCmux(["close-surface", "--surface", surface]).catch(
     () => {}
   );

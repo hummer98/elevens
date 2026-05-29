@@ -210,12 +210,12 @@ export class ClaudeCodeBackend implements RuntimeBackend {
    * セッションを強制終了する（cmux close-surface）。
    * idempotent — 既に閉じている場合はエラーを無視する。
    */
-  async kill(sessionRef: SessionRef): Promise<void> {
+  async kill(sessionRef: SessionRef, reason: string): Promise<void> {
     if (this.disposed) return;
     const surface = fromSessionRef(sessionRef);
     this.stopPidWatcher(surface);
     try {
-      await cmux.closeSurface(surface);
+      await cmux.closeSurface(surface, reason);
     } catch {
       // 既に閉じている場合は無視（idempotent）
     }

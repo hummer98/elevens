@@ -166,8 +166,10 @@ export interface RuntimeBackend {
   /**
    * セッションを強制終了する。
    * 完了済みセッションに対して呼んでも throw しない（idempotent）。
+   *
+   * reason は surface close の追跡用ラベル（cmux.closeSurface の surface_closed ログに記録される）。
    */
-  kill(sessionRef: SessionRef): Promise<void>;
+  kill(sessionRef: SessionRef, reason: string): Promise<void>;
 
   /**
    * パーミッション要求に応答する。

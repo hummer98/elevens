@@ -806,7 +806,10 @@ export async function resetConductor(
     //    surface が閉じ残りうるが、「未知 surface を巻き込む」害より明確に小さいので許容する。
     for (const agent of conductor.agents) {
       if (agent.surface !== conductor.surface) {
-        await _backend.kill(_backend.surfaceToRef(agent.surface));
+        await _backend.kill(
+          _backend.surfaceToRef(agent.surface),
+          `reset_conductor_agent:${effectiveReason ?? "unknown"}`,
+        );
       }
     }
 

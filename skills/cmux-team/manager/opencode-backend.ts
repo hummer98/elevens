@@ -141,8 +141,10 @@ export class OpenCodeBackend implements RuntimeBackend {
   /**
    * セッションを強制終了する（abort のみ、idempotent）。
    * opencode ではセッションを delete せず abort のみ行う。
+   * _reason は RuntimeBackend.kill インターフェース整合のため受けるが、opencode は
+   * cmux surface を close しない（API abort のみ）ため surface_closed ログには出ない。
    */
-  async kill(sessionRef: SessionRef): Promise<void> {
+  async kill(sessionRef: SessionRef, _reason: string): Promise<void> {
     if (this.disposed) return;
     const id = sessionRef as string;
     this.sessionMeta.delete(id);
