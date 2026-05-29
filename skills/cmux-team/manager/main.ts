@@ -5240,7 +5240,7 @@ async function cleanupAssignedTask(conductor: any): Promise<CleanupResult> {
  */
 async function cmdClearConductor(): Promise<void> {
   if (hasHelpFlag()) showHelp(t("help_clear_conductor"));
-  const surface = requireArg("surface");
+  const surface = getArg("surface") ?? await resolveCallerSurfaceOrExit();
   const normalizedSurface = surface.startsWith("surface:") ? surface : `surface:${surface}`;
 
   const teamJsonPath = join(PROJECT_ROOT, ".team/team.json");
