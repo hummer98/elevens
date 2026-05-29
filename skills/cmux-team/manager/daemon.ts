@@ -74,6 +74,13 @@ export interface DaemonState {
   projectRoot: string;
   pollInterval: number;
   maxConductors: number;
+  /**
+   * `clear-conductor` で Conductor プールから明示的に外された surface の集合。
+   * Manager は二度とこの surface を Conductor として扱わない（再 self-register を拒否）。
+   * in-memory のみ（永続化しない）。daemon 再起動で config 由来の maxConductors に戻るのと
+   * 同じく、この除外もプロセス内限定。
+   */
+  clearedConductorSurfaces: Set<string>;
   /** レイアウトモード（wide=3 Conductor / 16x9=2 Conductor） */
   layout: LayoutMode;
   lastUpdate: Date;
@@ -412,6 +419,7 @@ export async function createDaemon(
     bootPhase: "infra",
     masters: new Map(),
     conductors: new Map(),
+    clearedConductorSurfaces: new Set(),
     projectRoot,
     pollInterval: Number(process.env.CMUX_TEAM_POLL_INTERVAL ?? 10_000),
     maxConductors,
@@ -1673,8 +1681,14 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
     }
 
     case "CONDUCTOR_CLEAR": {
-      // T250: broken Conductor を明示的に idle に戻す専用経路。
-      //       CONDUCTOR_DONE 流用だと `no_task` guard で早期 break されるため新 message 型で分離。
+      // broken Conductor を「Manager の Conductor プールから恒久的に外す」専用経路。
+      //   旧実装は surface 実在時に resetConductor を呼び、その内部 step1 で
+      //   listSiblingSurfaces（= conductor と同 pane の全 surface）を「自分の Agent 群」
+      //   とみなして全 close していた。pane に同居する無関係 surface まで巻き添えで
+      //   閉じる事故があったため、CONDUCTOR_CLEAR は surface に一切触れない方針に変更する。
+      //   代わりに entry 削除 + maxConductors 減算 + 再 self-register 拒否
+      //   (clearedConductorSurfaces) で「二度と Conductor として扱わない」を実現する。
+      //   slot 数は 1 減るが daemon 再起動 / `cmux-team start` で config 値に戻る。
       const conductor = state.conductors.get(message.surface);
       if (!conductor) {
         await log(
@@ -1690,59 +1704,44 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
         );
         break;
       }
-      // T027: surface が tree に存在しないなら idle 復帰でなく entry 削除する。
-      //   resetConductor は surface_missing 時に effectiveTargetStatus="broken" へ
-      //   倒し戻す (conductor.ts:780-782) ため、idle 復帰経路では「surface 不在の
-      //   broken」を絶対に解除できない。観察制約: 現役スロットの broken
-      //   (surface 実在) は drop 対象外なので、ここで pane の有無を確認して分岐する。
+      // R1: pid watcher / mailbox watcher を delete の前に明示停止する。
+      //   delete 後も interval が走り続けると dangling timer リーク + 削除済み
+      //   オブジェクトへの mutation（observability ノイズ — session_ended /
+      //   conductor_disconnected 誤発火）を起こす。abort_task / RESET_CONDUCTOR /
+      //   forceCloseDisconnectedConductor と同形の「pid watcher → mailbox watcher の
+      //   2 連停止」を必ず行う。
+      if (conductor.pidWatcherInterval) {
+        clearInterval(conductor.pidWatcherInterval);
+        conductor.pidWatcherInterval = undefined;
+      }
+      if (conductor.mailboxWatcherStop) {
+        try { conductor.mailboxWatcherStop(); } catch { /* best-effort */ }
+        conductor.mailboxWatcherStop = undefined;
+      }
+      // surface 実在性は観測ログ用にのみ取得する（分岐には使わない — どちらでも close しない）。
       const clearPane = await cmux.getPaneForSurface(
         conductor.surface,
         state.workspace ?? undefined,
       );
-      if (clearPane === undefined) {
-        // R1: pid watcher / mailbox watcher を delete の前に明示停止する。
-        //   daemon 再起動を挟むと applyRestorePlan (daemon.ts:1192-1197) で
-        //   broken でも pid 値が残っていれば spawnPidWatcher /
-        //   spawnConductorMailboxWatcher が再 spawn される。delete 後も interval が
-        //   走り続け、dangling timer リーク + 削除済みオブジェクトへの mutation
-        //   (observability ノイズ — session_ended / conductor_disconnected 誤発火) を
-        //   起こす。abort_task / RESET_CONDUCTOR (L1727-1736) /
-        //   forceCloseDisconnectedConductor (L4518-4527) と同形の「pid watcher →
-        //   mailbox watcher の 2 連停止」を必ず行う規約に合わせる。
-        if (conductor.pidWatcherInterval) {
-          clearInterval(conductor.pidWatcherInterval);
-          conductor.pidWatcherInterval = undefined;
-        }
-        if (conductor.mailboxWatcherStop) {
-          try { conductor.mailboxWatcherStop(); } catch { /* best-effort */ }
-          conductor.mailboxWatcherStop = undefined;
-        }
-        // C-I2 invariant: status=broken ⇒ taskRunId == null は維持されている前提。
-        // worktree archive も broken 遷移時に実施済み
-        // (CONDUCTOR_DISCONNECT_TIMEOUT 経路の cleanupMode: archive)。
-        state.conductors.delete(conductor.surface);
-        const aliveDetail = conductor.pid !== undefined
-          ? String(cmux.isAlive(conductor.pid))
-          : "unknown";
-        await log(
-          "conductor_pruned",
-          `${formatSurface(conductor.surface, "C")} reason=user_clear_surface_missing` +
-            ` pid=${conductor.pid ?? "null"} alive=${aliveDetail}`,
-        );
-        // team.json 永続化は notifyStateChanged を起点に既存 debounce 経路で行われる。
-        notifyStateChanged("daemon.ts:CONDUCTOR_CLEAR:pruned");
-        requestWakeup(state);
-        break;
-      }
-      // cleanup は broken 遷移時点で既に済んでいるが、resetConductor は冪等なので
-      // 再度呼んでも worktree 不在時は no-op 的に振る舞う。
-      // T011 [M4]: 念のため archive を指定（既に archive 済みでも target_exists で skip される）。
-      await resetConductor(conductor, state.projectRoot, state.workspace ?? undefined, {
-        targetStatus: "idle",
-        reason: message.reason ?? "cleared",
-        cleanupMode: { kind: "archive", reason: "clear_conductor" },
-      }, ccBackend(state.backend));
-      // 即時 tick を発火し、次の scanTasks で新タスクを拾えるようにする
+      const surfacePresent = clearPane !== undefined;
+      // C-I2 invariant: status=broken ⇒ taskRunId == null。worktree archive も broken 遷移時に
+      //   実施済みのため、ここで worktree / surface には一切触れない。
+      state.conductors.delete(conductor.surface);
+      // maxConductors を 1 減らし、applyRestorePlan の deficit topup が穴埋めしないようにする。
+      state.maxConductors = Math.max(0, state.maxConductors - 1);
+      // 同 surface からの CONDUCTOR_REGISTERED 再登録を恒久拒否する（soft cap では止まらない）。
+      state.clearedConductorSurfaces.add(conductor.surface);
+      const aliveDetail = conductor.pid !== undefined
+        ? String(cmux.isAlive(conductor.pid))
+        : "unknown";
+      await log(
+        "conductor_pruned",
+        `${formatSurface(conductor.surface, "C")} ` +
+          `reason=${surfacePresent ? "user_clear" : "user_clear_surface_missing"} ` +
+          `new_max=${state.maxConductors} pid=${conductor.pid ?? "null"} alive=${aliveDetail}`,
+      );
+      // team.json 永続化は notifyStateChanged を起点に既存 debounce 経路で行われる。
+      notifyStateChanged("daemon.ts:CONDUCTOR_CLEAR:pruned");
       requestWakeup(state);
       break;
     }
@@ -2424,6 +2423,15 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
     }
 
     case "CONDUCTOR_REGISTERED": {
+      // clear-conductor でプールから外された surface は二度と Conductor として登録しない。
+      //   soft cap (size >= maxConductors は warn のみ) では止まらないため明示除外する。
+      if (state.clearedConductorSurfaces.has(message.surface)) {
+        await log(
+          "conductor_register_ignored",
+          `${formatSurface(message.surface, "C")} reason=cleared_by_user`,
+        );
+        break;
+      }
       // T003: HTTP レスポンスの daemon_pid 添付は proxy.ts 側 (`/api/messages` 分岐) で
       //   行う。handleMessage の戻り値型は void のまま。registerSelf 側でこの daemon_pid を
       //   team.json.manager.pid と cross-check する。

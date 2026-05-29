@@ -5277,7 +5277,9 @@ async function cmdClearConductor(): Promise<void> {
     reason: "user_clear",
     timestamp: new Date().toISOString(),
   });
-  console.log(`OK cleared ${normalizedSurface} (broken → idle)`);
+  console.log(
+    `OK cleared ${normalizedSurface} (removed from conductor pool; surface left untouched, maxConductors -1)`,
+  );
 }
 
 /**

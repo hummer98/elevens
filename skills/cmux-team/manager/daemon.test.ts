@@ -3425,14 +3425,20 @@ describe("T250 broken status", () => {
     expect(conductor.status).toBe("broken");
   });
 
-  test("CONDUCTOR_CLEAR で broken Conductor が idle に戻る（正常経路）", async () => {
-    // T251: clear-conductor 経由で idle に戻す正常経路では surface は実在するため
-    //       getPaneForSurface を存在ケースでモックする。
+  test("CONDUCTOR_CLEAR で broken Conductor がプールから外れる（surface は閉じない / maxConductors -1）", async () => {
+    // surface 実在ケース。旧実装は resetConductor で同 pane の sibling surface を全 close
+    //   していたが、現行は surface に一切触れず entry 削除 + maxConductors 減算のみ行う。
     const cmux = await import("./cmux");
     const { spyOn } = await import("bun:test");
     const paneSpy = spyOn(cmux, "getPaneForSurface").mockResolvedValue("pane:1");
+    const closeSpy = spyOn(cmux, "closeSurface").mockResolvedValue(undefined);
+    const siblingSpy = spyOn(cmux, "listSiblingSurfaces").mockResolvedValue([
+      "surface:broken-cc1",
+      "surface:unrelated-bystander",
+    ]);
     try {
       const state = await createDaemon(testDir);
+      const maxBefore = state.maxConductors;
       const conductor: ConductorState = {
         surface: "surface:broken-cc1",
         startedAt: new Date().toISOString(),
@@ -3449,9 +3455,56 @@ describe("T250 broken status", () => {
         timestamp: new Date().toISOString(),
       });
 
-      expect(conductor.status).toBe("idle");
-      expect(conductor.disconnectedAt).toBeUndefined();
-      expect(conductor.taskRunId).toBeUndefined();
+      // entry はプールから消える
+      expect(state.conductors.has(conductor.surface)).toBe(false);
+      // maxConductors は 1 減る（topup が穴埋めしない）
+      expect(state.maxConductors).toBe(maxBefore - 1);
+      // 再 self-register を拒否するための除外集合に入る
+      expect(state.clearedConductorSurfaces.has(conductor.surface)).toBe(true);
+      // 巻き添えバグの回帰防止: surface は一切閉じない
+      expect(closeSpy).not.toHaveBeenCalled();
+      const logContent = await readFile(join(testDir, ".team/logs/manager.log"), "utf-8");
+      expect(logContent).toContain("conductor_pruned");
+      expect(logContent).toMatch(/reason=user_clear /);
+    } finally {
+      paneSpy.mockRestore();
+      closeSpy.mockRestore();
+      siblingSpy.mockRestore();
+    }
+  });
+
+  test("CONDUCTOR_CLEAR 後に同 surface が再 self-register しても無視される", async () => {
+    const cmux = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const paneSpy = spyOn(cmux, "getPaneForSurface").mockResolvedValue("pane:1");
+    try {
+      const state = await createDaemon(testDir);
+      const surface = "surface:broken-reregister";
+      state.conductors.set(surface, {
+        surface,
+        startedAt: new Date().toISOString(),
+        disconnectedAt: new Date().toISOString(),
+        agents: [],
+        status: "broken",
+      });
+
+      await handleMessage(state, {
+        type: "CONDUCTOR_CLEAR",
+        surface,
+        reason: "user_clear",
+        timestamp: new Date().toISOString(),
+      });
+      expect(state.conductors.has(surface)).toBe(false);
+
+      // クリア後の再登録は拒否される
+      await handleMessage(state, {
+        type: "CONDUCTOR_REGISTERED",
+        surface,
+        timestamp: new Date().toISOString(),
+      });
+      expect(state.conductors.has(surface)).toBe(false);
+      const logContent = await readFile(join(testDir, ".team/logs/manager.log"), "utf-8");
+      expect(logContent).toMatch(/conductor_register_ignored.*reason=cleared_by_user/);
     } finally {
       paneSpy.mockRestore();
     }
@@ -3614,12 +3667,16 @@ describe("CONDUCTOR_CLEAR (T027 surface_missing pruning)", () => {
     }
   });
 
-  test("broken + getPaneForSurface 実在 → 既存通り idle 復帰 (regression: ST-1)", async () => {
+  test("broken + getPaneForSurface 実在 → surface は閉じずプールから外す", async () => {
+    // 旧挙動（idle 復帰 + sibling surface close）から変更。surface 実在でも
+    //   entry 削除のみ行い、surface には触れない（巻き添え close 回帰防止）。
     const cmux = await import("./cmux");
     const { spyOn } = await import("bun:test");
     const paneSpy = spyOn(cmux, "getPaneForSurface").mockResolvedValue("pane:1");
+    const closeSpy = spyOn(cmux, "closeSurface").mockResolvedValue(undefined);
     try {
       const state = await createDaemon(testDir);
+      const maxBefore = state.maxConductors;
       const conductor: ConductorState = {
         surface: "surface:t027-keep",
         startedAt: new Date().toISOString(),
@@ -3636,10 +3693,12 @@ describe("CONDUCTOR_CLEAR (T027 surface_missing pruning)", () => {
         timestamp: new Date().toISOString(),
       });
 
-      expect(state.conductors.has(conductor.surface)).toBe(true);
-      expect(conductor.status).toBe("idle");
+      expect(state.conductors.has(conductor.surface)).toBe(false);
+      expect(state.maxConductors).toBe(maxBefore - 1);
+      expect(closeSpy).not.toHaveBeenCalled();
     } finally {
       paneSpy.mockRestore();
+      closeSpy.mockRestore();
     }
   });
 

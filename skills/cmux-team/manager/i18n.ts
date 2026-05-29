@@ -492,7 +492,7 @@ Notes:
 `,
 
   help_clear_conductor: `
-elevens clear-conductor -- explicitly reset a broken Conductor (broken -> idle)
+elevens clear-conductor -- remove a broken Conductor from the pool (does NOT close the surface)
 
 Usage:
   elevens clear-conductor --surface <id>
@@ -507,9 +507,11 @@ Examples:
 Notes:
   - Only Conductors currently in broken state can be cleared
   - For other states, use abort-task / restart-task
-  - Worktree / branch residue is already cleaned up at the broken transition; this CLI only resets the status
-  - If the surface is missing from the c11 tree, the conductor entry is pruned
-    from team.json instead of being reset (logged as conductor_pruned)
+  - The surface is left completely untouched (never closed). The Manager simply
+    stops treating it as a Conductor: the entry is dropped, maxConductors is
+    decremented by 1, and any re-registration from that surface is rejected
+  - maxConductors returns to the configured value on daemon restart / 'cmux-team start'
+  - Worktree / branch residue is already cleaned up at the broken transition
 `,
 
   help_reset_conductor: `
@@ -1616,7 +1618,7 @@ Notes:
 `,
 
   help_clear_conductor: `
-elevens clear-conductor -- broken Conductor を明示的にリセットする（broken → idle）
+elevens clear-conductor -- broken Conductor をプールから外す（surface は閉じません）
 
 Usage:
   elevens clear-conductor --surface <id>
@@ -1631,9 +1633,11 @@ Examples:
 Notes:
   - broken 状態の Conductor のみクリアできます
   - 他の状態は abort-task / restart-task を使ってください
+  - surface には一切触れません（絶対に閉じない）。Manager がその surface を
+    Conductor として扱わなくなるだけです: entry を削除し、maxConductors を 1 減らし、
+    その surface からの再登録を拒否します
+  - maxConductors は daemon 再起動 / "cmux-team start" で config 値に戻ります
   - worktree / branch 残骸は broken 遷移時点で既に掃除済みのため、ここでは行いません
-  - surface が c11 tree から消えている場合、idle 復帰ではなく team.json から
-    entry 削除されます（conductor_pruned で記録）
 `,
 
   help_reset_conductor: `
