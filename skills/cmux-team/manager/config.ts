@@ -37,8 +37,10 @@ export interface TeamConfig {
      */
     agentEnabled?: boolean;
     /**
-     * opencode Agent で使うモデル名（デフォルト: "claude-sonnet-4-5"）。Issue #37
-     * opencode provider layer に渡す。例: "kiwi-2.6", "claude-haiku-4-5"
+     * opencode Agent で使うモデル名（デフォルト: "anthropic/claude-opus-4-8"）。Issue #37
+     * "providerID/modelID" 形式（スラッシュ必須）で opencode provider layer に渡す。
+     * スラッシュが無い値は model 指定として渡らず opencode 側デフォルトにフォールバックする。
+     * 例: "anthropic/claude-opus-4-8", "openrouter/anthropic/claude-haiku-4.5"
      */
     agentModel?: string;
   };
