@@ -81,6 +81,18 @@ export interface DaemonState {
    * 同じく、この除外もプロセス内限定。
    */
   clearedConductorSurfaces: Set<string>;
+  /**
+   * `clear-master` / `reset-master` で Manager 管理から外された Master surface の集合。
+   * Manager は二度とこの surface を Master として扱わない（再 self-register を拒否）。
+   * in-memory のみ（永続化しない）。daemon 再起動でリセットされる。
+   */
+  clearedMasterSurfaces: Set<string>;
+  /**
+   * daemon（Manager）自身が動作している surface。`reset-master` の spawnMaster で
+   * 新 Master pane を split する基準として使う。cmdStart が解決して set する。null 可
+   * （その場合 spawnMaster は基準 pane なしで split する）。
+   */
+  daemonSurface: string | null;
   /** レイアウトモード（wide=3 Conductor / 16x9=2 Conductor） */
   layout: LayoutMode;
   lastUpdate: Date;
@@ -420,6 +432,8 @@ export async function createDaemon(
     masters: new Map(),
     conductors: new Map(),
     clearedConductorSurfaces: new Set(),
+    clearedMasterSurfaces: new Set(),
+    daemonSurface: null,
     projectRoot,
     pollInterval: Number(process.env.CMUX_TEAM_POLL_INTERVAL ?? 10_000),
     maxConductors,
@@ -1746,6 +1760,61 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
       break;
     }
 
+    case "MASTER_CLEAR": {
+      // Master を Manager の管理から外す（CONDUCTOR_CLEAR の Master 版）。
+      //   surface には一切触れず、removeMaster（masters.delete + master ファイル削除 +
+      //   pidWatcher 停止）+ 再 self-register 拒否で「二度と Master として扱わない」を実現する。
+      //   状態（idle / busy / disconnected）は問わない。--surface 明示指定 + surface 非 close
+      //   なので、生きた Master を誤って外しても surface は残り daemon 再起動で復帰できる。
+      const master = state.masters.get(message.surface);
+      if (!master) {
+        await log(
+          "master_clear_ignored",
+          `surface=${message.surface} reason=not_found`,
+        );
+        break;
+      }
+      await removeMaster(state, message.surface, message.reason ?? "user_clear");
+      state.clearedMasterSurfaces.add(message.surface);
+      await log(
+        "master_cleared",
+        `${formatSurface(message.surface, "U")} reason=${message.reason ?? "user_clear"}`,
+      );
+      requestWakeup(state);
+      break;
+    }
+
+    case "RESET_MASTER": {
+      // Master を作り直す（reset-conductor の Master 版）。
+      //   古い Master を登録解除（surface 非 close）+ 再登録拒否してから、新しい Master を
+      //   新 pane で spawn する。disconnected で居座った Master を解消する主力経路。
+      //   古い surface（disconnected pane）は閉じない方針のため残る（ユーザーが手動で閉じる）。
+      const master = state.masters.get(message.surface);
+      if (!master) {
+        await log(
+          "master_reset_ignored",
+          `surface=${message.surface} reason=not_found`,
+        );
+        break;
+      }
+      await removeMaster(state, message.surface, message.reason ?? "user_reset");
+      // 古い surface の再 self-register 復活を防ぐ（生きていた場合の二重登録回避）。
+      state.clearedMasterSurfaces.add(message.surface);
+      const spawned = await spawnMaster(
+        state.projectRoot,
+        state.daemonSurface ?? undefined,
+      );
+      await log(
+        "master_reset",
+        `old=${formatSurface(message.surface, "U")} ` +
+          `new=${spawned ? formatSurface(spawned.surface, "U") : "spawn_failed"} ` +
+          `reason=${message.reason ?? "user_reset"}`,
+      );
+      notifyStateChanged("daemon.ts:RESET_MASTER");
+      requestWakeup(state);
+      break;
+    }
+
     case "RESET_CONDUCTOR": {
       // T004: surface ターミナルから Conductor を pane 単位で復旧する経路。
       //       任意状態の Conductor を `reserved` に戻し、次 tick の findIdleConductor
@@ -2514,6 +2583,15 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
     }
 
     case "MASTER_REGISTERED": {
+      // clear-master / reset-master で外された surface は二度と Master として登録しない。
+      //   生きた Master を clear した場合の再 self-register 復活を防ぐ。
+      if (state.clearedMasterSurfaces.has(message.surface)) {
+        await log(
+          "master_register_ignored",
+          `${formatSurface(message.surface, "U")} reason=cleared_by_user`,
+        );
+        break;
+      }
       // T003: HTTP レスポンスの daemon_pid 添付は proxy.ts 側 (`/api/messages` 分岐) で
       //   行う。handleMessage の戻り値型は void のまま。registerSelf 側でこの daemon_pid を
       //   team.json.manager.pid と cross-check する。

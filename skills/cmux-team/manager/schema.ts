@@ -52,6 +52,26 @@ export const ResetConductorMessage = z.object({
   timestamp: z.string().datetime(),
 });
 
+// Master を Manager の管理から外すメッセージ（`elevens clear-master` が送る）。
+// CONDUCTOR_CLEAR の Master 版。surface は一切閉じず、Manager の Master 登録から外すだけ
+// （removeMaster + master ファイル削除 + 再 self-register 拒否）。
+export const MasterClearMessage = z.object({
+  type: z.literal("MASTER_CLEAR"),
+  surface: z.string(),
+  reason: z.string().optional(),
+  timestamp: z.string().datetime(),
+});
+
+// Master を作り直すメッセージ（`elevens reset-master` が送る）。
+// 指定 Master を登録解除（surface 非 close）してから、新しい Master を新 pane で spawn する。
+// disconnected で居座った Master を解消する主力経路。
+export const ResetMasterMessage = z.object({
+  type: z.literal("RESET_MASTER"),
+  surface: z.string(),
+  reason: z.string().optional(),
+  timestamp: z.string().datetime(),
+});
+
 // T008: `elevens abort-task` から daemon に送るメッセージ。
 // daemon 側で T004 RESET_CONDUCTOR と同形のシーケンス
 //   (watcher 停止 → markTaskAborted → insertTaskSession → kill → reserved) を実行する。
@@ -282,6 +302,8 @@ export const QueueMessage = z.discriminatedUnion("type", [
   ConductorDoneMessage,
   ConductorClearMessage,
   ResetConductorMessage,
+  MasterClearMessage,
+  ResetMasterMessage,
   AbortTaskMessage,
   ConductorRegisteredMessage,
   MasterRegisteredMessage,
@@ -309,6 +331,8 @@ export type TaskUpdatedMessage = z.infer<typeof TaskUpdatedMessage>;
 export type ConductorDoneMessage = z.infer<typeof ConductorDoneMessage>;
 export type ConductorClearMessage = z.infer<typeof ConductorClearMessage>;
 export type ResetConductorMessage = z.infer<typeof ResetConductorMessage>;
+export type MasterClearMessage = z.infer<typeof MasterClearMessage>;
+export type ResetMasterMessage = z.infer<typeof ResetMasterMessage>;
 export type AbortTaskMessage = z.infer<typeof AbortTaskMessage>;
 export type ConductorRegisteredMessage = z.infer<typeof ConductorRegisteredMessage>;
 export type MasterRegisteredMessage = z.infer<typeof MasterRegisteredMessage>;

@@ -3864,6 +3864,116 @@ describe("CONDUCTOR_CLEAR (T027 surface_missing pruning)", () => {
   });
 });
 
+// --- MASTER_CLEAR / RESET_MASTER (clear-master / reset-master CLI) ---------
+//
+// clear-conductor / reset-conductor の Master 版。clear-master は Master を Manager の
+// 管理から外す（surface 非 close + 再 self-register 拒否）。reset-master は古い Master を
+// 外して新しい Master を新 pane で spawn する。
+describe("MASTER_CLEAR / RESET_MASTER (clear-master / reset-master CLI)", () => {
+  test("MASTER_CLEAR で Master が登録から外れ、surface は閉じない", async () => {
+    const cmuxMod = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const closeSpy = spyOn(cmuxMod, "closeSurface").mockResolvedValue(undefined as any);
+    try {
+      const state = await createDaemon(testDir);
+      const surface = "surface:master-clear-1";
+      state.masters.set(surface, {
+        surface,
+        status: "disconnected",
+        startedAt: new Date().toISOString(),
+      } as any);
+
+      await handleMessage(state, {
+        type: "MASTER_CLEAR",
+        surface,
+        reason: "user_clear",
+        timestamp: new Date().toISOString(),
+      });
+
+      expect(state.masters.has(surface)).toBe(false);
+      expect(state.clearedMasterSurfaces.has(surface)).toBe(true);
+      // surface は閉じない（巻き添え close 回帰防止 / clear-conductor と同じ思想）
+      expect(closeSpy).not.toHaveBeenCalled();
+    } finally {
+      closeSpy.mockRestore();
+    }
+  });
+
+  test("MASTER_CLEAR 後の再 self-register (MASTER_REGISTERED) は拒否される", async () => {
+    const state = await createDaemon(testDir);
+    const surface = "surface:master-clear-2";
+    state.masters.set(surface, {
+      surface,
+      status: "idle",
+      startedAt: new Date().toISOString(),
+    } as any);
+
+    await handleMessage(state, {
+      type: "MASTER_CLEAR",
+      surface,
+      reason: "user_clear",
+      timestamp: new Date().toISOString(),
+    });
+    expect(state.masters.has(surface)).toBe(false);
+
+    await handleMessage(state, {
+      type: "MASTER_REGISTERED",
+      surface,
+      timestamp: new Date().toISOString(),
+    });
+    expect(state.masters.has(surface)).toBe(false);
+    const logContent = await readFile(join(testDir, ".team/logs/manager.log"), "utf-8");
+    expect(logContent).toMatch(/master_register_ignored.*reason=cleared_by_user/);
+  });
+
+  test("MASTER_CLEAR が未登録 surface に来ても無視される (not_found)", async () => {
+    const state = await createDaemon(testDir);
+    await handleMessage(state, {
+      type: "MASTER_CLEAR",
+      surface: "surface:ghost-master",
+      reason: "user_clear",
+      timestamp: new Date().toISOString(),
+    });
+    expect(state.masters.has("surface:ghost-master")).toBe(false);
+    const logContent = await readFile(join(testDir, ".team/logs/manager.log"), "utf-8");
+    expect(logContent).toMatch(/master_clear_ignored.*reason=not_found/);
+  });
+
+  test("RESET_MASTER で古い Master が外れ、新 Master が spawn され、surface は閉じない", async () => {
+    const masterMod = await import("./master");
+    const cmuxMod = await import("./cmux");
+    const { spyOn } = await import("bun:test");
+    const spawnSpy = spyOn(masterMod, "spawnMaster").mockResolvedValue({ surface: "surface:master-new" });
+    const closeSpy = spyOn(cmuxMod, "closeSurface").mockResolvedValue(undefined as any);
+    try {
+      const state = await createDaemon(testDir);
+      const surface = "surface:master-reset-1";
+      state.daemonSurface = "surface:daemon";
+      state.masters.set(surface, {
+        surface,
+        status: "disconnected",
+        startedAt: new Date().toISOString(),
+      } as any);
+
+      await handleMessage(state, {
+        type: "RESET_MASTER",
+        surface,
+        reason: "user_reset",
+        timestamp: new Date().toISOString(),
+      });
+
+      expect(state.masters.has(surface)).toBe(false);
+      expect(state.clearedMasterSurfaces.has(surface)).toBe(true);
+      expect(spawnSpy).toHaveBeenCalledTimes(1);
+      // 古い surface（disconnected pane）は閉じない
+      expect(closeSpy).not.toHaveBeenCalled();
+    } finally {
+      spawnSpy.mockRestore();
+      closeSpy.mockRestore();
+    }
+  });
+});
+
 // --- T004: RESET_CONDUCTOR (reset-conductor CLI) ---------------------------
 //
 // `elevens reset-conductor` から daemon に届く RESET_CONDUCTOR メッセージを

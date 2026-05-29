@@ -516,6 +516,48 @@ Notes:
   - Worktree / branch residue is already cleaned up at the broken transition
 `,
 
+  help_clear_master: `
+elevens clear-master -- remove a Master from the pool (does NOT close the surface)
+
+Usage:
+  elevens clear-master --surface <id>
+
+Options:
+  --surface <id>   surface ID (e.g. 10 or surface:10)
+
+Examples:
+  elevens clear-master --surface 10
+  elevens clear-master --surface surface:10
+
+Notes:
+  - Works for a Master in any state (idle / busy / disconnected)
+  - The surface is left completely untouched (never closed). The Manager drops the
+    Master entry, deletes its master file, stops its watcher, and rejects any
+    re-registration from that surface
+  - The rejection is in-memory and resets on daemon restart / 'cmux-team start'
+  - To stand up a fresh Master, run 'elevens spawn-master' or use 'reset-master'
+`,
+
+  help_reset_master: `
+elevens reset-master -- recreate a Master (remove the old one, spawn a new one)
+
+Usage:
+  elevens reset-master --surface <id>
+
+Options:
+  --surface <id>   surface ID (e.g. 10 or surface:10)
+
+Examples:
+  elevens reset-master --surface 10
+  elevens reset-master --surface surface:10
+
+Notes:
+  - Removes the old Master from the pool (surface left untouched) and spawns a new
+    Master in a new pane. The main way to recover a stuck 'disconnected' Master
+  - The old surface (e.g. a dead disconnected pane) is not closed; close it manually
+    if you no longer need it
+`,
+
   help_reset_conductor: `
 elevens reset-conductor -- reset a Conductor surface to the reserved state
 
@@ -1642,6 +1684,46 @@ Notes:
     その surface からの再登録を拒否します
   - maxConductors は daemon 再起動 / "cmux-team start" で config 値に戻ります
   - worktree / branch 残骸は broken 遷移時点で既に掃除済みのため、ここでは行いません
+`,
+
+  help_clear_master: `
+elevens clear-master -- Master をプールから外す（surface は閉じません）
+
+Usage:
+  elevens clear-master --surface <id>
+
+Options:
+  --surface <id>   surface ID（例: 10 または surface:10）
+
+Examples:
+  elevens clear-master --surface 10
+  elevens clear-master --surface surface:10
+
+Notes:
+  - 任意状態の Master（idle / busy / disconnected）に対して実行できます
+  - surface には一切触れません（絶対に閉じない）。Manager は Master 登録を削除し、
+    master ファイルを消し、watcher を止め、その surface からの再登録を拒否します
+  - 拒否は in-memory で、daemon 再起動 / "cmux-team start" でリセットされます
+  - 新しい Master を立てるには "elevens spawn-master" か "reset-master" を使ってください
+`,
+
+  help_reset_master: `
+elevens reset-master -- Master を作り直す（古い Master を外して新しい Master を spawn）
+
+Usage:
+  elevens reset-master --surface <id>
+
+Options:
+  --surface <id>   surface ID（例: 10 または surface:10）
+
+Examples:
+  elevens reset-master --surface 10
+  elevens reset-master --surface surface:10
+
+Notes:
+  - 古い Master をプールから外し（surface 非 close）、新しい Master を新 pane で spawn します。
+    disconnected で固まった Master を復旧する主力経路です
+  - 古い surface（死んだ disconnected pane 等）は閉じません。不要なら手動で閉じてください
 `,
 
   help_reset_conductor: `

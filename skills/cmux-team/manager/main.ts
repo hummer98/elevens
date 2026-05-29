@@ -319,6 +319,8 @@ const WRITE_COMMANDS: Record<string, true | Set<string>> = {
   "close-agent": true,
   "clear-conductor": true,
   "reset-conductor": true,
+  "clear-master": true,
+  "reset-master": true,
   "set-agent-instructions": true,
   "delete-agent-instructions": true,
   artifacts: new Set(["add"]),
@@ -1474,6 +1476,8 @@ async function cmdStart(): Promise<void> {
     const num = daemonSurface.replace("surface:", "");
     await cmux.renameTab(daemonSurface, `[${num}] Manager`);
   }
+  // reset-master の spawnMaster で新 pane を split する基準として state に保持する。
+  state.daemonSurface = daemonSurface ?? null;
 
   // ワークスペース名を起動フォルダ名に設定
   const folderName = basename(PROJECT_ROOT);
@@ -5283,6 +5287,86 @@ async function cmdClearConductor(): Promise<void> {
 }
 
 /**
+ * Master を Manager の管理から外す（clear-conductor の Master 版）。
+ * surface は閉じず、daemon が removeMaster（masters.delete + master ファイル削除 +
+ * pidWatcher 停止）+ 再 self-register 拒否を行う。状態（idle/busy/disconnected）は問わない。
+ */
+async function cmdClearMaster(): Promise<void> {
+  if (hasHelpFlag()) showHelp(t("help_clear_master"));
+  const surface = requireArg("surface");
+  const normalizedSurface = surface.startsWith("surface:") ? surface : `surface:${surface}`;
+
+  const teamJsonPath = join(PROJECT_ROOT, ".team/team.json");
+  if (!existsSync(teamJsonPath)) {
+    console.error("Error: team.json not found");
+    process.exit(1);
+  }
+  let teamJson: any;
+  try {
+    teamJson = JSON.parse(await readFile(teamJsonPath, "utf-8"));
+  } catch {
+    console.error("Error: team.json unreadable");
+    process.exit(1);
+  }
+  const master = (teamJson.masters ?? []).find(
+    (m: any) => m.surface === normalizedSurface,
+  );
+  if (!master) {
+    console.error(`Error: master ${normalizedSurface} not found in team.json`);
+    process.exit(1);
+  }
+  await postMessage({
+    type: "MASTER_CLEAR",
+    surface: normalizedSurface,
+    reason: "user_clear",
+    timestamp: new Date().toISOString(),
+  });
+  console.log(
+    `OK cleared ${normalizedSurface} (removed from master pool; surface left untouched)`,
+  );
+}
+
+/**
+ * Master を作り直す（reset-conductor の Master 版）。
+ * daemon が古い Master を登録解除（surface 非 close）してから新しい Master を新 pane で spawn する。
+ * disconnected で居座った Master を解消する主力経路。
+ */
+async function cmdResetMaster(): Promise<void> {
+  if (hasHelpFlag()) showHelp(t("help_reset_master"));
+  const surface = requireArg("surface");
+  const normalizedSurface = surface.startsWith("surface:") ? surface : `surface:${surface}`;
+
+  const teamJsonPath = join(PROJECT_ROOT, ".team/team.json");
+  if (!existsSync(teamJsonPath)) {
+    console.error("Error: team.json not found");
+    process.exit(1);
+  }
+  let teamJson: any;
+  try {
+    teamJson = JSON.parse(await readFile(teamJsonPath, "utf-8"));
+  } catch {
+    console.error("Error: team.json unreadable");
+    process.exit(1);
+  }
+  const master = (teamJson.masters ?? []).find(
+    (m: any) => m.surface === normalizedSurface,
+  );
+  if (!master) {
+    console.error(`Error: master ${normalizedSurface} not found in team.json`);
+    process.exit(1);
+  }
+  await postMessage({
+    type: "RESET_MASTER",
+    surface: normalizedSurface,
+    reason: "user_reset",
+    timestamp: new Date().toISOString(),
+  });
+  console.log(
+    `OK reset ${normalizedSurface} (old master removed, new master spawning in a new pane)`,
+  );
+}
+
+/**
  * T004: 任意状態の Conductor surface を `reserved` に戻す。
  *
  * 観察箱原則の「real-time 観察 → 介入」サイクルを閉じる pane 単位の局所復旧 CLI。
@@ -7158,6 +7242,12 @@ switch (command) {
     break;
   case "reset-conductor":
     await cmdResetConductor();
+    break;
+  case "clear-master":
+    await cmdClearMaster();
+    break;
+  case "reset-master":
+    await cmdResetMaster();
     break;
   case "delete-task":
     await cmdDeleteTask();
