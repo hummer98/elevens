@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.11.0] - 2026-05-29
+
+### Added
+
+- **`clear-master` / `reset-master` CLI を追加**: Conductor 向けの clear / reset と同様に、Master セッションをプールから外す（`clear-master`）/ Master を初期状態に戻す（`reset-master`）操作を CLI から行えるようにした。`/clear` 後の再読み込みや Master の状態リセットを正規経路で実行できる
+- **events.jsonl 汎用 signal 投稿 CLI を追加** (T029): `elevens events` 系に任意の signal を best-effort で events.jsonl へ append できる汎用投稿口を追加。watch mode や外部監視からの状態共有チャネルとして利用できる
+- **elevens 起因の surface close を必ずログに記録**: elevens 自身が surface を閉じた場合に、その事実を確実にログへ残すようにした。意図しない surface close の事後追跡を可能にする（observatory 原則）
+
+### Fixed
+
+- **`clear-conductor` が surface を閉じないように修正** (#3 ほか): `clear-conductor` は surface を閉じず Conductor プールから外すだけの挙動に統一。`--surface` 省略時は現在の surface へフォールバックするようにした
+- **`reset-conductor` の Agent 片付け範囲を限定** (巻き添え close 防止): `resetConductor` 時の Agent クリーンアップ対象を当該 `conductor.agents` に限定し、無関係な Agent / surface を巻き添えで閉じる事故を防止
+- **OpenCode Agent のデフォルトモデルを `anthropic/claude-opus-4-8` に更新** (#4)
+- **`MAILBOX_FETCH_ERROR` のログ埋め尽くしを抑制** (#5): 同種エラーの大量出力を間引きつつ、各エントリのエラー詳細を充実させてデバッグ性を改善
+
 ## [0.10.1] - 2026-05-27
 
 ### Fixed

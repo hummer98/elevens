@@ -142,7 +142,9 @@ skills/cmux-team/manager/
 | `artifacts` | アーティファクト一覧・検索・追加（`add`）・表示（`show`）・Markdown ビューア（`open`） |
 | `resume` | assigned タスクの Conductor セッションを `claude --resume` で再開 |
 | `restart-task` | `assigned` / `aborted` タスクの Conductor セッションを再起動（T204 で `aborted` からの再開にも対応。status は `ready` に戻され、worktree / taskRunId / sessionId 等の割り当て情報はクリアされる。`aborted` の場合は残存 worktree も強制削除） |
-| `clear-conductor` | `broken` 状態の Conductor を `reserved` に強制リセットする手動回復経路（C-I3 不変条件の唯一の解除手段） |
+| `clear-conductor` | `broken` 状態の Conductor を Manager の Conductor プールから恒久的に外す手動回復経路。**surface は一切閉じない** — `CONDUCTOR_CLEAR` メッセージ → daemon が watcher 2 連停止 + `state.conductors.delete` + `maxConductors -1`（topup の穴埋め防止）+ `clearedConductorSurfaces.add`（同 surface からの再 self-register を恒久拒否）を行う。surface 実在性は分岐に使わず観測ログ用にのみ取得し、`conductor_pruned reason=user_clear`（surface 不在時 `user_clear_surface_missing`）を `manager.log` に記録する。`maxConductors` は daemon 再起動 / `cmux-team start` で config 値に戻る。`--surface` 省略時は `CMUX_SURFACE` → `cmux identify` で自動解決。`broken` 以外は error 終了し `abort-task` / `restart-task` / `reset-conductor` を誘導する（C-I3 不変条件の解除手段は本コマンドと `reset-conductor` のみ） |
+| `clear-master` | Master（状態不問: idle / busy / disconnected）を Manager の管理から外す（`clear-conductor` の Master 版）。**surface は一切閉じない** — `MASTER_CLEAR` メッセージ → daemon が `removeMaster`（`masters.delete` + master ファイル削除 + pidWatcher 停止）+ `clearedMasterSurfaces.add`（再 self-register 拒否）を行う。拒否は in-memory で daemon 再起動 / `cmux-team start` でリセット。`--surface` 必須。新しい Master を立てるには `spawn-master` または `reset-master` |
+| `reset-master` | Master を作り直す（`reset-conductor` の Master 版）。古い Master を `removeMaster`（surface 非 close）+ 再登録拒否してから、新しい Master を新 pane で `spawnMaster` する。`disconnected` で居座った Master を解消する主力経路。古い surface（dead な disconnected pane 等）は閉じないので不要ならユーザーが手動で閉じる。`--surface` 必須。`RESET_MASTER` メッセージ経由 |
 | `reset-conductor` | 任意状態（`broken` / `disconnected` / `idle` / `running` / `assigning` / `asking` / `error` / `reserved` 等）の Conductor を **そのレーンに閉じて** `reserved` に局所復旧する CLI（T004）。surface ターミナルから自分自身を呼び戻すことを想定し、`--surface` 省略時は `CMUX_SURFACE` から自動解決する。`assigned` 中のタスクは `--force` 必須で、reducer は `task_aborted reason=reset_conductor` を log（events stream への mapping は `other`）。Claude プロセスを kill → `markTaskAborted` → cascade → `resetConductor(reserved)` → `requestWakeup` を `SESSION_CLEAR(running)` 経路と対称に実行する。出力は `OK reset <surface> (<oldStatus> → reserved)` |
 | `await-task` | タスク完了を fs.watch で待機（カンマ区切りで複数指定可、`--timeout` サポート） |
 | `await-agent` | Agent 完了/ask/crash を done マーカーの fs.watch で待機（T181、Conductor から使用） |
@@ -169,7 +171,7 @@ flag 経由で resolve した場合、`process.env.PROJECT_ROOT` も flag 由来
 `--project-root` で指定した root が cwd-walk 結果と異なる状態で write 系コマンド
 （`start`, `create-task`, `update-task`, `close-task`, `abort-task`, `restart-task`, `delete-task`,
 `spawn-conductor`, `spawn-agent`, `spawn-master`, `send`, `send-agent`, `kill-agent`, `close-agent`,
-`clear-conductor`, `reset-conductor`, `set-agent-instructions`, `delete-agent-instructions`, `artifacts add`,
+`clear-conductor`, `reset-conductor`, `clear-master`, `reset-master`, `set-agent-instructions`, `delete-agent-instructions`, `artifacts add`,
 `token add|remove|rotate|set-plan|promote|migrate-subscription`）を実行すると、
 事故防止の確認 gate が発火する。
 
@@ -286,7 +288,7 @@ daemon 停止時に `cmux clear-status` でクリアする。
 ### メッセージング
 
 - daemon の HTTP プロキシが受け口を兼ね、CLI（`cmux-team send <TYPE>`）から POST されたメッセージを受信
-- メッセージ種別: `TASK_CREATED`, `TASK_UPDATED`, `CONDUCTOR_REGISTERED`, `CONDUCTOR_DONE`, `AGENT_SPAWNED`, `SESSION_STARTED`, `SESSION_ENDED`, `SESSION_ACTIVE`, `SESSION_IDLE`, `SESSION_ASK`, `SESSION_STOP`, `SESSION_CLEAR`, `RESET_CONDUCTOR`（T004、`reset-conductor` CLI 経路で投入）, `SHUTDOWN`
+- メッセージ種別: `TASK_CREATED`, `TASK_UPDATED`, `CONDUCTOR_REGISTERED`, `CONDUCTOR_DONE`, `AGENT_SPAWNED`, `SESSION_STARTED`, `SESSION_ENDED`, `SESSION_ACTIVE`, `SESSION_IDLE`, `SESSION_ASK`, `SESSION_STOP`, `SESSION_CLEAR`, `CONDUCTOR_CLEAR`（`clear-conductor` CLI 経路）, `RESET_CONDUCTOR`（T004、`reset-conductor` CLI 経路で投入）, `MASTER_CLEAR`（`clear-master` CLI 経路）, `RESET_MASTER`（`reset-master` CLI 経路）, `SHUTDOWN`
 - Zod バリデーション（不正メッセージはスキップ）
 - `task_completed` の二重記録は CONDUCTOR_DONE ハンドラのステータスガードで防止
 

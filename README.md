@@ -193,7 +193,9 @@ A third category alongside Task / Artifact. An Epic is a "goal you want to achie
 | `elevens send-agent --surface <s> <message>` | Send a message to Agent / Conductor |
 | `elevens spawn-master` | Boot Master role (proxy auto-resolved) |
 | `elevens reset-conductor [--surface <s>] [--force]` | Locally reset a Conductor (any state → `reserved`) from its own surface terminal. `--surface` defaults to `CMUX_SURFACE`. `--force` is required when the lane has an `assigned` task — that task is aborted with `reason=reset_conductor` and cascade is applied. Symmetric with the `SESSION_CLEAR(running)` recovery path |
-| `elevens clear-conductor --surface <s>` | Manually clear a `broken` Conductor (only exit from the `broken` terminal state, alongside `reset-conductor`) |
+| `elevens clear-conductor [--surface <s>]` | Remove a `broken` Conductor from the pool. The surface is **never closed** — the entry is dropped, `maxConductors` is decremented by 1, and any re-registration from that surface is rejected (resets on daemon restart / `cmux-team start`). `--surface` defaults to `CMUX_SURFACE`. Only `broken` Conductors can be cleared; for other states use `reset-conductor` / `abort-task` / `restart-task` |
+| `elevens clear-master --surface <s>` | Remove a Master (any state) from the pool. The surface is **never closed**: the Master entry is dropped, its master file deleted, watcher stopped, and re-registration rejected (resets on daemon restart). To stand up a fresh Master use `spawn-master` or `reset-master` |
+| `elevens reset-master --surface <s>` | Recreate a Master: remove the old one (surface left untouched) and spawn a new Master in a new pane. The main way to recover a stuck `disconnected` Master |
 
 **Token Pool**
 | Command | What it does |

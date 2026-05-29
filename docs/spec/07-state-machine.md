@@ -33,16 +33,19 @@
 | `broken` | disconnected 300s 超過で自動復帰停止 (T250) | `monitorConductors` timeout |
 | `error` | StopFailure hook 受信（API エラー確定）— `lastApiError` を伴う (T392) | `STOP_FAILURE` |
 
-`broken` は **終端状態**。`cmux-team clear-conductor` または `cmux-team reset-conductor`（T004、任意状態 → `reserved` の局所復旧 CLI）でのみ解除される。
+`broken` は **終端状態**。`cmux-team clear-conductor`（プールから恒久的に外す）または
+`cmux-team reset-conductor`（T004、任意状態 → `reserved` の局所復旧 CLI）でのみ解除される。
 `error` は次の `SESSION_STARTED` / `SESSION_IDLE` で自然解除される（`lastApiError` も undefined に戻る）。
 
-追加 (T027): `broken` Conductor の surface が c11 tree から消えた場合（外部 close / cmux session 全終了等）、
-`clear-conductor` は idle 復帰ではなく **team.json からの entry 削除** を行う。daemon 起動時の
-`planLayoutRestore` も同条件 (`status=broken && !surfaceExists`) で entry を discard する。
+`clear-conductor` は idle 復帰ではなく、**team.json からの entry 削除 + `maxConductors -1` + 再 self-register 拒否**
+を行う（surface 実在性によらず常に同じ。surface には一切触れず close もしない — 同 pane 同居の無関係
+surface を巻き添えで閉じる事故を構造的に防ぐ）。`maxConductors` 減算は `applyRestorePlan` の deficit topup が
+穴を埋めないようにするためで、daemon 再起動 / `cmux-team start` で config 値に戻る。
+daemon 起動時の `planLayoutRestore` も `status=broken && !surfaceExists` で entry を discard する。
 削除は state machine の遷移ではなく **machine 外の entry エビクション** であり、
 reducer は引き続き `broken` で全 event no-op を返す。削除イベントは `conductor_pruned` として
-`manager.log` に記録される（CLI 起点は `reason=user_clear_surface_missing`、boot 起点は
-`reason=broken_surface_missing`）。
+`manager.log` に記録される（CLI 起点は surface 実在時 `reason=user_clear` / 不在時 `reason=user_clear_surface_missing`、
+boot 起点は `reason=broken_surface_missing`）。
 
 Master / Agent も同等に `status: "error"` バリアントと `lastApiError` を持つ（`MasterStateSchema` / `AgentState`）。
 
@@ -460,11 +463,13 @@ worktree 物理削除は **`CONDUCTOR_DONE success=true` 経路 (`close-task`) �
 |---|---|
 | `assigned → closed` (`CONDUCTOR_DONE success=true`) | **delete** (worktree remove + branch -d) |
 | `assigned → aborted` (`ABORT_TASK` / disconnect_timeout / resume) | **archive** (作業内容保全) |
-| `assigned → reserved` (`reset-conductor` / `clear-conductor`) | **archive** |
+| `assigned → reserved` (`reset-conductor`) | **archive** |
 | `running → reserved` (手動 `/clear`、SESSION_CLEAR) | **archive** [C1] |
 | `assigned → ready` (`restart-task` from assigned / aborted) | **archive** |
 | `judgment_pending` (success=false unresolved=true) | **preserve** (in-place 温存) |
 | terminal race (`applyAssignCommit`) | **archive** (保守側) |
+
+`clear-conductor` は `broken`（C-I2 不変条件で `taskRunId == null`、worktree は `broken` 遷移時に archive 済み）にのみ作用し、worktree / surface には一切触れずプールから entry を削除するだけなので上表には現れない。
 
 archive された worktree は `elevens worktree archive show <taskRunId>` で参照可能。再アサインされた Conductor の prompt に `{{ARCHIVED_WORKTREE_SECTION}}` として最新 1 件が埋め込まれる。
 

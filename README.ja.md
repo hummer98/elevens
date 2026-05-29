@@ -193,7 +193,9 @@ Task / Artifact と並ぶ第三のカテゴリ。「達成したいゴール」�
 | `elevens send-agent --surface <s> <message>` | Agent / Conductor にメッセージ送信 |
 | `elevens spawn-master` | Master 起動（proxy 自動解決） |
 | `elevens reset-conductor [--surface <s>] [--force]` | 任意状態の Conductor をそのレーンに閉じて `reserved` に局所復旧する CLI（surface ターミナルから自分自身を呼び戻す想定）。`--surface` 省略時は `CMUX_SURFACE` から自動解決。`assigned` 中は `--force` 必須で、対象タスクは `reason=reset_conductor` で aborted + cascade。`SESSION_CLEAR(running)` 経路と対称 |
-| `elevens clear-conductor --surface <s>` | `broken` 状態の Conductor を手動でクリアする経路（`broken` 終端状態の解除手段は `reset-conductor` と本コマンドのみ） |
+| `elevens clear-conductor [--surface <s>]` | `broken` 状態の Conductor をプールから外す。surface は**一切閉じない** — entry を削除し `maxConductors` を 1 減算、その surface からの再登録を拒否する（daemon 再起動 / `cmux-team start` でリセット）。`--surface` 省略時は `CMUX_SURFACE` から自動解決。クリアできるのは `broken` のみで、他状態は `reset-conductor` / `abort-task` / `restart-task` を使う |
+| `elevens clear-master --surface <s>` | Master（状態不問）をプールから外す。surface は**一切閉じない**: Master entry を削除し master ファイルを削除、watcher 停止、再登録を拒否する（daemon 再起動でリセット）。新しい Master を立てるには `spawn-master` または `reset-master` |
+| `elevens reset-master --surface <s>` | Master を作り直す: 古い Master を外し（surface 非 close）、新しい Master を新 pane で spawn する。`disconnected` で居座った Master を解消する主力経路 |
 
 **トークンプール**
 | コマンド | やること |
