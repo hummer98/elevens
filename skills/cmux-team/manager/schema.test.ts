@@ -18,6 +18,7 @@ import {
   QueueMessage,
   SessionStartedMessage,
   StopFailureMessage,
+  UserPromptSubmitMessage,
   normalizeOverlayRole,
 } from "./schema";
 
@@ -373,6 +374,41 @@ describe("StopFailureMessage (T392)", () => {
   test("QueueMessage 経由でも parse 可能", () => {
     const parsed = QueueMessage.safeParse(base);
     expect(parsed.success).toBe(true);
+  });
+});
+
+// --- T449: UserPromptSubmitMessage ---
+
+describe("UserPromptSubmitMessage (T449)", () => {
+  const base = {
+    type: "USER_PROMPT_SUBMIT" as const,
+    surface: "surface:200",
+    pid: 12345,
+    timestamp: "2026-05-29T10:00:00.000Z",
+  };
+
+  test("正常系: 最小構成（role 省略）でパース成功", () => {
+    expect(UserPromptSubmitMessage.safeParse(base).success).toBe(true);
+  });
+
+  test("正常系: role は master/conductor/agent のいずれか", () => {
+    for (const role of ["master", "conductor", "agent"] as const) {
+      expect(UserPromptSubmitMessage.safeParse({ ...base, role }).success).toBe(true);
+    }
+  });
+
+  test("異常系: pid 未指定は reject（required 契約）", () => {
+    const { pid: _pid, ...withoutPid } = base;
+    expect(UserPromptSubmitMessage.safeParse(withoutPid).success).toBe(false);
+  });
+
+  test("異常系: surface 未指定は reject", () => {
+    const { surface: _s, ...withoutSurface } = base;
+    expect(UserPromptSubmitMessage.safeParse(withoutSurface).success).toBe(false);
+  });
+
+  test("QueueMessage 経由でも parse 可能", () => {
+    expect(QueueMessage.safeParse(base).success).toBe(true);
   });
 });
 

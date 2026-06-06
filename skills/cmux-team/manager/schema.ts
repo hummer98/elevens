@@ -255,6 +255,20 @@ export const StopFailureMessage = z.object({
   timestamp: z.string().datetime(),
 });
 
+// T449: Claude Code UserPromptSubmit hook 受信時のメッセージ。
+// 新しいプロンプト投入（ユーザーの「続けて」や Master の send-key）= ターン再開シグナル。
+// stale な API エラー表示（status="error" + lastApiError）の早期クリアに用途を限定する。
+// それ以外の status 遷移には関与しない（active/idle/ask は既存 hook が担う）。
+// pid は settings.json テンプレートが --pid "$PPID" を必ず付けるため required。
+// role は hook 側で hardcode する契約（daemon 逆引きの fallback 兼ヒント）。
+export const UserPromptSubmitMessage = z.object({
+  type: z.literal("USER_PROMPT_SUBMIT"),
+  surface: z.string(),
+  pid: z.number(),
+  role: z.enum(["master", "conductor", "agent"]).optional(),
+  timestamp: z.string().datetime(),
+});
+
 // T379: Claude Code の PreToolUse / PostToolUse hook 受信時のメッセージ。
 // hook 側で分岐せず stdin 生 JSON を payload に丸ごと持たせ、daemon が trace DB に書き込む。
 // - toolName: payload.tool_name と同値（trace DB の専用列に分離する集計用ショートカット）
@@ -322,6 +336,7 @@ export const QueueMessage = z.discriminatedUnion("type", [
   PreToolUseMessage,
   PostToolUseMessage,
   PreToolUseDeniedMessage,
+  UserPromptSubmitMessage,
   ShutdownMessage,
 ]);
 
@@ -347,6 +362,7 @@ export type AgentSpawnFailedMessage = z.infer<typeof AgentSpawnFailedMessage>;
 export type PreToolUseMessage = z.infer<typeof PreToolUseMessage>;
 export type PostToolUseMessage = z.infer<typeof PostToolUseMessage>;
 export type PreToolUseDeniedMessage = z.infer<typeof PreToolUseDeniedMessage>;
+export type UserPromptSubmitMessage = z.infer<typeof UserPromptSubmitMessage>;
 
 // --- Deliverable (T295) ---
 

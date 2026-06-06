@@ -123,6 +123,14 @@ export interface DaemonState {
   proxyPortChanged: boolean;
   /** daemon が稼働しているワークスペース（他 workspace の surface との混同を防ぐ） */
   workspace: string | null;
+  /**
+   * T450: workspace 内で前回 tick 時に観測した生存 surface 集合（surface/tab open/close
+   * のログ化用）。`null` は未初期化 = 次の monitorSurfaces で baseline を seed するだけで
+   * 差分は出さない（daemon 起動前から存在した surface を「開いた」と誤記録しないため）。
+   */
+  knownSurfaces: Set<string> | null;
+  /** T450: surface poll が連続失敗したときのログ間引き用。最後にエラーを記録した時刻 (ms) */
+  lastSurfacePollErrorAt: number;
   /** サイドバーステータスの前回表示値（差分抑制用） */
   lastSidebarStatus: string | null;
   /** サイドバーステータスの前回カテゴリ（遷移判定用） */
@@ -452,6 +460,8 @@ export async function createDaemon(
     fileWatcherAbort: null,
     proxyPortChanged: false,
     workspace: null,
+    knownSurfaces: null,
+    lastSurfacePollErrorAt: 0,
     lastSidebarStatus: null,
     lastSidebarCategory: null,
     version: "v?.?.?",
@@ -1583,6 +1593,7 @@ export async function tick(state: DaemonState): Promise<void> {
   state.lastUpdate = new Date();
   await scanTasks(state);
   await monitorConductors(state);
+  await monitorSurfaces(state);
 
   // proxy 死活チェック（死んでいたらログに記録）
   if (state.proxyPort) {
@@ -1592,6 +1603,60 @@ export async function tick(state: DaemonState): Promise<void> {
     }
   }
 
+}
+
+/**
+ * T450: workspace 内の surface/tab open/close を毎 tick で観測してログに残す。
+ *
+ * elevens の管理対象（Master/Conductor/Agent = Claude Code hook 持ち surface）だけでなく、
+ * 素のシェル tab・browser・markdown surface など hook を持たない surface も対象。
+ * `c11 tree` の workspace スコープ pull で生存 surface 集合を取り、前回 tick との差分を
+ * `surface_opened` / `surface_closed` として `manager.log` に記録する（observatory の
+ * real-time 層を補完する pull 型観測。state は外部の c11 tree が source of truth）。
+ *
+ * - 初回（knownSurfaces=null）は baseline を seed するだけで差分は出さない
+ *   （daemon 起動前から存在した surface を「開いた」と誤記録しないため）。
+ * - workspace 未確定なら no-op。
+ * - `c11 tree` の一時失敗では daemon を落とさず、60s 間引きで `surface_poll_error` を残す
+ *   （startup の fail-fast とは別。定常 tick の transient 失敗は mailbox watcher と同じく許容）。
+ */
+export async function monitorSurfaces(state: DaemonState): Promise<void> {
+  if (!state.workspace) return;
+
+  let live: Set<string>;
+  try {
+    live = await cmux.fetchLiveSurfaces(state.workspace);
+  } catch (e: any) {
+    const now = Date.now();
+    if (now - state.lastSurfacePollErrorAt >= 60_000) {
+      state.lastSurfacePollErrorAt = now;
+      await log(
+        "surface_poll_error",
+        `workspace=${state.workspace} error=${e?.message ?? e}`,
+      );
+    }
+    return;
+  }
+
+  // 初回は baseline を記録するだけ（差分なし）
+  if (state.knownSurfaces === null) {
+    state.knownSurfaces = live;
+    await log("surface_baseline", `workspace=${state.workspace} count=${live.size}`);
+    return;
+  }
+
+  const prev = state.knownSurfaces;
+  for (const s of live) {
+    if (!prev.has(s)) {
+      await log("surface_opened", formatSurface(s, "S"));
+    }
+  }
+  for (const s of prev) {
+    if (!live.has(s)) {
+      await log("surface_closed", formatSurface(s, "S"));
+    }
+  }
+  state.knownSurfaces = live;
 }
 
 export async function handleMessage(state: DaemonState, message: QueueMessage): Promise<void> {
@@ -3438,6 +3503,53 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
       break;
     }
 
+    case "USER_PROMPT_SUBMIT": {
+      // T449: UserPromptSubmit hook 受信。再開プロンプト投入 = ターン再開シグナル。
+      // 用途は stale な API エラー表示の早期クリアに限定する。error 状態でなければ何もしない
+      // （active/idle/ask の正規遷移は SESSION_* hook が担う。ここで status を動かすと二重管理になる）。
+      // Master は proxy `/master-state` busy POST 経路で別途クリアされるため、ここでは Conductor / Agent のみ対象。
+      const target = resolveStopFailureTarget(state, message);
+      if (!target) {
+        await log(
+          "user_prompt_submit_unknown_surface",
+          formatSurface(message.surface, "S"),
+        );
+        break;
+      }
+      // UserPromptSubmit = ターン開始シグナルなので、error 解除時の遷移先は常に "running"。
+      // （SESSION_IDLE の taskRunId?running:idle は「ターン終了」由来の分岐であり、ここでは当てはまらない）
+      if (target.role === "conductor") {
+        const c = target.conductor;
+        // T250: broken は明示 clear-conductor 以外で解除しない。
+        if (c.status === "broken") {
+          await logBrokenIgnore(c, "USER_PROMPT_SUBMIT");
+          break;
+        }
+        if (c.status === "error") {
+          c.status = "running";
+          c.lastApiError = undefined;
+          notifyStateChanged("daemon.ts:handleMessage:user-prompt-submit-conductor");
+          await log(
+            "api_error_cleared",
+            `${formatSurface(c.surface, "C")} role=conductor via=USER_PROMPT_SUBMIT new_status=running`,
+          );
+        }
+      } else if (target.role === "agent") {
+        const a = target.agent;
+        if (a.status === "error") {
+          a.status = "running";
+          a.lastApiError = undefined;
+          notifyStateChanged("daemon.ts:handleMessage:user-prompt-submit-agent");
+          await log(
+            "api_error_cleared",
+            `${formatPair(target.parent.surface, a.surface, "C", "A")} role=agent via=USER_PROMPT_SUBMIT new_status=running`,
+          );
+        }
+      }
+      // Master は対象外（proxy /master-state busy POST が担う）
+      break;
+    }
+
     case "SHUTDOWN":
       await log("shutdown_requested");
       // T234: 全 pidWatcher の clearInterval も同時に実行
@@ -3464,7 +3576,7 @@ type StopFailureTarget =
 
 export function resolveStopFailureTarget(
   state: DaemonState,
-  message: import("./schema").StopFailureMessage,
+  message: { surface: string; role?: "master" | "conductor" | "agent" },
 ): StopFailureTarget | undefined {
   const surface = message.surface;
   if (message.role === "master") {

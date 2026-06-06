@@ -707,9 +707,13 @@ export async function start(
           }
           if (body.status === "busy") {
             master.status = "running";
+            // T449: 再開プロンプト投入で running に戻ったら stale な API エラー情報をクリア。
+            // status="error" → "running" 遷移で dashboard の error 表示も消える。
+            master.lastApiError = undefined;
           } else if (body.status === "idle") {
             master.status = "idle";
             master.prompt = undefined;
+            master.lastApiError = undefined;
           }
           if (body.prompt != null) {
             master.prompt = body.prompt.slice(0, 80);

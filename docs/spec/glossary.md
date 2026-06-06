@@ -20,6 +20,7 @@ glossary には要約と一次リンクのみを置く方針を取る。
 10. [コミュニケーション系](#10-コミュニケーション系)
 11. [Metrics 関連](#11-metrics-関連)
 12. [Post-mortem evidence](#12-post-mortem-evidence)
+13. [Integration Queue 関連](#13-integration-queue-関連)
 
 ---
 
@@ -169,7 +170,7 @@ glossary には要約と一次リンクのみを置く方針を取る。
 | events stream | 外向け event channel。Manager daemon が `.team/logs/events.jsonl` に JSONL で append し、Master watch mode や `cmux-team events` CLI が購読する。schema v2、18 event 種、append-only（rotate なし）。 | [`10-events-stream.md`](10-events-stream.md) | event channel / EventBus / Trace DB |
 | event channel | Manager daemon が外向けに公開する event の論理チャネル。`.team/logs/events.jsonl`（events stream）として実装される。daemon プロセス内 EventBus（`notifyStateChanged`）とは別レイヤー。 | [`10-events-stream.md#1-概要`](10-events-stream.md#1-概要) | events stream / EventBus |
 | watch mode | Master が `/cmux-team:watch` を能動 invoke した時のみ起動する opt-in な events stream 監視モード。`task_completed` の自動 PR merge（squash、branch は残す）/ `git pull --ff-only` までを Master が自走する。**conflict が出た PR の自動 resolve は行わず（commit drop 事故防止のため）`git merge --abort` で停止して escalate する（T028）**。判断が必要な他 event も escalate する。default 無効。 | [`../../commands/watch.md`](../../commands/watch.md), [`10-events-stream.md`](10-events-stream.md) | events stream / event channel |
-| hook | Claude Code が発行する SessionStart / Stop / StopFailure / Notification / PreToolUse / PostToolUse / SessionEnd 等のイベント。hook shell には分岐ロジックを持たせず、全イベントを daemon に転送する。 | [`../../CLAUDE.md#実装ルールガードレール`](../../CLAUDE.md#実装ルールガードレール), [`05-install-and-infrastructure.md#メッセージング`](05-install-and-infrastructure.md#メッセージング) | hook_signals / Trace DB |
+| hook | Claude Code が発行する SessionStart / UserPromptSubmit / Stop / StopFailure / Notification / PreToolUse / PostToolUse / SessionEnd 等のイベント。hook shell には分岐ロジックを持たせず、全イベントを daemon に転送する。 | [`../../CLAUDE.md#実装ルールガードレール`](../../CLAUDE.md#実装ルールガードレール), [`05-install-and-infrastructure.md#メッセージング`](05-install-and-infrastructure.md#メッセージング) | hook_signals / Trace DB |
 | EventBus | daemon プロセス内の **実 state mutation** → TUI refresh を疎結合に接続する EventEmitter ラッパー（`eventBus.ts`）。`notifyStateChanged` / `onStateChanged` のみ使用可（`bus.emit` / `bus.on` 直接呼び出しは禁止）。 | [`05-install-and-infrastructure.md#event-catalogeventbusts`](05-install-and-infrastructure.md#event-catalogeventbusts), [`../../CLAUDE.md#実装ルールガードレール`](../../CLAUDE.md#実装ルールガードレール) | state mutation |
 | queue | daemon の HTTP プロキシが受け口を兼ねるメッセージキュー。CLI（`cmux-team send <TYPE>`）から POST されたメッセージを受信。旧ファイルベース `queue.ts` は廃止済み。 | [`05-install-and-infrastructure.md#メッセージング`](05-install-and-infrastructure.md#メッセージング) | proxy |
 | done marker | Conductor 完了通知用ファイル（`.team/tasks/TNNN-slug/runs/<taskRunId>/done`）。Manager は fs.watch + PID ベース生存確認（`spawnPidWatcher`）で完了検出する（pull 型）。 | [`00-project-overview.md#core-concept`](00-project-overview.md#core-concept), [`../../CLAUDE.md#manager-プロトコル概要`](../../CLAUDE.md#manager-プロトコル概要) | Conductor / await-agent |
@@ -206,3 +207,15 @@ glossary には要約と一次リンクのみを置く方針を取る。
 | fatal-handlers | `uncaughtException` / `unhandledRejection` / `SIGTERM` / `SIGINT` / `SIGHUP` を 1 箇所に集約する handler。pidfile cleanup は別責務 (`'exit'` listener)。 | [`15-post-mortem-evidence.md#5-fatal-trace-の重複経路`](15-post-mortem-evidence.md#5-fatal-trace-の重複経路) | post-mortem evidence |
 
 **関連 spec**: [`15-post-mortem-evidence.md`](15-post-mortem-evidence.md)
+
+## 13. Integration Queue 関連
+
+| 用語 | 定義 | 一次リンク | 関連 |
+|------|------|-----------|------|
+| Integration Queue | 後工程（統合レーン）の待ち行列。closed かつ `deliverable=pr` の Task を参照する item を `.team/integration-queue/Qnnn.json` で管理する。Integrator が pull して merge → deploy → 実機 E2E を直列に遂行する。CLI 強制（直接書き込みは hook block）。 | [`17-integration-queue.md`](17-integration-queue.md) | Integrator / Integration Item / deliverable |
+| Integration Item | Queue の 1 アイテム。Task そのものではなく closed&pr Task への参照（`task_id` / `branch` / `pr` / `batch_id` / `retry` 等）。在り処は `Qnnn.json`（`Q001`〜）。 | [`17-integration-queue.md#3-integration-itemtask-参照型`](17-integration-queue.md#3-integration-itemtask-参照型) | Integration Item FSM / Integration Queue |
+| Integration Item FSM | Item の状態機械（5 値）: `queued → integrating → verifying → done` / `failed`。done/failed は終端で evidence（`result_artifact`）必須、failed は `followup_task_id` 必須。reducer は `integration-queue.ts:integReduce`（純関数）。 | [`17-integration-queue.md#4-integration-item-fsm5-値`](17-integration-queue.md#4-integration-item-fsm5-値) | Task FSM / Integration Item |
+| Integrator | Master / Manager / Conductor / Agent の 4 層に対する後段の**単一直列ワーカー**。`/loop` で Queue を pull し、唯一 main / deploy / 実機を触る存在（single-writer による直列化）。Epic Planner と同じ `/loop` 自律パターン。 | [`17-integration-queue.md#6-integrator-ロールloop-自律エージェント`](17-integration-queue.md#6-integrator-ロールloop-自律エージェント) | Epic Planner / Integration Queue / Conductor 境界 |
+| `elevens integ` | Integration Queue 操作 CLI。`enqueue`（closed&pr Task を投入） / `list` / `show` / `update`（FSM 遷移、不正遷移は reject）。write 系は `enqueue` / `update`。 | [`17-integration-queue.md#8-cli-surfacepoc`](17-integration-queue.md#8-cli-surfacepoc) | Integration Queue / Integration Item FSM |
+
+**関連 spec**: [`17-integration-queue.md`](17-integration-queue.md)

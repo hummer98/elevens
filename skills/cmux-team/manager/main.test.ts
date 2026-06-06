@@ -2400,6 +2400,35 @@ describe("SessionStart hook generation (T203)", () => {
     expect(cmd).not.toContain('"session_end"');
   });
 
+  // T449: UserPromptSubmit hook の generator テスト
+  test("T449: Conductor settings に UserPromptSubmit hook があり role=conductor で USER_PROMPT_SUBMIT を送る", async () => {
+    await mkdir(join(testDir, ".team/prompts"), { recursive: true });
+    const settingsPath = generateConductorSettings(testDir, "surface:200");
+    const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
+
+    expect(Array.isArray(settings.hooks.UserPromptSubmit)).toBe(true);
+    expect(settings.hooks.UserPromptSubmit.length).toBe(1);
+    const cmd: string = settings.hooks.UserPromptSubmit[0].hooks[0].command;
+    expect(cmd).toContain("elevens send USER_PROMPT_SUBMIT");
+    expect(cmd).toContain("--role conductor");
+    expect(cmd).toContain("--surface");
+    // stdin（プロンプト本文）は読まない契約
+    expect(cmd).not.toContain("--from-stdin");
+  });
+
+  test("T449: Agent settings に UserPromptSubmit hook があり role=agent で USER_PROMPT_SUBMIT を送る", async () => {
+    await mkdir(join(testDir, ".team/prompts"), { recursive: true });
+    const settingsPath = generateAgentSettings(testDir, "surface:100");
+    const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
+
+    expect(Array.isArray(settings.hooks.UserPromptSubmit)).toBe(true);
+    expect(settings.hooks.UserPromptSubmit.length).toBe(1);
+    const cmd: string = settings.hooks.UserPromptSubmit[0].hooks[0].command;
+    expect(cmd).toContain("elevens send USER_PROMPT_SUBMIT");
+    expect(cmd).toContain("--role agent");
+    expect(cmd).not.toContain("--from-stdin");
+  });
+
   // T266: Notification hook の generator テスト
   test("T266: Conductor settings に Notification hook があり role=conductor で送信する", async () => {
     await mkdir(join(testDir, ".team/prompts"), { recursive: true });

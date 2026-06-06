@@ -350,7 +350,7 @@ describe("エラーハンドリング", () => {
 
 // --- scanTasks 統合テスト (assignTask エラー分離) ---
 
-import { scanTasks, createDaemon, requestWakeup, sleepUntilWakeup, initFileWatcher, handleMessage, monitorConductors } from "./daemon";
+import { scanTasks, createDaemon, requestWakeup, sleepUntilWakeup, initFileWatcher, handleMessage, monitorConductors, monitorSurfaces } from "./daemon";
 import type { DaemonState } from "./daemon";
 import type { ConductorState } from "./schema";
 
@@ -8710,6 +8710,255 @@ describe("kill 中 SESSION_ENDED suppression (T421/F6)", () => {
     } finally {
       state.running = false;
       __setIsAliveImpl(null);
+    }
+  });
+});
+
+describe("handleMessage: USER_PROMPT_SUBMIT による API エラー clear (T449)", () => {
+  async function readManagerLog(): Promise<string> {
+    try {
+      return await readFile(join(testDir, ".team/logs/manager.log"), "utf-8");
+    } catch {
+      return "";
+    }
+  }
+
+  test("error 状態の Conductor が USER_PROMPT_SUBMIT で running に戻り lastApiError がクリアされる", async () => {
+    const state = await createDaemon(testDir);
+    const conductor: ConductorState = {
+      surface: "surface:449c",
+      startedAt: new Date().toISOString(),
+      agents: [],
+      status: "error",
+      taskRunId: "task-449-a",
+      taskId: "449",
+      lastApiError: { kind: "rate_limit", message: "overloaded", at: new Date().toISOString() },
+    };
+    state.conductors.set(conductor.surface, conductor);
+
+    await handleMessage(state, {
+      type: "USER_PROMPT_SUBMIT",
+      surface: conductor.surface,
+      pid: 44901,
+      role: "conductor",
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(conductor.status).toBe("running");
+    expect(conductor.lastApiError).toBeUndefined();
+    const logContent = await readManagerLog();
+    expect(logContent).toMatch(/api_error_cleared C\[449c\].*via=USER_PROMPT_SUBMIT/);
+  });
+
+  test("taskRunId 無しの error Conductor でも running に遷移する（ターン開始シグナル）", async () => {
+    const state = await createDaemon(testDir);
+    const conductor: ConductorState = {
+      surface: "surface:449n",
+      startedAt: new Date().toISOString(),
+      agents: [],
+      status: "error",
+      lastApiError: { kind: "server_error", at: new Date().toISOString() },
+    };
+    state.conductors.set(conductor.surface, conductor);
+
+    await handleMessage(state, {
+      type: "USER_PROMPT_SUBMIT",
+      surface: conductor.surface,
+      pid: 44902,
+      role: "conductor",
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(conductor.status).toBe("running");
+    expect(conductor.lastApiError).toBeUndefined();
+  });
+
+  test("error でない Conductor は USER_PROMPT_SUBMIT で変化しない（idle 維持）", async () => {
+    const state = await createDaemon(testDir);
+    const conductor: ConductorState = {
+      surface: "surface:449i",
+      startedAt: new Date().toISOString(),
+      agents: [],
+      status: "idle",
+    };
+    state.conductors.set(conductor.surface, conductor);
+
+    await handleMessage(state, {
+      type: "USER_PROMPT_SUBMIT",
+      surface: conductor.surface,
+      pid: 44903,
+      role: "conductor",
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(conductor.status).toBe("idle");
+    const logContent = await readManagerLog();
+    expect(logContent).not.toMatch(/api_error_cleared C\[449i\]/);
+  });
+
+  test("broken Conductor は USER_PROMPT_SUBMIT で解除されない（明示 clear-conductor のみ）", async () => {
+    const state = await createDaemon(testDir);
+    const conductor: ConductorState = {
+      surface: "surface:449b",
+      startedAt: new Date().toISOString(),
+      agents: [],
+      status: "broken",
+      lastApiError: { kind: "rate_limit", at: new Date().toISOString() },
+    };
+    state.conductors.set(conductor.surface, conductor);
+
+    await handleMessage(state, {
+      type: "USER_PROMPT_SUBMIT",
+      surface: conductor.surface,
+      pid: 44904,
+      role: "conductor",
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(conductor.status).toBe("broken");
+    const logContent = await readManagerLog();
+    expect(logContent).toMatch(/session_event_ignored_broken.*event=USER_PROMPT_SUBMIT/);
+  });
+
+  test("error 状態の Agent が USER_PROMPT_SUBMIT で running に戻り lastApiError がクリアされる", async () => {
+    const state = await createDaemon(testDir);
+    const conductor: ConductorState = {
+      surface: "surface:449pc",
+      startedAt: new Date().toISOString(),
+      agents: [
+        {
+          surface: "surface:449a",
+          spawnedAt: new Date().toISOString(),
+          status: "error",
+          lastApiError: { kind: "rate_limit", at: new Date().toISOString() },
+        },
+      ],
+      status: "running",
+      taskRunId: "task-449-pc",
+      taskId: "449pc",
+    };
+    state.conductors.set(conductor.surface, conductor);
+
+    await handleMessage(state, {
+      type: "USER_PROMPT_SUBMIT",
+      surface: "surface:449a",
+      pid: 44905,
+      role: "agent",
+      timestamp: new Date().toISOString(),
+    });
+
+    const agent = conductor.agents[0]!;
+    expect(agent.status).toBe("running");
+    expect(agent.lastApiError).toBeUndefined();
+  });
+
+  test("未知 surface は user_prompt_submit_unknown_surface をログするだけ", async () => {
+    const state = await createDaemon(testDir);
+
+    await handleMessage(state, {
+      type: "USER_PROMPT_SUBMIT",
+      surface: "surface:449unknown",
+      pid: 44906,
+      role: "conductor",
+      timestamp: new Date().toISOString(),
+    });
+
+    const logContent = await readManagerLog();
+    expect(logContent).toMatch(/user_prompt_submit_unknown_surface/);
+  });
+});
+
+describe("monitorSurfaces: surface/tab open/close ログ (T450)", () => {
+  async function readManagerLog(): Promise<string> {
+    try {
+      return await readFile(join(testDir, ".team/logs/manager.log"), "utf-8");
+    } catch {
+      return "";
+    }
+  }
+
+  test("初回 tick は baseline を seed するだけで surface_opened を出さない", async () => {
+    const { __setTreeImpl } = await import("./cmux");
+    __setTreeImpl(async () => "surface:700\nsurface:701\n");
+    try {
+      const state = await createDaemon(testDir);
+      state.workspace = "workspace:1";
+      expect(state.knownSurfaces).toBeNull();
+
+      await monitorSurfaces(state);
+
+      expect(state.knownSurfaces).toEqual(new Set(["surface:700", "surface:701"]));
+      const logContent = await readManagerLog();
+      expect(logContent).toMatch(/surface_baseline workspace=workspace:1 count=2/);
+      expect(logContent).not.toMatch(/surface_opened/);
+    } finally {
+      __setTreeImpl(null);
+    }
+  });
+
+  test("2 回目 tick で新規 surface は surface_opened、消えた surface は surface_closed", async () => {
+    const { __setTreeImpl } = await import("./cmux");
+    let treeOut = "surface:700\nsurface:701\n";
+    __setTreeImpl(async () => treeOut);
+    try {
+      const state = await createDaemon(testDir);
+      state.workspace = "workspace:1";
+
+      await monitorSurfaces(state); // baseline
+
+      // 702 が開かれ、701 が閉じられた
+      treeOut = "surface:700\nsurface:702\n";
+      await monitorSurfaces(state);
+
+      expect(state.knownSurfaces).toEqual(new Set(["surface:700", "surface:702"]));
+      const logContent = await readManagerLog();
+      expect(logContent).toMatch(/surface_opened S\[702\]/);
+      expect(logContent).toMatch(/surface_closed S\[701\]/);
+      // 据え置きの 700 は open/close どちらにも出ない
+      expect(logContent).not.toMatch(/surface_(opened|closed) S\[700\]/);
+    } finally {
+      __setTreeImpl(null);
+    }
+  });
+
+  test("workspace 未確定なら no-op（tree を呼ばない）", async () => {
+    const { __setTreeImpl } = await import("./cmux");
+    let called = false;
+    __setTreeImpl(async () => {
+      called = true;
+      return "surface:700\n";
+    });
+    try {
+      const state = await createDaemon(testDir);
+      state.workspace = null;
+
+      await monitorSurfaces(state);
+
+      expect(called).toBe(false);
+      expect(state.knownSurfaces).toBeNull();
+    } finally {
+      __setTreeImpl(null);
+    }
+  });
+
+  test("c11 tree 失敗時は daemon を落とさず surface_poll_error を 60s 間引きで記録する", async () => {
+    const { __setTreeImpl } = await import("./cmux");
+    __setTreeImpl(async () => {
+      throw new Error("c11 tree boom");
+    });
+    try {
+      const state = await createDaemon(testDir);
+      state.workspace = "workspace:1";
+
+      await monitorSurfaces(state); // 1 回目: エラー記録
+      await monitorSurfaces(state); // 2 回目: 60s 以内なので間引かれる
+
+      expect(state.knownSurfaces).toBeNull(); // baseline 未確定のまま
+      const logContent = await readManagerLog();
+      const matches = logContent.match(/surface_poll_error/g) ?? [];
+      expect(matches.length).toBe(1);
+    } finally {
+      __setTreeImpl(null);
     }
   });
 });

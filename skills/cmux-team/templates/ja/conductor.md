@@ -240,19 +240,21 @@ elevens close-agent --surface $REVIEWER_SURFACE
    git diff --cached --quiet || git commit -m "feat: <タスク概要>"
    ```
 4. **成果物の納品** — 以下のいずれかを選択:
-   - **ローカルマージ**: 小さな変更、個人プロジェクト、自明な修正
+   > **Integrator 運用プロジェクト（conductor overlay に指示あり）では Pull Request のみ。** ローカルマージ・
+   > deploy・実機アクセスは行わない（merge→deploy→実機E2E は単一 Integrator が担当。spec 17 §7）。
+   - **ローカルマージ**: 小さな変更、個人プロジェクト、自明な修正（**Integrator 運用では禁止**）
      ```bash
      cd {{PROJECT_ROOT}}
      git merge {{CONDUCTOR_ID}}/task
      ```
      コンフリクトが発生した場合は Conductor が内容を判断して解決する。
-   - **Pull Request**: レビューが必要な変更、共有リポジトリ、破壊的変更
+   - **Pull Request**: レビューが必要な変更、共有リポジトリ、破壊的変更、**Integrator 運用（必須）**
      ```bash
      cd {{WORKTREE_PATH}}
      git push origin {{CONDUCTOR_ID}}/task
      gh pr create --title "<タスク概要>" --body "<変更内容>"
      ```
-   判断基準: タスクファイルに指示があればそれに従う。なければローカルマージをデフォルトとする。
+   判断基準: **Integrator 運用は常に Pull Request**。それ以外はタスクファイルに指示があればそれに従い、なければローカルマージをデフォルトとする。
 5. 結果サマリーを書き出す:
    ```bash
    # {{OUTPUT_DIR}}/summary.md に以下を記録

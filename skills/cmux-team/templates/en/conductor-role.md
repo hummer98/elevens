@@ -511,18 +511,24 @@ The completion report must be marked [Judgment Required] and must include **stru
 
 ### Step 9: Deliver the deliverables — choose one of the following
 
-- **Local merge**: small changes, personal project, trivial fixes
+> **Integration Queue projects deliver via Pull Request only.** If the project's conductor overlay
+> (`.team/agent-instructions/conductor.md`) enables the Integrator workflow, **never local-merge, deploy,
+> touch hardware, or merge into `{{MAIN_BRANCH}}`** — always finish with a Pull Request (`--deliverable-kind pr`).
+> A single Integrator serially owns merge → deploy → on-device E2E (spec `docs/spec/17-integration-queue.md` §7).
+> Legacy projects without that overlay instruction may default to local merge as below.
+
+- **Local merge**: small changes, personal project, trivial fixes (**forbidden in Integrator projects**)
   ```bash
   cd {{PROJECT_ROOT}}
   git merge --ff-only <branch name assigned to this task>
   ```
-- **Pull Request**: changes requiring review, shared repositories, breaking changes
+- **Pull Request**: changes requiring review, shared repositories, breaking changes, **Integrator projects (required)**
   ```bash
   cd <WORKTREE_PATH>
   git push origin <branch name assigned to this task>
   gh pr create --title "<task summary>" --body "<change description>"
   ```
-Criteria: follow the task file instructions if specified. Default to local merge otherwise.
+Criteria: **Integrator projects always use a Pull Request.** Otherwise follow the task file instructions if specified, and default to local merge.
 
 #### Mapping delivery method to `close-task --deliverable-kind` (T295)
 

@@ -240,19 +240,21 @@ If there are no code changes (documentation/config files only), skip the review 
    git diff --cached --quiet || git commit -m "feat: <task summary>"
    ```
 4. **Deliver deliverables** — Choose one of the following:
-   - **Local merge**: Small changes, personal project, trivial fixes
+   > **Integrator projects (conductor overlay enables it) use Pull Request only.** Never local-merge, deploy,
+   > or touch hardware (merge→deploy→on-device E2E belongs to the single Integrator; spec 17 §7).
+   - **Local merge**: Small changes, personal project, trivial fixes (**forbidden in Integrator projects**)
      ```bash
      cd {{PROJECT_ROOT}}
      git merge {{CONDUCTOR_ID}}/task
      ```
      If conflicts occur, the Conductor resolves them by judging the content.
-   - **Pull Request**: Changes requiring review, shared repositories, breaking changes
+   - **Pull Request**: Changes requiring review, shared repositories, breaking changes, **Integrator projects (required)**
      ```bash
      cd {{WORKTREE_PATH}}
      git push origin {{CONDUCTOR_ID}}/task
      gh pr create --title "<task summary>" --body "<change description>"
      ```
-   Criteria: Follow task file instructions if specified. Default to local merge otherwise.
+   Criteria: **Integrator projects always use a Pull Request.** Otherwise follow task file instructions if specified, and default to local merge.
 5. Write result summary:
    ```bash
    # Record the following in {{OUTPUT_DIR}}/summary.md

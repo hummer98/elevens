@@ -86,6 +86,14 @@ import { loadTaskState, loadTasks, saveTaskState, createTaskProgrammatic, cascad
 import { applyTaskEvent, refreshTaskStateFromDisk } from "./state-machine/task-state-store";
 import { loadArtifacts, searchArtifacts, validateArtifact, addArtifact } from "./artifact";
 import { loadEpics, readEpic, createEpic, updateEpicStatus, listEpicTasks, EPIC_STATUSES, type EpicStatus } from "./epic";
+import {
+  loadIntegItems,
+  readIntegItem,
+  enqueueIntegItem,
+  updateIntegItem,
+  INTEG_STATES,
+  type IntegItemState,
+} from "./integration-queue";
 import { runPreflight, printPreflightIssues } from "./preflight";
 import { acquireOrExit, installCrashHandler, releasePidFile } from "./pidfile";
 import { installFatalHandlers, type FatalSignal } from "./fatal-handlers";
@@ -101,7 +109,7 @@ import {
 import { resolvePostMortemConfig } from "./config";
 import { ensureEnvrcHookPrompt } from "./envrc-prompt";
 import { checkDirenvAllowed, formatDirenvNotAllowedMessage } from "./direnv-check";
-import type { QueueMessage, LayoutMode, AutoUpdateMode, SleepPreventionMode, SessionStartedMessage, SessionEndedMessage, NotificationMessage, StopFailureMessage, PreToolUseMessage, PostToolUseMessage, PreToolUseDeniedMessage, Deliverable } from "./schema";
+import type { QueueMessage, LayoutMode, AutoUpdateMode, SleepPreventionMode, SessionStartedMessage, SessionEndedMessage, NotificationMessage, StopFailureMessage, PreToolUseMessage, PostToolUseMessage, PreToolUseDeniedMessage, UserPromptSubmitMessage, Deliverable } from "./schema";
 import { THROTTLE_5H_THRESHOLD, LAYOUT_MAX_CONDUCTORS, QueueMessage as QueueMessageSchema, SessionStartedMessage as SessionStartedMessageSchema, SessionEndedMessage as SessionEndedMessageSchema, NotificationMessage as NotificationMessageSchema, StopFailureMessage as StopFailureMessageSchema, PreToolUseMessage as PreToolUseMessageSchema, PostToolUseMessage as PostToolUseMessageSchema, PreToolUseDeniedMessage as PreToolUseDeniedMessageSchema, Deliverable as DeliverableSchema } from "./schema";
 import type { TeamConfig } from "./config";
 import {
@@ -326,6 +334,7 @@ const WRITE_COMMANDS: Record<string, true | Set<string>> = {
   artifacts: new Set(["add"]),
   token: new Set(["add", "remove", "rotate", "set-plan", "promote", "migrate-subscription"]),
   epic: new Set(["create", "resume", "abort"]),
+  integ: new Set(["enqueue", "update"]),
   // T011 [M3]: `worktree archive remove` / `prune` のみ write 扱い。`list` / `show` は read。
   // 2 階層 (worktree → archive → sub) を flat に展開して既存 isWriteCommand 構造に適合させる。
   worktree: new Set(["archive-remove", "archive-prune"]),
@@ -1830,6 +1839,7 @@ async function cmdSend(): Promise<void> {
     "SESSION_ASK",
     "SESSION_CLEAR",
     "STOP_FAILURE",
+    "USER_PROMPT_SUBMIT",
   ]);
   let normalizedSurface: string | undefined;
   let normalizedConductorSurface: string | undefined;
@@ -1960,6 +1970,18 @@ async function cmdSend(): Promise<void> {
       };
       break;
 
+    case "USER_PROMPT_SUBMIT":
+      // T449: UserPromptSubmit hook。stale な API エラー表示の早期クリア専用。
+      // stdin（プロンプト本文）は読まない — surface / pid / role だけで足りる。
+      message = {
+        type: "USER_PROMPT_SUBMIT",
+        surface: normalizedSurface!,
+        pid: Number(requireArg("pid")),
+        role: getArg("role") as UserPromptSubmitMessage["role"],
+        timestamp: now,
+      };
+      break;
+
     case "SHUTDOWN":
       message = { type: "SHUTDOWN", timestamp: now };
       break;
@@ -1980,7 +2002,7 @@ async function cmdSend(): Promise<void> {
     }
 
     default:
-      console.error("Usage: send <TASK_CREATED|TASK_UPDATED|CONDUCTOR_DONE|CONDUCTOR_REGISTERED|AGENT_SPAWNED|SESSION_STARTED|SESSION_ENDED|SESSION_ACTIVE|SESSION_IDLE|SESSION_ASK|SESSION_STOP|SESSION_CLEAR|NOTIFICATION|STOP_FAILURE|PRE_TOOL_USE_DENIED|SHUTDOWN> [--from-stdin]");
+      console.error("Usage: send <TASK_CREATED|TASK_UPDATED|CONDUCTOR_DONE|CONDUCTOR_REGISTERED|AGENT_SPAWNED|SESSION_STARTED|SESSION_ENDED|SESSION_ACTIVE|SESSION_IDLE|SESSION_ASK|SESSION_STOP|SESSION_CLEAR|NOTIFICATION|STOP_FAILURE|PRE_TOOL_USE_DENIED|USER_PROMPT_SUBMIT|SHUTDOWN> [--from-stdin]");
       process.exit(1);
   }
 
@@ -2982,6 +3004,17 @@ export function generateAgentSettings(
           }],
         },
       ],
+      // T449: UserPromptSubmit hook で stale な API エラー表示を早期クリアする。stdin は読まない。
+      UserPromptSubmit: [
+        {
+          matcher: "",
+          hooks: [{
+            type: "command",
+            command: `bash -c 'elevens send USER_PROMPT_SUBMIT --surface "${surface}" --pid "$PPID" --role agent 2>/dev/null || true'`,
+            timeout: 3000,
+          }],
+        },
+      ],
       Stop: [
         {
           matcher: "",
@@ -3094,6 +3127,18 @@ export function generateConductorSettings(projectRoot: string, surface: string):
             type: "command",
             command: "bash -c 'elevens send STOP_FAILURE --from-stdin --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --role conductor 2>/dev/null || true'",
             timeout: 5000,
+          }],
+        },
+      ],
+      // T449: UserPromptSubmit hook で stale な API エラー表示を早期クリアする。
+      // 「続けて」等の再開プロンプト投入時に発火。stdin（プロンプト本文）は読まない。
+      UserPromptSubmit: [
+        {
+          matcher: "",
+          hooks: [{
+            type: "command",
+            command: "bash -c 'elevens send USER_PROMPT_SUBMIT --surface \"${CMUX_SURFACE}\" --pid \"$PPID\" --role conductor 2>/dev/null || true'",
+            timeout: 3000,
           }],
         },
       ],
@@ -7157,6 +7202,137 @@ async function cmdEpicAbort(): Promise<void> {
   }
 }
 
+/**
+ * Integration Queue（後工程・統合レーン）サブコマンド本体。spec: docs/spec/17-integration-queue.md。
+ */
+async function cmdInteg(): Promise<void> {
+  const sub = args[1];
+  if (!sub || hasHelpFlag()) {
+    showIntegUsage();
+    return;
+  }
+  switch (sub) {
+    case "enqueue":
+      await cmdIntegEnqueue();
+      break;
+    case "list":
+      await cmdIntegList();
+      break;
+    case "show":
+      await cmdIntegShow();
+      break;
+    case "update":
+      await cmdIntegUpdate();
+      break;
+    default:
+      console.error(`Unknown integ subcommand: ${sub}`);
+      showIntegUsage();
+      process.exit(1);
+  }
+}
+
+function showIntegUsage(): void {
+  console.log(`Usage: elevens integ <subcommand>
+
+  enqueue --task ID [--pr URL] [--branch NAME] [--force]
+                          closed && deliverable=pr の Task を統合キューに投入。
+  list [--state STATE]    Item 一覧（STATE: ${INTEG_STATES.join("|")}|all、default=all）。
+  show Qnnn               Item 詳細。
+  update Qnnn --state STATE [--batch B] [--artifact A] [--followup ID] [--retry-inc] [--reason TEXT]
+                          FSM 遷移。done/failed は --artifact 必須、failed は --followup 必須。
+
+詳細仕様: docs/spec/17-integration-queue.md`);
+}
+
+async function cmdIntegEnqueue(): Promise<void> {
+  const taskId = requireArg("task");
+  const pr = getArg("pr");
+  const branch = getArg("branch");
+  const force = hasFlag("force");
+  try {
+    const result = await enqueueIntegItem({ projectRoot: PROJECT_ROOT, taskId, pr, branch, force });
+    console.log(`Integration item ${result.id} enqueued: ${result.filePath}`);
+  } catch (e: any) {
+    console.error(`Error: ${e?.message ?? e}`);
+    process.exit(1);
+  }
+}
+
+async function cmdIntegList(): Promise<void> {
+  const filter = getArg("state") ?? "all";
+  if (filter !== "all" && !INTEG_STATES.includes(filter as IntegItemState)) {
+    console.error(`Error: --state は ${INTEG_STATES.join(" | ")} | all（got: ${filter}）`);
+    process.exit(1);
+  }
+  const items = await loadIntegItems(PROJECT_ROOT);
+  const filtered = filter === "all" ? items : items.filter((i) => i.state === filter);
+  if (filtered.length === 0) {
+    console.log("(no integration items)");
+    return;
+  }
+  filtered.sort((a, b) => a.enqueuedAt.localeCompare(b.enqueuedAt));
+  for (const i of filtered) {
+    const batch = i.batchId ? ` ${i.batchId}` : "";
+    const retry = i.retry > 0 ? ` retry=${i.retry}` : "";
+    console.log(`${i.id}  ${i.state.padEnd(11)}  T${i.taskId}  ${i.branch}${batch}${retry}`);
+  }
+}
+
+async function cmdIntegShow(): Promise<void> {
+  const id = args[2];
+  if (!id) {
+    console.error("Error: Item ID が必要です（例: elevens integ show Q001）");
+    process.exit(1);
+  }
+  const item = await readIntegItem(PROJECT_ROOT, id);
+  if (!item) {
+    console.error(`Error: Integration item ${id} が見つかりません`);
+    process.exit(1);
+  }
+  console.log(`=== ${item.id} (T${item.taskId}) ===`);
+  console.log(`state:           ${item.state}`);
+  console.log(`branch:          ${item.branch}`);
+  console.log(`pr:              ${item.pr ?? "(none)"}`);
+  console.log(`batch_id:        ${item.batchId ?? "(none)"}`);
+  console.log(`retry:           ${item.retry}`);
+  console.log(`enqueued_at:     ${item.enqueuedAt}`);
+  console.log(`updated_at:      ${item.updatedAt}`);
+  console.log(`result_artifact: ${item.resultArtifact ?? "(none)"}`);
+  console.log(`followup_task:   ${item.followupTaskId ?? "(none)"}`);
+  console.log(`file:            ${item.filePath}`);
+  if (item.journal) {
+    console.log("");
+    console.log("--- Journal ---");
+    console.log(item.journal);
+  }
+}
+
+async function cmdIntegUpdate(): Promise<void> {
+  const id = args[2];
+  if (!id) {
+    console.error("Error: Item ID が必要です（例: elevens integ update Q001 --state verifying）");
+    process.exit(1);
+  }
+  const state = getArg("state");
+  if (!state || !INTEG_STATES.includes(state as IntegItemState)) {
+    console.error(`Error: --state は ${INTEG_STATES.join(" | ")}（got: ${state ?? "(none)"}）`);
+    process.exit(1);
+  }
+  try {
+    const result = await updateIntegItem(PROJECT_ROOT, id, state as IntegItemState, {
+      batchId: getArg("batch"),
+      resultArtifact: getArg("artifact"),
+      followupTaskId: getArg("followup"),
+      retryInc: hasFlag("retry-inc"),
+      reason: getArg("reason"),
+    });
+    console.log(`Integration item ${id} → ${result.next}: ${result.filePath}`);
+  } catch (e: any) {
+    console.error(`Error: ${e?.message ?? e}`);
+    process.exit(1);
+  }
+}
+
 // --- ルーティング ---
 // 単体テストから import した場合にトップレベル副作用を走らせないためのガード
 if (import.meta.main) {
@@ -7327,6 +7503,9 @@ switch (command) {
   }
   case "epic":
     await cmdEpic();
+    break;
+  case "integ":
+    await cmdInteg();
     break;
   case "worktree":
     await cmdWorktree();

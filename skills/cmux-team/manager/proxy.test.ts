@@ -513,6 +513,24 @@ describe("proxy", () => {
       handle.stop();
     });
 
+    test("T449: status=busy で error 状態の master が running に戻り lastApiError がクリアされる", async () => {
+      const master: any = {
+        surface: "surface:100",
+        status: "error",
+        startedAt: "2026-03-29T00:00:00Z",
+        lastApiError: { kind: "rate_limit", message: "overloaded", at: "2026-05-29T09:00:00.000Z" },
+      };
+      const mockState: any = { masters: new Map([["surface:100", master]]) };
+      const handle = await start(testDir, { getState: () => mockState });
+
+      const res = await postMasterState(handle.port, { status: "busy", prompt: "続けて" });
+      expect(res.status).toBe(200);
+      expect(master.status).toBe("running");
+      expect(master.lastApiError).toBeUndefined();
+
+      handle.stop();
+    });
+
     test("manager.log に master_state status=<...> が 1 行記録される", async () => {
       const { masters } = buildMasterMockState();
       const mockState: any = { masters };

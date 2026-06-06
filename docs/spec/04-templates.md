@@ -56,7 +56,7 @@ Project: {{PROJECT_ROOT}}
 | hook | 役割 | Master | Conductor | Agent |
 |---|---|---|---|---|
 | `SessionStart` | `cmux-team send SESSION_STARTED` を呼び pid / sessionId を daemon へ通知（T407: Conductor / Agent では Manager 側で発行した pre-inject UUID と整合性チェック。`source=startup` の不一致は warn し hook 値で上書き） | ✅ | ✅ | ✅ |
-| `UserPromptSubmit` | Master 専用 — proxy `/master-state` に `status: busy` を POST | ✅ | — | — |
+| `UserPromptSubmit` | Master は proxy `/master-state` に `status: busy` を POST（T211、busy 復帰時に `lastApiError` も clear / T449）。Conductor / Agent は `cmux-team send USER_PROMPT_SUBMIT` で stale な API エラー表示を早期 clear（T449、stdin は読まない） | ✅ | ✅ | ✅ |
 | `PreToolUse` (Bash) | Conductor の `cmux-team send/send-key` 直接呼出を抑止 | — | ✅ | — |
 | `Notification` | Claude Code native の通知（permission / idle 等）を Manager に集約 | ✅ | ✅ | ✅ |
 | `StopFailure` (T392) | Claude Code 内部リトライが諦めた API エラー（rate_limit / authentication_failed / billing_error / server_error）を `cmux-team send STOP_FAILURE` で daemon へ通知 | ✅ | ✅ | ✅ |

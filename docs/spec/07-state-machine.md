@@ -35,7 +35,12 @@
 
 `broken` は **終端状態**。`cmux-team clear-conductor`（プールから恒久的に外す）または
 `cmux-team reset-conductor`（T004、任意状態 → `reserved` の局所復旧 CLI）でのみ解除される。
-`error` は次の `SESSION_STARTED` / `SESSION_IDLE` で自然解除される（`lastApiError` も undefined に戻る）。
+`error` は次の `SESSION_STARTED` / `SESSION_IDLE` / `SESSION_ASK` で自然解除される（`lastApiError` も undefined に戻る）。
+加えて **`USER_PROMPT_SUBMIT`（再開プロンプト投入）でも早期解除される (T449)**。「続けて」等の再開アクションや
+Master の send-key を待たずに次のターン完了まで stale なエラー表示が残るのを防ぐ目的で、UserPromptSubmit hook を
+Conductor / Agent に追加した。`error` 状態のときのみ `running` に倒し `lastApiError` を undefined にする
+（error でなければ no-op。`broken` は対象外）。Master は proxy `/master-state` の busy POST 経路で
+`status="running"` 復帰時に同様に `lastApiError` をクリアする（Master 用の追加 hook は不要）。
 
 `clear-conductor` は idle 復帰ではなく、**team.json からの entry 削除 + `maxConductors -1` + 再 self-register 拒否**
 を行う（surface 実在性によらず常に同じ。surface には一切触れず close もしない — 同 pane 同居の無関係
@@ -75,11 +80,13 @@ Master / Agent も同等に `status: "error"` バリアントと `lastApiError` 
 | `DONE(unresolved)` | — | — | — | `idle` [+abort_task, preserveWorktree] | `idle` | — | — | — |
 | `CLEAR_MANUAL` [^4] | — | — | — | `idle` | `idle` | — | — | — |
 | `STOP_FAILURE` (T392) | `error` | `error` | `error` | `error` | `error` | `error` | — | — (上書き) |
+| `USER_PROMPT_SUBMIT` (T449) | — | — | — | — | — | — | — | `running` [^5] |
 
 [^1]: `ctx.hasTaskRunId` が真なら `running`、偽なら `idle` (T181/T263 経路)。
 [^2]: `ctx.hasTaskRunId` が真のときのみ `running`。偽なら no-op (assigning 維持)。
 [^3]: state が `assigning` のときのみ (daemon.ts R2 保険)。
 [^4]: 予約イベント。現在 emit 箇所なし (SESSION_CLEAR.manualUserInitiated で同等表現)。
+[^5]: `error` 状態のみ `running` に解除し `lastApiError` をクリア (T449)。他 state は no-op（active/idle/ask の正規遷移は SESSION_* が担う）。`broken` も no-op。
 
 ### 1.3 タイムアウト定数
 

@@ -558,18 +558,24 @@ elevens send CONDUCTOR_DONE --surface $CMUX_SURFACE \
 
 ### Step 9: 成果物の納品 — 以下のいずれかを選択
 
-- **ローカルマージ**: 小さな変更、個人プロジェクト、自明な修正
+> **Integration Queue（後工程レーン）採用プロジェクトでは pr 納品のみ。** プロジェクトの conductor overlay
+> (`.team/agent-instructions/conductor.md`) に「Integrator 運用」の指示がある場合、**ローカルマージ・deploy・
+> 実機アクセス・`{{MAIN_BRANCH}}` への merge を一切行わず、必ず Pull Request 納品**（`--deliverable-kind pr`）で
+> 終える。merge → deploy → 実機 E2E は単一の Integrator が直列に担う（spec `docs/spec/17-integration-queue.md` §7）。
+> overlay に当該指示が無い従来プロジェクトは、下記のとおりローカルマージをデフォルトとしてよい。
+
+- **ローカルマージ**: 小さな変更、個人プロジェクト、自明な修正（**Integrator 運用プロジェクトでは禁止**）
   ```bash
   cd {{PROJECT_ROOT}}
   git merge --ff-only <タスク割り当てで指定されたブランチ名>
   ```
-- **Pull Request**: レビューが必要な変更、共有リポジトリ、破壊的変更
+- **Pull Request**: レビューが必要な変更、共有リポジトリ、破壊的変更、**Integrator 運用プロジェクト（必須）**
   ```bash
   cd <WORKTREE_PATH>
   git push origin <タスク割り当てで指定されたブランチ名>
   gh pr create --title "<タスク概要>" --body "<変更内容>"
   ```
-判断基準: タスクファイルに指示があればそれに従う。なければローカルマージをデフォルトとする。
+判断基準: **Integrator 運用プロジェクトは常に Pull Request**。それ以外はタスクファイルに指示があればそれに従い、なければローカルマージをデフォルトとする。
 
 #### 納品方式と `close-task --deliverable-kind` の対応（T295）
 
