@@ -29,6 +29,7 @@ import {
   loadConfig,
   resolveMetricsRefreshIntervalMs,
   resolveProjectTokenPool,
+  DEFAULT_MODEL,
   type TeamConfig,
 } from "./config";
 import { listTokens, getLatestUsageSnapshot } from "./token-store";
@@ -524,6 +525,16 @@ async function loadSettingsItems(projectRoot: string): Promise<SettingsItem[]> {
     value: cfg.autoUpdate ?? "off (default)",
   });
   items.push({ kind: "config", label: "mainBranch", value: cfg.mainBranch ?? "(unresolved)" });
+  // ロール別 spawn モデル。未指定なら DEFAULT_MODEL に解決される旨を明示（観察箱として
+  // 「今どのロールがどのモデルか」を pane から見えるようにする）。
+  for (const role of ["master", "conductor", "agent"] as const) {
+    const configured = cfg.models?.[role];
+    items.push({
+      kind: "config",
+      label: `models.${role}`,
+      value: configured ?? `${DEFAULT_MODEL} (default)`,
+    });
+  }
   items.push({
     kind: "config",
     label: "sleepPrevention",

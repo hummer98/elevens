@@ -121,6 +121,7 @@ import {
   resolveGcConfig,
   isTokenPoolEnabled,
   buildSelectTokenPolicy,
+  DEFAULT_MODEL,
 } from "./config";
 import { runTeamGC } from "./team-gc";
 import { persistRateLimit, loadRateLimit, isStale5h, isStale7d } from "./rate-limit-persistence";
@@ -517,7 +518,7 @@ if (import.meta.main) {
 const execFileAsync = promisify(execFile);
 
 // --- config ---
-const DEFAULT_MODEL = "opus";
+// DEFAULT_MODEL は config.ts に集約（dashboard Settings タブと共有）。
 
 function getModelForRole(config: TeamConfig, role: "master" | "conductor" | "agent", cliOverride?: string): string {
   return cliOverride ?? config.models?.[role] ?? DEFAULT_MODEL;
@@ -3575,7 +3576,7 @@ async function cmdSpawnAgent(): Promise<void> {
   const spawnConfig = await loadConfig(PROJECT_ROOT);
   if (spawnConfig.opencode?.agentEnabled) {
     const ocServerUrl = spawnConfig.opencode.serverUrl ?? "http://localhost:54321";
-    const ocModel = spawnConfig.opencode.agentModel ?? "anthropic/claude-opus-4-8";
+    const ocModel = spawnConfig.opencode.agentModel ?? "anthropic/claude-fable-5";
 
     // prompt テキストを解決（promptFile があれば読んで展開する）
     let ocPromptText = prompt ?? "";

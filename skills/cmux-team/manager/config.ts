@@ -12,6 +12,14 @@ import { homedir } from "os";
 import type { LayoutMode, AutoUpdateMode, SleepPreventionMode } from "./schema";
 import { normalizeAutoUpdate, normalizeSleepPrevention } from "./schema";
 
+/**
+ * config.models で role 別指定が無いときに全 spawn ロールへ適用する既定モデル。
+ * 解決順: CLI --model > config.models[role] > DEFAULT_MODEL。
+ * main.ts（getModelForRole）と dashboard.tsx（Settings タブ表示）の両方が参照するため、
+ * literal の drift を避けて config モジュールに集約する。
+ */
+export const DEFAULT_MODEL = "claude-fable-5";
+
 export interface TeamConfig {
   models?: {
     master?: string;
@@ -37,10 +45,10 @@ export interface TeamConfig {
      */
     agentEnabled?: boolean;
     /**
-     * opencode Agent で使うモデル名（デフォルト: "anthropic/claude-opus-4-8"）。Issue #37
+     * opencode Agent で使うモデル名（デフォルト: "anthropic/claude-fable-5"）。Issue #37
      * "providerID/modelID" 形式（スラッシュ必須）で opencode provider layer に渡す。
      * スラッシュが無い値は model 指定として渡らず opencode 側デフォルトにフォールバックする。
-     * 例: "anthropic/claude-opus-4-8", "openrouter/anthropic/claude-haiku-4.5"
+     * 例: "anthropic/claude-fable-5", "openrouter/anthropic/claude-haiku-4.5"
      */
     agentModel?: string;
   };
