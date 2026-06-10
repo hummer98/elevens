@@ -182,6 +182,19 @@ A third category alongside Task / Artifact. An Epic is a "goal you want to achie
 
 > Phase 1 PoC scope: CLI + epic.md + Planner template + manual `/loop`. Daemon integration / auto-spawn / abort cascade / hard budget enforcement are Phase 2.
 
+**Integration Queue / Integrator (PoC — Phase 1)**
+
+A post-development lane. Conductors finish by delivering a PR (`deliverable=pr`); a single **Integrator** (`/loop`, run manually in Phase 1) pulls those closed PRs from the queue and is the *only* actor that touches `main` / deploy / the real device — serializing integration via the single-writer pattern. Opt-in per project (base Conductor templates stay local-merge by default). See `docs/spec/17-integration-queue.md` for the full spec.
+
+| Command | What it does |
+|---------|-------------|
+| `elevens integ enqueue --task <id> [--pr <url>] [--branch <name>] [--force]` | Enqueue a closed `deliverable=pr` Task as an integration item (`Qnnn`) |
+| `elevens integ list [--state queued\|integrating\|verifying\|done\|failed\|all]` | List items, filtered by state |
+| `elevens integ show <Qid>` | Show item detail |
+| `elevens integ update <Qid> --state <state> [--batch <B>] [--artifact <A>] [--followup <id>] [--retry-inc] [--reason <text>]` | FSM transition (5 states; `done`/`failed` require `--artifact`, `failed` also `--followup`) |
+
+> Phase 1 PoC scope: CLI + Item FSM + Integrator template + opt-in Conductor pr-only notes. Daemon auto-enqueue / event-driven Integrator spawn / staging release-train / deploy guardrail hook are Phase 2.
+
 **Agent / Conductor**
 | Command | What it does |
 |---------|-------------|

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.12.0] - 2026-06-10
+
+### Added
+
+- **Integration Queue / Integrator 後工程レーンを追加**: Master→Manager→Conductor→Agent の 4 層に対し、完了タスクのマージ・deploy・実機 E2E テストを単一書き手（Integrator）で直列処理する後工程レーンを新設。`elevens integ enqueue/list/show/update` CLI、Integration Item の決定論的 FSM（`queued→integrating→verifying→done|failed`）、`.team/integration-queue/` への直接書き込みを禁止する hook、Integrator `/loop` テンプレートで構成。実機テストは1デバイスでしか走らせられないため、単一コンシューマによる lockless 直列化でマージのクリティカルパスから E2E を切り離す。詳細は `docs/spec/17-integration-queue.md`
+- **Conductor の opt-in pr-only 納品切替**: Integrator 運用プロジェクトでは、プロジェクト overlay（`.team/agent-instructions/conductor.md`）で Conductor を「pr 納品のみ・ローカルマージ/deploy/実機/main merge 禁止」に切り替えられるようにした
+- **TUI dashboard Settings タブに `models.{master,conductor,agent}` を表示**: ロール別の解決後モデル（未指定は `<DEFAULT_MODEL> (default)`）を pane から可視化（observatory 原則）
+
+### Changed
+
+- **spawn 時のデフォルトモデルを `claude-fable-5` に更新**: `DEFAULT_MODEL` を `opus`（→ Opus 4.8 解決）から最新最上位 GA の `claude-fable-5`（2026-06-09 リリース）へ変更。literal を `config.ts` に集約・export し main.ts / dashboard.tsx で共有（drift 防止）。opencode Agent の既定モデルも `anthropic/claude-fable-5` に追従。解決順は不変（`--model` CLI > `config.models[role]` > `DEFAULT_MODEL`）で、コスト調整は `config.models` でロール別に下げ可能（例 `"agent": "claude-opus-4-8"`）
+- **`.team/worktrees-archive/` を gitignore**: 314MB / 29,283 ファイルに及ぶ ephemeral な worktree コピーをリポジトリ追跡対象から除外
+
 ## [0.11.0] - 2026-05-29
 
 ### Added

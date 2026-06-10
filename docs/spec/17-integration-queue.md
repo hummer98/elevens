@@ -1,6 +1,6 @@
-# 17. Integration Queue / Integrator（PoC ドラフト）
+# 17. Integration Queue / Integrator（PoC）
 
-> **Status: Phase 1 PoC ドラフト（未実装）。** 設計合意のための草案であり、実装・glossary 同期はまだ行っていない。
+> **Status: Phase 1 PoC 実装済み。** CLI（`elevens integ enqueue|list|show|update`）/ Item FSM（5 値）/ Integrator template / opt-in な Conductor pr 納品注記まで実装し、glossary §13 も同期済み。daemon auto-enqueue / イベント駆動 spawn / staging release-train / deploy guardrail hook は Phase 2（§11）。
 > 既存 4 層（Master / Manager / Conductor / Agent）の **後工程（後段の統合レーン）** を担う仕組みを定義する。
 
 関連: [`07-state-machine.md`](07-state-machine.md)（Task / Conductor FSM）/ [`08-runtime-boundary.md`](08-runtime-boundary.md)（Deliverable）/ [`14-epic.md`](14-epic.md)（`/loop` 自律エージェントの先行事例）/ [`16-worktree-archive.md`](16-worktree-archive.md)（cleanup 経路）
@@ -201,7 +201,7 @@ Epic Planner（[`14-epic.md`](14-epic.md)）と同じ「`/loop` で回す自律�
 
 ### 6.3 テンプレート
 
-`skills/cmux-team/templates/ja/integrator.md`（新規・未作成）に上記ループを記述する。Epic Planner template（`epic-planner.md`）と同じ起動法: 別ペインで Claude Code → template 読み込み → `/loop`。
+`skills/cmux-team/templates/ja/integrator.md`（作成済み）に上記ループを記述する。Epic Planner template（`epic-planner.md`）と同じ起動法: 別ペインで Claude Code → template 読み込み → `/loop`。
 
 ---
 
@@ -224,8 +224,8 @@ Integration Queue を採用するプロジェクトでは、Conductor / Agent �
 ## 8. CLI surface（PoC）
 
 ```bash
-# enqueue（PoC は CLI 明示。closed & deliverable=pr を検証）
-elevens integ enqueue --task 142 [--pr 17] [--branch task/142-foo]
+# enqueue（PoC は CLI 明示。closed & deliverable=pr を検証。--force で §3.3 検証を skip）
+elevens integ enqueue --task 142 [--pr 17] [--branch task/142-foo] [--force]
 
 # 一覧 / 詳細
 elevens integ list [--state queued|integrating|verifying|done|failed|all]

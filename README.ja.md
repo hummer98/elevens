@@ -182,6 +182,19 @@ Task / Artifact と並ぶ第三のカテゴリ。「達成したいゴール」�
 
 > Phase 1 PoC スコープ: CLI + epic.md + Planner template + 手動 `/loop`。daemon 統合 / 自動 spawn / abort cascade / budget hard enforcement は Phase 2。
 
+**Integration Queue / Integrator（PoC — Phase 1）**
+
+開発の後工程レーン。Conductor は PR 納品（`deliverable=pr`）で終え、単一の **Integrator**（Phase 1 では `/loop` で手動起動）が closed PR をキューから pull します。`main` / deploy / 実機を触れるのは Integrator だけで、single-writer パターンにより統合を構造的に直列化します。採用は per-project の opt-in（base Conductor template はデフォルトでローカルマージのまま）。詳細は `docs/spec/17-integration-queue.md` 参照。
+
+| コマンド | やること |
+|---------|---------|
+| `elevens integ enqueue --task <id> [--pr <url>] [--branch <name>] [--force]` | closed な `deliverable=pr` Task を統合 item（`Qnnn`）として投入 |
+| `elevens integ list [--state queued\|integrating\|verifying\|done\|failed\|all]` | item 一覧（state で filter 可） |
+| `elevens integ show <Qid>` | item 詳細を表示 |
+| `elevens integ update <Qid> --state <state> [--batch <B>] [--artifact <A>] [--followup <id>] [--retry-inc] [--reason <text>]` | FSM 遷移（5 状態。`done`/`failed` は `--artifact` 必須、`failed` は `--followup` も必須） |
+
+> Phase 1 PoC スコープ: CLI + Item FSM + Integrator template + opt-in な Conductor pr 納品注記。daemon auto-enqueue / イベント駆動 Integrator spawn / staging release-train / deploy guardrail hook は Phase 2。
+
 **Agent / Conductor**
 | コマンド | やること |
 |---------|---------|

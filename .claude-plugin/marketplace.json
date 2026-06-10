@@ -9,7 +9,7 @@
       "name": "elevens",
       "source": "./",
       "description": "c11-native multi-agent orchestration package (successor to cmux-team)",
-      "version": "0.11.0",
+      "version": "0.12.0",
       "author": {
         "name": "hummer98"
       },
