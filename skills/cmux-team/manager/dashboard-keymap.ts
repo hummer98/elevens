@@ -118,6 +118,8 @@ export type KeymapDeps = Readonly<{
    * chord auto-clear と toast auto-clear で共用する単一 IF。
    */
   schedule: (ms: number, cb: () => void) => () => void;
+  /** T035: Tasks リストで選択中の draft タスクを ready に昇格する（r キー） */
+  promoteSelectedTaskToReady: (state: AppState) => void;
 }>;
 
 export function createDashboardBindings(deps: KeymapDeps): ReadonlyArray<BindingSpec> {
@@ -388,6 +390,16 @@ export function createDashboardBindings(deps: KeymapDeps): ReadonlyArray<Binding
     description: "key_artifact_copy_path",
     statusBarKey: "cc",
     handler: (ctx) => deps.handleCopyChord(ctx),
+  });
+  // T035: Tasks リストで選択中の draft タスクを ready に昇格（r = ready）
+  bindings.push({
+    id: "tasks.promote-ready",
+    keys: ["r"],
+    scope: { kind: "focus", areas: ["tasks"] },
+    category: "action",
+    description: "key_task_promote_ready",
+    statusBarKey: "r",
+    handler: (ctx) => deps.promoteSelectedTaskToReady(ctx.state),
   });
   bindings.push({
     id: "issues.sync",

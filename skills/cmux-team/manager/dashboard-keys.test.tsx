@@ -47,6 +47,7 @@ function makeDeps(overrides: Partial<KeymapDeps> = {}): KeymapDeps {
     handleCopyChord: () => {},
     cancelChord: () => {},
     schedule: () => () => {},
+    promoteSelectedTaskToReady: () => {},
     ...overrides,
   };
 }
@@ -411,5 +412,54 @@ describe("T439: c key dispatch", () => {
     cKey(ctx);
     expect(cancelCalled).toBe(0);
     expect(copyChordCalled).toBe(1);
+  });
+});
+
+describe("T035: r key dispatch (tasks.promote-ready)", () => {
+  test("r (focus=tasks) → promoteSelectedTaskToReady が ctx.state 付きで呼ばれる", () => {
+    let calledWith: AppState | null = null;
+    const bindings = createDashboardBindings(makeDeps({
+      promoteSelectedTaskToReady: (s) => { calledWith = s; },
+    }));
+    const map = buildAppKeys(bindings);
+    const rKey = (map as any)["r"];
+    expect(typeof rKey).toBe("function");
+    const state = makeState({ focusedArea: "tasks", taskCursor: 2 });
+    const { ctx } = makeCtx(state);
+    rKey(ctx);
+    expect(calledWith).not.toBeNull();
+    expect((calledWith as unknown as AppState).taskCursor).toBe(2);
+    expect((calledWith as unknown as AppState).focusedArea).toBe("tasks");
+  });
+
+  test("r (focus=artifacts / global) → 発火しない (scope 違反)", () => {
+    let promoteCalled = 0;
+    const bindings = createDashboardBindings(makeDeps({
+      promoteSelectedTaskToReady: () => { promoteCalled++; },
+    }));
+    const map = buildAppKeys(bindings);
+    const rKey = (map as any)["r"];
+    rKey(makeCtx(makeState({ focusedArea: "artifacts" })).ctx);
+    expect(promoteCalled).toBe(0);
+    rKey(makeCtx(makeState({ focusedArea: "global" })).ctx);
+    expect(promoteCalled).toBe(0);
+  });
+
+  // design-review R2: r binding は focus=tasks でのみ active なので、
+  // chord cancel の検証は focusedArea:"tasks" + cChordPending≠null を直接構築した state で行う
+  test("focus=tasks で c chord pending 中、r 押下 → cancelChord が先に呼ばれてから promote", () => {
+    const order: string[] = [];
+    const bindings = createDashboardBindings(makeDeps({
+      cancelChord: () => { order.push("cancel"); },
+      promoteSelectedTaskToReady: () => { order.push("promote"); },
+    }));
+    const map = buildAppKeys(bindings);
+    const rKey = (map as any)["r"];
+    const { ctx } = makeCtx(makeState({
+      focusedArea: "tasks",
+      cChordPending: { startedAtMs: 100 },
+    }));
+    rKey(ctx);
+    expect(order).toEqual(["cancel", "promote"]);
   });
 });

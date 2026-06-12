@@ -46,6 +46,7 @@ function makeDeps(overrides: Partial<KeymapDeps> = {}): KeymapDeps {
     handleCopyChord: () => {},
     cancelChord: () => {},
     schedule: () => () => {},
+    promoteSelectedTaskToReady: () => {},
     ...overrides,
   };
 }

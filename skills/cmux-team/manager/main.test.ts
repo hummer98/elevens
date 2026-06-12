@@ -3824,7 +3824,7 @@ describe("formatDaemonStartedDetail (backend visualization)", () => {
       pollInterval: 1000,
       maxConductors: 4,
       layout: "16x9",
-      sleepPrevention: false,
+      sleepPrevention: "off",
       backend: "c11",
     });
     expect(detail).toContain("backend=c11");
@@ -3838,7 +3838,7 @@ describe("formatDaemonStartedDetail (backend visualization)", () => {
       pollInterval: 2500,
       maxConductors: 8,
       layout: "wide",
-      sleepPrevention: true,
+      sleepPrevention: "aggressive",
       backend: "c11",
     });
     expect(detail).toContain("0.3.2");
@@ -3846,7 +3846,7 @@ describe("formatDaemonStartedDetail (backend visualization)", () => {
     expect(detail).toContain("poll=2500ms");
     expect(detail).toContain("max_conductors=8");
     expect(detail).toContain("layout=wide");
-    expect(detail).toContain("sleep_prevention=true");
+    expect(detail).toContain("sleep_prevention=aggressive");
   });
 });
 

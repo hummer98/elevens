@@ -32,6 +32,10 @@ import {
   DEFAULT_MODEL,
   type TeamConfig,
 } from "./config";
+// T035: Tasks リスト r キー昇格（task-state-store は dashboard を import しないため循環なし）
+import { applyTaskEvent } from "./state-machine/task-state-store";
+import { runReadySyncGuard } from "./ready-guard";
+import { promoteTaskToReady } from "./dashboard-promote";
 import { listTokens, getLatestUsageSnapshot } from "./token-store";
 import type { OverlayRole } from "./schema";
 import { resolveOriginRepo } from "./gh-cache-repo";
@@ -624,7 +628,8 @@ export interface AppState {
   showHelp: boolean;
   // ── T439: artifacts c c chord + toast ───────────────────────────
   /** body 末尾に表示する一時通知。2 秒後に自動 clear */
-  toast: { kind: "success" | "error"; message: string; expiresAt: number } | null;
+  // T035: label 省略時は copy 用デフォルト（toast_copy_success / toast_copy_failed）
+  toast: { kind: "success" | "error"; message: string; expiresAt: number; label?: string } | null;
   /** c 単発押下後の chord 待機状態。500ms 以内に再度 c で確定、別キーで cancel */
   cChordPending: { startedAtMs: number } | null;
 }
@@ -1462,10 +1467,11 @@ export function reduceShowToast(
   message: string,
   now: number,
   durationMs: number = 2000,
+  label?: string,
 ): AppState {
   return {
     ...state,
-    toast: { kind, message, expiresAt: now + durationMs },
+    toast: { kind, message, expiresAt: now + durationMs, label },
   };
 }
 
@@ -1482,11 +1488,14 @@ export function reduceClearToast(state: AppState): AppState {
  * 長すぎるパスは末尾優先 truncate（先頭側に "..." を付ける）。
  */
 export function formatToastMessage(
-  toast: { kind: "success" | "error"; message: string },
+  toast: { kind: "success" | "error"; message: string; label?: string },
   columns: number,
 ): { icon: string; label: string; body: string } {
   const icon = toast.kind === "success" ? "✓" : "✗";
-  const label = toast.kind === "success" ? t("toast_copy_success") : t("toast_copy_failed");
+  // T035: label 未指定時は従来どおり copy 用デフォルト（T439 既存呼び出しは挙動不変）
+  const label =
+    toast.label ??
+    (toast.kind === "success" ? t("toast_copy_success") : t("toast_copy_failed"));
   const prefixLen = icon.length + 1 + label.length + 2; // "✓ Copied: "
   const max = Math.max(8, columns - prefixLen);
   let body = toast.message;
@@ -1496,7 +1505,7 @@ export function formatToastMessage(
   return { icon, label, body };
 }
 
-function renderToastRow(toast: { kind: "success" | "error"; message: string }): any {
+function renderToastRow(toast: { kind: "success" | "error"; message: string; label?: string }): any {
   const cols = (typeof process.stdout.columns === "number" && process.stdout.columns > 0)
     ? process.stdout.columns
     : 80;
@@ -2210,13 +2219,13 @@ export async function startDashboard(
     return () => clearTimeout(id);
   };
 
-  function showToast(kind: "success" | "error", message: string): void {
+  function showToast(kind: "success" | "error", message: string, label?: string): void {
     if (toastTimerCancel) {
       toastTimerCancel();
       toastTimerCancel = null;
     }
     try {
-      app.update((s) => reduceShowToast(s, kind, message, Date.now(), TOAST_DURATION_MS));
+      app.update((s) => reduceShowToast(s, kind, message, Date.now(), TOAST_DURATION_MS, label));
     } catch {}
     toastTimerCancel = scheduleImpl(TOAST_DURATION_MS, () => {
       toastTimerCancel = null;
@@ -2314,6 +2323,58 @@ export async function startDashboard(
     } catch {}
   }
 
+  // ── T035: Tasks リスト r キーで draft → ready 昇格 ──────────────────────
+
+  /**
+   * CLI postMessage（main.ts）と同一経路・同一 payload の proxy POST で daemon を起床させる。
+   * proxy 未起動（proxyPort:null）時は requestWakeup 直呼びへフォールバックせず skip + log に
+   * 留める（fail-fast 原則。状態は task-state.json に永続済みで、復旧経路は既存 tick）。
+   */
+  async function notifyTaskCreatedImpl(
+    taskId: string,
+    taskFile: string | undefined,
+  ): Promise<void> {
+    const port = getState().proxyPort;
+    if (!port) {
+      await log("task_promote_notify_skipped", `task_id=${taskId} reason=no_proxy_port`);
+      return;
+    }
+    try {
+      await fetch(`http://localhost:${port}/api/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "TASK_CREATED",
+          taskId,
+          taskFile,
+          timestamp: new Date().toISOString(),
+        }),
+      });
+    } catch (e: any) {
+      await log("task_promote_notify_failed", `task_id=${taskId} ${e?.message ?? e}`);
+    }
+  }
+
+  // guard の git fetch（最大 30s）中の連打・再入を防止する
+  let promoteInFlight = false;
+
+  function promoteSelectedTaskToReadyImpl(s: AppState): void {
+    if (promoteInFlight) return;
+    const task = s.daemon.taskList[s.taskCursor];
+    promoteInFlight = true;
+    void promoteTaskToReady(task, {
+      projectRoot: getState().projectRoot,
+      runGuard: runReadySyncGuard,
+      applyEvent: applyTaskEvent,
+      notifyTaskCreated: notifyTaskCreatedImpl,
+      showToast,
+      log: (event, detail) => { log(event, detail).catch(() => {}); },
+    }).catch((e: any) => {
+      showToast("error", e?.message ?? String(e), t("toast_promote_label_failed"));
+      log("task_promote_error", e?.message ?? String(e)).catch(() => {});
+    }).finally(() => { promoteInFlight = false; });
+  }
+
   const keymapDeps: KeymapDeps = {
     switchTab,
     syncIssuesFromGh,
@@ -2343,6 +2404,7 @@ export async function startDashboard(
     handleCopyChord,
     cancelChord,
     schedule: scheduleImpl,
+    promoteSelectedTaskToReady: promoteSelectedTaskToReadyImpl,
   };
 
   dashboardBindings = createDashboardBindings(keymapDeps);

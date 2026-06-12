@@ -50,6 +50,7 @@ function makeDeps(overrides: Partial<KeymapDeps> = {}): KeymapDeps {
     handleCopyChord: () => {},
     cancelChord: () => {},
     schedule: () => () => {},
+    promoteSelectedTaskToReady: () => {},
     ...overrides,
   };
 }
@@ -388,5 +389,83 @@ describe("buildHelpOverlayRows", () => {
     // issues.sync は tab=issues
     const issuesSync = rows.find((r) => r.key === "Ctrl+s");
     expect(issuesSync?.scopeLabel).toBe("issues");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T035: tasks.promote-ready (r キーで draft → ready 昇格)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("tasks.promote-ready binding (T035)", () => {
+  test("registry に存在し、keys=['r'] / scope focus:['tasks'] / category 'action'", () => {
+    const bindings = createDashboardBindings(makeDeps());
+    const b = bindings.find((x) => x.id === "tasks.promote-ready");
+    expect(b).toBeDefined();
+    expect(b!.keys).toEqual(["r"]);
+    expect(b!.scope).toEqual({ kind: "focus", areas: ["tasks"] });
+    expect(b!.category).toBe("action");
+  });
+
+  test("r 追加後も validateRegistry が throw しない（C5 違反なし）", () => {
+    const bindings = createDashboardBindings(makeDeps());
+    expect(() => validateRegistry(bindings)).not.toThrow();
+  });
+
+  test("buildAppKeys: focus=tasks で r → promoteSelectedTaskToReady が呼ばれる", () => {
+    let promoteCount = 0;
+    const bindings = createDashboardBindings(makeDeps({
+      promoteSelectedTaskToReady: () => { promoteCount++; },
+    }));
+    const map = buildAppKeys(bindings);
+    const rHandler = (map as any)["r"];
+    expect(typeof rHandler).toBe("function");
+
+    // focus=journal → 発火しない
+    rHandler({
+      state: makeState({ activeTab: "journal", focusedArea: "journal" }),
+      update: () => {},
+      focusedId: null,
+    });
+    expect(promoteCount).toBe(0);
+
+    // focus=global → 発火しない
+    rHandler({
+      state: makeState({ focusedArea: "global" }),
+      update: () => {},
+      focusedId: null,
+    });
+    expect(promoteCount).toBe(0);
+
+    // focus=tasks → 発火する
+    rHandler({
+      state: makeState({ activeTab: "journal", focusedArea: "tasks" }),
+      update: () => {},
+      focusedId: null,
+    });
+    expect(promoteCount).toBe(1);
+  });
+
+  test("buildStatusBarItems: focus=tasks で r hint が出る / focus=global では出ない", () => {
+    const bindings = createDashboardBindings(makeDeps());
+    const tasksItems = buildStatusBarItems(
+      bindings,
+      makeState({ activeTab: "journal", focusedArea: "tasks" }),
+    );
+    const rItem = tasksItems.find((i) => i.key === "r");
+    expect(rItem).toBeDefined();
+
+    const globalItems = buildStatusBarItems(
+      bindings,
+      makeState({ focusedArea: "global" }),
+    );
+    expect(globalItems.map((i) => i.key)).not.toContain("r");
+  });
+
+  test("buildHelpOverlayRows に r 行（scope=tasks）が含まれる", () => {
+    const bindings = createDashboardBindings(makeDeps());
+    const rows = buildHelpOverlayRows(bindings);
+    const rRow = rows.find((r) => r.key === "r" && r.scopeLabel === "tasks");
+    expect(rRow).toBeDefined();
+    expect(rRow!.category).toBe("action");
   });
 });
