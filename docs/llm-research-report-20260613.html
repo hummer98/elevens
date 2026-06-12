@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ローカルLLM調査レポート 2026-06-13</title>
+<style>
+  :root {
+    --bg: #fdfcf9;
+    --fg: #2a2a2e;
+    --accent: #b8553e;
+    --accent-light: #f4e8e4;
+    --border: #ddd6cc;
+    --table-head: #f0ebe2;
+    --code-bg: #f3f0e9;
+    --muted: #7a766e;
+  }
+  body {
+    font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.8;
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+  }
+  h1 {
+    font-size: 1.7rem;
+    border-bottom: 3px solid var(--accent);
+    padding-bottom: .5rem;
+  }
+  h2 {
+    font-size: 1.3rem;
+    margin-top: 3rem;
+    border-left: 5px solid var(--accent);
+    padding-left: .6rem;
+  }
+  h3 { font-size: 1.05rem; margin-top: 2rem; }
+  .meta { color: var(--muted); font-size: .9rem; }
+  .summary {
+    background: var(--accent-light);
+    border-radius: 8px;
+    padding: 1rem 1.4rem;
+    margin: 1.5rem 0;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1.2rem 0;
+    font-size: .92rem;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: .55rem .7rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--table-head); }
+  tr:nth-child(even) td { background: #faf8f3; }
+  code, pre {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    background: var(--code-bg);
+    border-radius: 4px;
+  }
+  code { padding: .1em .35em; font-size: .88em; }
+  pre {
+    padding: 1rem;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  .note {
+    border-left: 4px solid #c9a227;
+    background: #fbf6e3;
+    padding: .6rem 1rem;
+    margin: 1rem 0;
+    font-size: .92rem;
+  }
+  .pill {
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 999px;
+    font-size: .75rem;
+    padding: .1rem .6rem;
+    margin-right: .4rem;
+    vertical-align: middle;
+  }
+  ul.sources li { font-size: .88rem; margin-bottom: .25rem; }
+  a { color: var(--accent); }
+  footer { margin-top: 4rem; color: var(--muted); font-size: .85rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+</style>
+</head>
+<body>
+
+<h1>ローカルLLM調査レポート</h1>
+<p class="meta">調査日: 2026-06-12〜13 ／ 対象環境: 自宅 Bazzite マシン (Ryzen 9 5950X / RTX 3090 24GB / RAM 64GB)、Jetson AGX Orin 64GB、Mac mini (検討)</p>
+
+<div class="summary">
+<strong>結論サマリ</strong>
+<ul>
+  <li><strong>動画解析</strong>: API なら Gemini 3 Pro / 2.5 系、ローカルなら Qwen3-VL が本命。Claude は動画入力非対応。</li>
+  <li><strong>Qwen3-VL の実行環境</strong>: 新規購入なら Mac mini M4 Pro 64GB(M5 mini は未発売)。ただし手持ちの Jetson AGX Orin 64GB で無料で始められる。</li>
+  <li><strong>RTX 3090 でのコーディング LLM</strong>: 本命は <strong>Qwen3.5-35B-A3B 4bit(約112 tok/s)</strong>、精度優先なら <strong>Qwen3-Coder-Next 80B-A3B</strong> の GPU+CPU ハイブリッド。Ollama の Anthropic 互換 API 経由で Claude Code に直結可能。</li>
+</ul>
+</div>
+
+<h2>1. 動画解析ができる最新モデル (2026年6月時点)</h2>
+
+<h3>ネイティブ動画入力対応</h3>
+<table>
+<tr><th>モデル</th><th>提供元</th><th>特徴</th></tr>
+<tr><td>Gemini 3 Pro</td><td>Google</td><td>動画理解の本命。映像+音声を統合解析、1リクエスト最大10本</td></tr>
+<tr><td>Gemini 2.5 Pro / Flash</td><td>Google</td><td>動画理解ベンチマークでトップクラス。インライン上限100MB、File API併用で長尺対応</td></tr>
+<tr><td>Qwen3-VL (235B / 30B)</td><td>Alibaba</td><td>オープンウェイト最強格。ネイティブ256Kコンテキスト(最大1M)で最長2時間の動画を秒単位インデックス付きで解析。ローカル実行可</td></tr>
+<tr><td>Pegasus 1.5</td><td>TwelveLabs</td><td>動画特化基盤モデル。最大2時間の時系列推論(人物追跡・因果・物語構造)、約261Kトークンのコンテキスト</td></tr>
+<tr><td>Marengo</td><td>TwelveLabs</td><td>動画の検索・埋め込み特化(Pegasusと対になる検索系)</td></tr>
+<tr><td>InternVL3 / GLM-4.6V</td><td>OpenGVLab / Zhipu</td><td>オープンソースのマルチモーダルモデル。動画理解ベンチマーク対応</td></tr>
+</table>
+
+<h3>補足が必要なモデル</h3>
+<ul>
+  <li><strong>GPT-5系 (OpenAI)</strong> — 動画系ベンチマーク性能は謳われるが、API はフレーム抽出+Whisper書き起こしの分解方式。Realtime API も画像まで。</li>
+  <li><strong>Claude (Anthropic)</strong> — Fable 5 / Opus 4.8 含め<strong>動画入力非対応</strong>(画像・PDFまで)。ffmpeg でフレーム抽出して画像として渡すワークアラウンドになる。</li>
+  <li><strong>Sora 2 (OpenAI)</strong> — 動画「生成」モデルで解析用途ではない。Videos API は 2026-09-24 廃止予定。</li>
+</ul>
+
+<h3>用途別推奨</h3>
+<ul>
+  <li>手軽に API で動画解析 → Gemini 2.5 Flash(コスト)/ Gemini 3 Pro(精度)</li>
+  <li>長尺動画・放送/メディア業務 → TwelveLabs Pegasus 1.5</li>
+  <li>ローカル/セルフホスト → Qwen3-VL</li>
+</ul>
+
+<h2>2. Qwen3-VL の実行環境: Mac mini M4/M5 vs Jetson AGX Orin</h2>
+
+<div class="note">「M5 の Mac mini」は 2026年6月時点で未発売(WWDC 2026 後〜年末、2027年ずれ込み説あり)。比較対象は実質 M4 / M4 Pro。</div>
+
+<table>
+<tr><th>項目</th><th>Jetson AGX Orin 64GB<br>(所有済み)</th><th>Mac mini M4</th><th>Mac mini M4 Pro</th></tr>
+<tr><td>メモリ</td><td>64GB 統合</td><td>最大32GB</td><td>最大64GB</td></tr>
+<tr><td>メモリ帯域</td><td>約205GB/s</td><td>120GB/s</td><td>273GB/s</td></tr>
+<tr><td>Qwen3-30B-A3B 実測</td><td>約20〜30 tok/s (llama.cpp)</td><td>—</td><td>約130 tok/s (MLX)</td></tr>
+<tr><td>ソフトウェア</td><td>Jetson AI Lab 公式コンテナ<br>(NVFP4/FP8/BF16)</td><td>MLX / MLX-VLM</td><td>MLX / MLX-VLM</td></tr>
+</table>
+
+<p>ローカルLLMの生成速度はほぼメモリ帯域で決まる。M4 Pro は帯域・MLX最適化の両面で Orin の<strong>実測4〜5倍</strong>。無印 M4 は 32GB 上限・120GB/s のため 30B クラス前提なら M4 Pro 一択。</p>
+
+<h3>推奨の進め方</h3>
+<ol>
+  <li><strong>まず Jetson で試す(追加コストゼロ)</strong> — 20〜30 tok/s はバッチ用途なら実用。64GB あるので長コンテキストに有利。注: <code>cuda-toolkit</code> (nvcc) 未導入、必要なら <code>sudo apt install nvidia-jetpack</code>。</li>
+  <li><strong>対話的に使う・速度が欲しい → M4 Pro 64GB 購入</strong> — MLX-VLM が Qwen3-VL 対応。M5 mini を待つ価値は現時点で不確実。</li>
+  <li><strong>隠れた選択肢: 自宅 RTX 3090</strong> — 帯域 936GB/s で最速。ただし VRAM 24GB のため AWQ 4bit (約17GB) 限定で、動画解析の長コンテキストでは KV キャッシュが厳しい。短尺クリップ解析なら最速環境。</li>
+</ol>
+
+<h2>3. RTX 3090 (24GB) で動かすコーディング向けローカルLLM</h2>
+
+<p>目標: Claude Code (Fable 5) / Codex 5.5 級とはいかなくても、<strong>現実的なトークン速度で実装タスクに使えるローカルLLM</strong>。</p>
+
+<h3>候補比較</h3>
+<table>
+<tr><th>モデル</th><th>構成</th><th>実測速度 (3090)</th><th>特徴</th></tr>
+<tr>
+  <td><span class="pill">本命</span>Qwen3.5-35B-A3B</td>
+  <td>MoE、4bit ≈ 20GB → VRAM完結</td>
+  <td><strong>約112 tok/s</strong></td>
+  <td>SWE-bench / TAU2 / BFCL などエージェント系指標が強い。速度と知性のバランス最良</td>
+</tr>
+<tr>
+  <td><span class="pill">精度優先</span>Qwen3-Coder-Next (80B-A3B)</td>
+  <td>総80B/アクティブ3B。Q4 ≈ 45GB → GPU+CPU (RAM 64GB) ハイブリッド</td>
+  <td>15〜30 tok/s 程度</td>
+  <td><strong>SWE-bench 70%超</strong>、256Kコンテキスト。ローカル最強格だが速度を犠牲に</td>
+</tr>
+<tr>
+  <td>Qwen3.6-27B (dense)</td>
+  <td>AWQ 4bit</td>
+  <td>約72 tok/s (vLLM)、DFlash併用で約2倍</td>
+  <td>Reasoning 寄り。Pong/Tetris ワンショット生成の実績報告</td>
+</tr>
+<tr>
+  <td>gpt-oss-20b</td>
+  <td>MoE 21B/A3.6B、16GBで余裕</td>
+  <td>140 tok/s 前後</td>
+  <td>ツールコールが堅実。軽くて速いが精度は上記2つに劣る</td>
+</tr>
+</table>
+
+<p>Bazzite マシンは RAM 64GB のため、Qwen3-Coder-Next のハイブリッド構成(アクティブ3BだけGPU、エキスパートをRAMへオフロード)が現実的に動くのがポイント。</p>
+
+<h3>Claude Code との接続 (2026年現在の最短経路)</h3>
+<p>2026-01-16 に Ollama、2026-01-30 に LM Studio が Anthropic Messages API 互換エンドポイントを実装。<strong>プロキシ不要で Claude Code を直結できる</strong>。</p>
+<pre><code># Ollama (bazzite 側で稼働) に Claude Code を向ける
+export ANTHROPIC_BASE_URL=http://172.25.76.145:11434
+export ANTHROPIC_MODEL=qwen3.5:35b-a3b
+claude</code></pre>
+<ul>
+  <li><strong>コンテキスト長が肝</strong>: ローカルで Claude Code 的に使うなら 64K が実用ライン(32K未満はチャットデモ)。35B-A3B Q4 は VRAM 約20GB消費 → KVキャッシュ q8 量子化で 64K を確保するのが定石。</li>
+  <li>スループット重視なら vLLM (AWQ) + LiteLLM プロキシ構成。</li>
+  <li>Claude Code 以外では OpenCode / Qwen Code CLI がローカルモデルとの相性が良い定番。</li>
+</ul>
+
+<h3>期待値の設定</h3>
+<ul>
+  <li>Fable 5 / Codex 5.5 との差は「一発で正しい設計判断をする能力」と「長時間の自律実行」。ローカル勢は<strong>明確な仕様を渡した実装・リファクタ・テスト書きなら実用</strong>、曖昧な指示からの長距離エージェント実行は厳しい(2026年中盤の相場)。</li>
+  <li>112 tok/s あれば体感はクラウド API と遜色なし。プレフィルも 3090 なら十分。</li>
+  <li><strong>注意</strong>: Ampere + A3B MoE では llama.cpp の投機的デコードは全構成で逆効果という検証結果あり。チューニングに時間を使わない。</li>
+</ul>
+
+<h3>次のアクション案</h3>
+<ol>
+  <li>bazzite に Ollama 導入(immutable OS のためコンテナ or brew 経由)</li>
+  <li>Qwen3.5-35B-A3B 4bit を pull、KVキャッシュ q8 で 64K コンテキスト構成</li>
+  <li>Mac から <code>ANTHROPIC_BASE_URL</code> を向けて Claude Code で実タスク評価</li>
+  <li>精度不足を感じたら Qwen3-Coder-Next ハイブリッドを llama.cpp で検証</li>
+</ol>
+
+<h2>参考リンク</h2>
+<ul class="sources">
+  <li><a href="https://ai.google.dev/gemini-api/docs/video-understanding">Gemini API - Video understanding</a></li>
+  <li><a href="https://developers.googleblog.com/en/gemini-2-5-video-understanding/">Advancing the frontier of video understanding with Gemini 2.5 - Google Developers Blog</a></li>
+  <li><a href="https://www.bentoml.com/blog/multimodal-ai-a-guide-to-open-source-vision-language-models">Multimodal AI: The Best Open-Source Vision Language Models in 2026 - BentoML</a></li>
+  <li><a href="https://www.twelvelabs.io/product/models-overview">TwelveLabs - Video Foundation Models: Marengo &amp; Pegasus</a></li>
+  <li><a href="https://docs.twelvelabs.io/docs/concepts/models/pegasus">TwelveLabs Docs - Pegasus</a></li>
+  <li><a href="https://platform.openai.com/docs/guides/video-generation">OpenAI - Video generation with Sora</a></li>
+  <li><a href="https://vuzcloud.com/ja/blog/articles/2026-mac-mini-m5-hatsubai-kakaku-koukaiseki-koushin.html">Mac mini M5 発売日・価格・スペック (2026年更新) - vuzcloud</a></li>
+  <li><a href="https://iphone-mania.jp/mac-601867/">Mac mini (M4) は今が買い時か? M5は2027年ずれ込みの可能性も - iPhone Mania</a></li>
+  <li><a href="https://yage.ai/share/mlx-apple-silicon-en-20260331.html">MLX vs llama.cpp on Apple Silicon: Benchmarks, M5 Neural Accelerators</a></li>
+  <li><a href="https://contracollective.com/blog/llama-cpp-vs-mlx-ollama-vllm-apple-silicon-2026">llama.cpp vs MLX vs Ollama vs vLLM: Local AI Inference for Apple Silicon in 2026</a></li>
+  <li><a href="https://www.jetson-ai-lab.com/models/">Models - Jetson AI Lab</a></li>
+  <li><a href="https://forums.developer.nvidia.com/t/the-token-speed-of-llm-on-jetson-agx-orin/343901">The token speed of LLM on Jetson AGX Orin - NVIDIA Developer Forums</a></li>
+  <li><a href="https://forums.developer.nvidia.com/t/performance-comparison-of-qwen3-30b-a3b-awq-on-jetson-thor-vs-orin-agx-64gb/345449">Qwen3-30B-A3B-AWQ on Jetson Thor vs Orin AGX 64GB - NVIDIA Developer Forums</a></li>
+  <li><a href="https://medium.com/@CodePulse/one-rtx-3090-112-tokens-per-second-full-262k-context-no-api-bill-304f60029bb6">One RTX 3090. 112 Tokens Per Second. Full 262K Context. - Medium</a></li>
+  <li><a href="https://explore.n1n.ai/blog/qwen3-6-27b-local-inference-rtx-3090-vllm-ollama-2026-05-03">Qwen3.6-27B Local Inference on RTX 3090 with Native vLLM - n1n.ai</a></li>
+  <li><a href="https://unsloth.ai/docs/models/qwen3-coder-next">Qwen3-Coder-Next: How to Run Locally - Unsloth</a></li>
+  <li><a href="https://dev.to/sienna/qwen3-coder-next-the-complete-2026-guide-to-running-powerful-ai-coding-agents-locally-1k95">Qwen3-Coder-Next: The Complete 2026 Guide - DEV Community</a></li>
+  <li><a href="https://zenn.dev/rna4219/articles/5593afb569089a">Qwen3.5-35B-A3B 4bitをRTX3090で回して、Pongをポン出しした - Zenn</a></li>
+  <li><a href="https://dev.classmethod.jp/articles/local-llm-guide-2026/">2026年のローカルLLM事情を整理してみた - DevelopersIO</a></li>
+  <li><a href="https://unsloth.ai/docs/basics/claude-code">How to Run Local LLMs with Claude Code - Unsloth</a></li>
+  <li><a href="https://renezander.com/guides/claude-code-local-llm-anthropic-base-url/">Claude Code with Local LLMs and ANTHROPIC_BASE_URL</a></li>
+  <li><a href="https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090">llama.cpp speculative decoding on Qwen3.6-35B-A3B + RTX 3090 benchmark - GitHub</a></li>
+</ul>
+
+<footer>
+Generated by Claude Code (Fable 5) — 調査日 2026-06-12〜13 / Web検索ベース。ベンチマーク値は出典記事の実測報告であり、量子化方式・推論バックエンドにより変動します。
+</footer>
+
+</body>
+</html>
