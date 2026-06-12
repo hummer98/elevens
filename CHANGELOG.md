@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.13.0] - 2026-06-12
+
+### Added
+
+- **タスクに measurable な完了条件を書く規約を導入** (T032): goal 思想の層1。タスク `--body` に `## 完了条件` セクションを設け、3要素（測定可能な終了状態 / 証明方法 / 不変制約）を測れる形で書く推奨規約を Master テンプレート（書き手側）に、close-task 前の自己検証・証明の summary.md 記録を conductor-task テンプレート（読み手側）に追加（ja/en）。完了条件セクションの無いタスクは従来どおり動く（後方互換）。背景調査は `.team/artifacts/A035-research.md`（Claude Code 純正 `/goal` の実機検証 → 直接利用は非推奨と判定し思想のみ移植）
+
+### Changed
+
+- **repo 同梱 config の models override (opus) を削除**: ロール別モデルは `DEFAULT_MODEL`（`claude-fable-5`）解決に統一
+
 ## [0.12.0] - 2026-06-10
 
 ### Added
