@@ -805,7 +805,7 @@ async function renderTasks() {
     ${sorted
       .map(
         (r) => `<tr data-task="${r.task_id}">
-          <td>${r.task_id}</td>
+          <td>${escapeHtml(r.task_id)} <a class="output-link" href="/files/output/?prefix=task-${encodeURIComponent(r.task_id)}-" target="_blank" title="output dir">📁</a></td>
           <td><span class="risk-badge risk-${outcomeRisk(r.outcome)}">${r.outcome}</span></td>
           <td>${fmtIso(r.assigned_ts)}</td>
           <td class="num">${fmtMs(r.duration_ms)}</td>
@@ -829,6 +829,10 @@ async function renderTasks() {
       }
       renderTasks();
     });
+  });
+  // output リンクは行クリックの drill-down 遷移に巻き込まない
+  cont.querySelectorAll("a.output-link").forEach((a) => {
+    a.addEventListener("click", (e) => e.stopPropagation());
   });
   cont.querySelectorAll("tr[data-task]").forEach((row) => {
     row.addEventListener("click", () => {
@@ -876,7 +880,7 @@ function escapeHtml(s) {
 // ────────────────────────────────────────────────────────────────────
 
 function route() {
-  document.querySelectorAll("#sidebar nav a").forEach((a) => {
+  document.querySelectorAll("#sidebar nav a[data-page]").forEach((a) => {
     a.classList.toggle("active", a.dataset.page === state.page);
   });
   document.querySelectorAll("#topbar [data-preset]").forEach((b) => {
@@ -922,8 +926,8 @@ function isoToLocalInput(iso) {
 
 function init() {
   parseUrl();
-  // sidebar nav
-  document.querySelectorAll("#sidebar nav a").forEach((a) => {
+  // sidebar nav（data-page なしの外部リンク Files ↗ は hash routing の対象外）
+  document.querySelectorAll("#sidebar nav a[data-page]").forEach((a) => {
     a.addEventListener("click", (e) => {
       e.preventDefault();
       state.page = a.dataset.page;

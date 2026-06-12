@@ -436,6 +436,150 @@ describe("dashboard-server: 壊れた payload_json でも /api/overview は 200 
   });
 });
 
+describe("dashboard-server: /files ファイルビューワー (T033)", () => {
+  let project: DummyProject;
+  let handle: DashboardServerHandle;
+
+  // 1x1 透明 PNG（最小バイト列）
+  const PNG_BYTES = Uint8Array.from(
+    atob(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+    ),
+    (c) => c.charCodeAt(0),
+  );
+  const RAW_MD = "# spec x\n\nbody text\n";
+  const RAW_HTML = "<!doctype html><html><body><h1>report</h1></body></html>";
+
+  beforeEach(async () => {
+    project = await createDummyProject({
+      prefix: "cmux-team-dashboard-files-http-",
+      subdirs: ["logs", "traces", "artifacts", "output"],
+    });
+    const { mkdir, writeFile, symlink } = await import("fs/promises");
+    const { join } = await import("path");
+    await mkdir(join(project.root, "docs/spec"), { recursive: true });
+    await writeFile(join(project.root, "docs/spec/x.md"), RAW_MD);
+    await writeFile(join(project.root, ".team/artifacts/A001-t.md"), "# A001\n");
+    await mkdir(join(project.root, ".team/output/task-001-100"), { recursive: true });
+    await writeFile(
+      join(project.root, ".team/output/task-001-100/report.html"),
+      RAW_HTML,
+    );
+    await writeFile(join(project.root, ".team/output/task-001-100/img.png"), PNG_BYTES);
+    await mkdir(join(project.root, ".team/output/other-999"), { recursive: true });
+    await writeFile(join(project.root, ".team/traces/secret.txt"), "TOP_SECRET");
+    // I10: tmp 外を指す symlink
+    await symlink("/etc/hosts", join(project.root, "docs/escape-link"));
+    handle = await startDashboardServer({ projectRoot: project.root });
+  });
+
+  afterEach(async () => {
+    handle.stop();
+    await project.dispose();
+  });
+
+  test("I1: GET /files/ は 200 + text/html + 3 rootKey リンク + CSP + no-store", async () => {
+    const res = await fetch(`${handle.url}/files/`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type") ?? "").toContain("text/html");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    const csp = res.headers.get("Content-Security-Policy") ?? "";
+    expect(csp).toContain("default-src 'self'");
+    const body = await res.text();
+    expect(body).toContain('href="/files/docs/"');
+    expect(body).toContain('href="/files/artifacts/"');
+    expect(body).toContain('href="/files/output/"');
+  });
+
+  test("I2: GET /files/docs/ は 200 index + spec/ エントリリンク", async () => {
+    const res = await fetch(`${handle.url}/files/docs/`);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('href="/files/docs/spec/"');
+  });
+
+  test("I3: GET /files/docs/spec/x.md は marked wrapper HTML", async () => {
+    const res = await fetch(`${handle.url}/files/docs/spec/x.md`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type") ?? "").toContain("text/html");
+    const body = await res.text();
+    expect(body).toContain("marked.parse");
+    expect(body).toContain('id="md-src"');
+    expect(body).toContain(JSON.stringify(RAW_MD));
+  });
+
+  test("I4: ?raw=1 は生 md を text/plain で返す", async () => {
+    const res = await fetch(`${handle.url}/files/docs/spec/x.md?raw=1`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type") ?? "").toContain("text/plain");
+    expect(await res.text()).toBe(RAW_MD);
+  });
+
+  test("I5: html report は無加工 + CSP ヘッダあり", async () => {
+    const res = await fetch(`${handle.url}/files/output/task-001-100/report.html`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type") ?? "").toContain("text/html");
+    expect(res.headers.get("Content-Security-Policy") ?? "").toContain(
+      "default-src 'self'",
+    );
+    expect(await res.text()).toBe(RAW_HTML);
+  });
+
+  test("I6: png はバイト一致 + image/png", async () => {
+    const res = await fetch(`${handle.url}/files/output/task-001-100/img.png`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type") ?? "").toContain("image/png");
+    const got = new Uint8Array(await res.arrayBuffer());
+    expect(got).toEqual(PNG_BYTES);
+  });
+
+  test("I7: artifacts root の疎通", async () => {
+    const res = await fetch(`${handle.url}/files/artifacts/A001-t.md`);
+    expect(res.status).toBe(200);
+  });
+
+  test("I8: %2e%2e%2f traversal は 400 で secret を漏らさない", async () => {
+    const res = await fetch(
+      `${handle.url}/files/docs/%2e%2e%2f.team%2ftraces%2fsecret.txt`,
+    );
+    expect(res.status).toBe(400);
+    const body = await res.text();
+    expect(body).not.toContain("TOP_SECRET");
+    const res2 = await fetch(`${handle.url}/files/output/%2e%2e%2ftraces%2fsecret.txt`);
+    expect(res2.status).toBe(400);
+    expect(await res2.text()).not.toContain("TOP_SECRET");
+  });
+
+  test("I9: allowlist 外 rootKey は 404", async () => {
+    const res = await fetch(`${handle.url}/files/traces/secret.txt`);
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toContain("TOP_SECRET");
+  });
+
+  test("I10: root 外への symlink は 404", async () => {
+    const res = await fetch(`${handle.url}/files/docs/escape-link`);
+    expect(res.status).toBe(404);
+  });
+
+  test("I11: 不存在ファイルは 404", async () => {
+    const res = await fetch(`${handle.url}/files/docs/nope.md`);
+    expect(res.status).toBe(404);
+  });
+
+  test("I12: ?prefix= は前方一致 filter", async () => {
+    const res = await fetch(`${handle.url}/files/output/?prefix=task-001-`);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("task-001-100");
+    expect(body).not.toContain("other-999");
+  });
+
+  test("I13: POST /files/docs/spec/x.md は 404（method ガード）", async () => {
+    const res = await fetch(`${handle.url}/files/docs/spec/x.md`, { method: "POST" });
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("dashboard-server: parsePeriodQuery", () => {
   const fixedNow = Date.parse("2026-05-02T12:00:00.000Z");
   const now = () => fixedNow;

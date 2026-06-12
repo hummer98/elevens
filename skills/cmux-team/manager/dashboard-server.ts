@@ -41,6 +41,7 @@ import {
   type AgentStrategyDrillDownResponse,
 } from "./agent-strategy";
 import { computeRiskLevel } from "./dashboard-metrics";
+import { handleFilesRequest } from "./dashboard-files";
 import { log } from "./logger";
 
 export interface DashboardServerHandle {
@@ -794,6 +795,14 @@ export async function startDashboardServer(
         return htmlResponse(opts.htmlBundle());
       }
       return errorResponse(404, { error: "not_found", endpoint: pathname });
+    }
+
+    // /files ファイルビューワー (T033)。period parse より前に分岐する
+    if (pathname === "/files" || pathname.startsWith("/files/")) {
+      return handleFilesRequest(projectRoot, url, {
+        "Cache-Control": "no-store",
+        "Content-Security-Policy": CSP_HEADER,
+      });
     }
 
     // period query を必要とする集計 endpoint 群

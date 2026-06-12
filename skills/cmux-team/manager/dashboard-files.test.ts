@@ -1,0 +1,280 @@
+/**
+ * T033: dashboard-files.ts のユニットテスト。
+ *
+ * resolver（resolveFilePath）の path traversal / symlink 境界と、
+ * index HTML / md wrapper 生成のエスケープを検証する。
+ * fs 依存は実 tmp dir で検証する（plan §8 / §9-2）。
+ */
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { mkdtemp, rm, mkdir, writeFile, symlink } from "fs/promises";
+import { realpathSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import {
+  resolveFilePath,
+  contentTypeFor,
+  handleFilesRequest,
+} from "./dashboard-files";
+
+const BASE_HEADERS = {
+  "Cache-Control": "no-store",
+  "Content-Security-Policy": "default-src 'self'",
+} as const;
+
+function filesRequest(pathAndQuery: string): Response {
+  return handleFilesRequest(root, new URL(`http://127.0.0.1${pathAndQuery}`), {
+    ...BASE_HEADERS,
+  });
+}
+
+let root: string;
+
+beforeAll(async () => {
+  root = await mkdtemp(join(tmpdir(), "cmux-team-dashboard-files-"));
+  // rootKey 3 種 + traversal 標的の seed
+  await mkdir(join(root, "docs/sub"), { recursive: true });
+  await writeFile(join(root, "docs/sub/file.md"), "# hello\n");
+  await mkdir(join(root, "docs/b"), { recursive: true });
+  await writeFile(join(root, "docs/b/real.md"), "# real\n");
+  await mkdir(join(root, ".team/artifacts"), { recursive: true });
+  await writeFile(join(root, ".team/artifacts/A001-t.md"), "# artifact\n");
+  await mkdir(join(root, ".team/output/task-001-100"), { recursive: true });
+  await writeFile(join(root, ".team/output/task-001-100/report.html"), "<p>r</p>");
+  await mkdir(join(root, ".team/traces"), { recursive: true });
+  await writeFile(join(root, ".team/traces/secret.txt"), "TOP_SECRET");
+  await writeFile(join(root, "secret"), "ROOT_SECRET");
+  // U10: root 内 symlink（docs/a → docs/b/real.md）
+  await symlink(join(root, "docs/b/real.md"), join(root, "docs/a"));
+  // U9: root 外への symlink
+  await symlink("/etc/hosts", join(root, "docs/escape-link"));
+  // U9b: dangling symlink
+  await symlink(join(root, "docs/nonexistent"), join(root, "docs/dangling-link"));
+});
+
+afterAll(async () => {
+  await rm(root, { recursive: true, force: true });
+});
+
+describe("dashboard-files: resolveFilePath", () => {
+  test("U1: /files/ は root_index（trailing slash 有無両方）", () => {
+    expect(resolveFilePath(root, "/files/").kind).toBe("root_index");
+    expect(resolveFilePath(root, "/files").kind).toBe("root_index");
+  });
+
+  test("U2: 実在ファイルは file + 正しい absPath", () => {
+    const r = resolveFilePath(root, "/files/docs/sub/file.md");
+    expect(r.kind).toBe("file");
+    if (r.kind !== "file") return;
+    expect(r.absPath).toBe(realpathSync(join(root, "docs/sub/file.md")));
+    expect(r.rootKey).toBe("docs");
+    expect(r.relPath).toBe("sub/file.md");
+  });
+
+  test("U3: 実在 dir は trailing slash 有無どちらも dir", () => {
+    const withSlash = resolveFilePath(root, "/files/docs/sub/");
+    const noSlash = resolveFilePath(root, "/files/docs/sub");
+    expect(withSlash.kind).toBe("dir");
+    expect(noSlash.kind).toBe("dir");
+    if (withSlash.kind !== "dir") return;
+    expect(withSlash.absPath).toBe(realpathSync(join(root, "docs/sub")));
+    expect(withSlash.relPath).toBe("sub");
+  });
+
+  test("U3b: rootKey 自体（/files/docs/）は dir + relPath 空", () => {
+    const r = resolveFilePath(root, "/files/docs/");
+    expect(r.kind).toBe("dir");
+    if (r.kind !== "dir") return;
+    expect(r.relPath).toBe("");
+  });
+
+  test("U4: allowlist 外 rootKey は not_found", () => {
+    expect(resolveFilePath(root, "/files/traces/secret.txt").kind).toBe("not_found");
+    expect(resolveFilePath(root, "/files/.team/artifacts/A001-t.md").kind).toBe(
+      "not_found",
+    );
+  });
+
+  test("U5: raw `..` segment は not_found", () => {
+    expect(resolveFilePath(root, "/files/docs/../secret").kind).toBe("not_found");
+    expect(resolveFilePath(root, "/files/docs/../.team/traces/secret.txt").kind).toBe(
+      "not_found",
+    );
+  });
+
+  test("U6: encoded dot segment（%2e%2e）は not_found", () => {
+    expect(resolveFilePath(root, "/files/docs/%2e%2e/secret").kind).toBe("not_found");
+  });
+
+  test("U6b: decode 後 segment に `/` `\\` を含むものは bad_request", () => {
+    expect(resolveFilePath(root, "/files/docs/%2e%2e%2fsecret").kind).toBe("bad_request");
+    expect(resolveFilePath(root, "/files/docs/a%2f..%2fb").kind).toBe("bad_request");
+    expect(resolveFilePath(root, "/files/docs/%2e%2e%5csecret").kind).toBe("bad_request");
+  });
+
+  test("U7: decode 失敗（%zz）は bad_request", () => {
+    expect(resolveFilePath(root, "/files/docs/%zz").kind).toBe("bad_request");
+  });
+
+  test("U8: NUL byte（%00）は bad_request", () => {
+    expect(resolveFilePath(root, "/files/docs/a%00b").kind).toBe("bad_request");
+  });
+
+  test("U9: root 外への symlink は not_found", () => {
+    expect(resolveFilePath(root, "/files/docs/escape-link").kind).toBe("not_found");
+  });
+
+  test("U9b: dangling symlink は not_found", () => {
+    expect(resolveFilePath(root, "/files/docs/dangling-link").kind).toBe("not_found");
+  });
+
+  test("U10: root 内 symlink は file（許可）", () => {
+    const r = resolveFilePath(root, "/files/docs/a");
+    expect(r.kind).toBe("file");
+    if (r.kind !== "file") return;
+    expect(r.absPath).toBe(realpathSync(join(root, "docs/b/real.md")));
+  });
+
+  test("U11: macOS tmpdir（root 自体が symlink 配下）でも正当ファイルは file", () => {
+    // mkdtemp(tmpdir()) は macOS で /var → /private/var の symlink 配下になる。
+    // root 側も realpath して比較していないとここで not_found になる。
+    const r = resolveFilePath(root, "/files/artifacts/A001-t.md");
+    expect(r.kind).toBe("file");
+  });
+
+  test("U12: 不存在パスは not_found", () => {
+    expect(resolveFilePath(root, "/files/docs/nope.md").kind).toBe("not_found");
+    expect(resolveFilePath(root, "/files/docs/sub/nope/deep.md").kind).toBe("not_found");
+  });
+
+  test("rootKey の実 dir が存在しない project では not_found", () => {
+    // realpathSync(rootAbsDir) の throw を catch で not_found に閉じる経路
+    expect(resolveFilePath(join(root, "no-such-project"), "/files/docs/x.md").kind).toBe(
+      "not_found",
+    );
+  });
+});
+
+describe("dashboard-files: contentTypeFor", () => {
+  test("拡張子マップどおりの Content-Type を返す（lowercase 比較）", () => {
+    expect(contentTypeFor("report.html")).toBe("text/html; charset=utf-8");
+    expect(contentTypeFor("report.HTM")).toBe("text/html; charset=utf-8");
+    expect(contentTypeFor("img.png")).toBe("image/png");
+    expect(contentTypeFor("img.JPG")).toBe("image/jpeg");
+    expect(contentTypeFor("chart.svg")).toBe("image/svg+xml");
+    expect(contentTypeFor("data.json")).toBe("application/json");
+    expect(contentTypeFor("data.csv")).toBe("text/csv; charset=utf-8");
+    expect(contentTypeFor("events.jsonl")).toBe("text/plain; charset=utf-8");
+    expect(contentTypeFor("main.ts")).toBe("text/plain; charset=utf-8");
+    expect(contentTypeFor("notes.md")).toBe("text/plain; charset=utf-8");
+  });
+
+  test("未知の拡張子・拡張子なしは application/octet-stream", () => {
+    expect(contentTypeFor("blob.bin")).toBe("application/octet-stream");
+    expect(contentTypeFor("Makefile")).toBe("application/octet-stream");
+  });
+});
+
+describe("dashboard-files: handleFilesRequest（index / wrapper 生成）", () => {
+  beforeAll(async () => {
+    // index escape 検証用の細工ファイル名 + 空 dir + prefix filter 用エントリ
+    await mkdir(join(root, "docs/weird"), { recursive: true });
+    await writeFile(join(root, "docs/weird/a&<b> #1.md"), "# weird\n");
+    await mkdir(join(root, "docs/emptydir"), { recursive: true });
+    await mkdir(join(root, ".team/output/task-002-200"), { recursive: true });
+    await writeFile(
+      join(root, "docs/sub/script.md"),
+      "before\n</script><script>alert(1)</script>\nafter\n",
+    );
+  });
+
+  test("root index は 3 rootKey へのリンクを含む", async () => {
+    const res = filesRequest("/files/");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type") ?? "").toContain("text/html");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    const body = await res.text();
+    expect(body).toContain('href="/files/docs/"');
+    expect(body).toContain('href="/files/artifacts/"');
+    expect(body).toContain('href="/files/output/"');
+  });
+
+  test("dir index はエントリ名を HTML escape し href は segment 単位で encode する", async () => {
+    const res = filesRequest("/files/docs/weird/");
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    // 表示テキストは escape される
+    expect(body).toContain("a&amp;&lt;b&gt; #1.md");
+    expect(body).not.toContain("<b> #1.md");
+    // href は encodeURIComponent（# が fragment 化しない）
+    expect(body).toContain(`href="/files/docs/weird/${encodeURIComponent("a&<b> #1.md")}"`);
+  });
+
+  test("dir index は subdir に trailing slash 付きリンク + breadcrumb を持つ", async () => {
+    const res = filesRequest("/files/docs/");
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('href="/files/docs/sub/"');
+    // breadcrumb: 上位階層へのリンク
+    expect(body).toContain('href="/files/"');
+  });
+
+  test("空 dir は 200 + empty 表示", async () => {
+    const res = filesRequest("/files/docs/emptydir/");
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("empty");
+  });
+
+  test("?prefix= は前方一致 filter", async () => {
+    const res = filesRequest("/files/output/?prefix=task-001-");
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("task-001-100");
+    expect(body).not.toContain("task-002-200");
+  });
+
+  test("md wrapper は marked inline + JSON 埋め込み + raw リンク + breadcrumb を含む", async () => {
+    const res = filesRequest("/files/docs/sub/file.md");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type") ?? "").toContain("text/html");
+    const body = await res.text();
+    expect(body).toContain("marked.parse");
+    expect(body).toContain('<script type="application/json" id="md-src">');
+    expect(body).toContain(JSON.stringify("# hello\n"));
+    expect(body).toContain('href="?raw=1"');
+    expect(body).toContain('href="/files/docs/sub/"');
+  });
+
+  test("md wrapper は JSON 埋め込みの < を \\u003c に置換する（</script> 脱出防止）", async () => {
+    const res = filesRequest("/files/docs/sub/script.md");
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    // 埋め込み JSON 内に生の </script> が現れない
+    expect(body).toContain("\\u003c/script>");
+    const jsonPart = body.slice(body.indexOf('id="md-src">'));
+    expect(jsonPart.slice(0, jsonPart.indexOf("</script>"))).not.toContain("<script>");
+  });
+
+  test("?raw=1 は生 Markdown を text/plain で返す", async () => {
+    const res = filesRequest("/files/docs/sub/file.md?raw=1");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type") ?? "").toContain("text/plain");
+    expect(await res.text()).toBe("# hello\n");
+  });
+
+  test("html は無加工で text/html serve", async () => {
+    const res = filesRequest("/files/output/task-001-100/report.html");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type") ?? "").toContain("text/html");
+    expect(await res.text()).toBe("<p>r</p>");
+  });
+
+  test("bad_request は 400 / not_found は 404 の JSON error", async () => {
+    const bad = filesRequest("/files/docs/%zz");
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as any).error).toBe("bad_request");
+    const nf = filesRequest("/files/docs/nope.md");
+    expect(nf.status).toBe(404);
+    expect(((await nf.json()) as any).error).toBe("not_found");
+  });
+});

@@ -25,6 +25,7 @@ cmux-team は **AI 観察箱（observatory）** であり（[`00-project-overvie
 | 7 endpoint × `?from&to` 共通クエリ | SSE / WebSocket |
 | 5 ページ SPA（Overview / Tool Use / Agent Strategy / Tokens / Tasks） | サーバ側 export API |
 | Agent 戦略の自動分類（6 値） | TUI Metrics タブの縮小（後続） |
+| `/files` ファイルビューワー（docs / artifacts / output、T033） | ファイルの編集・アップロード API |
 
 ---
 
@@ -117,6 +118,7 @@ inline `<style>` / `<script>` を許可するため `style-src` / `script-src` �
 | `GET /api/agent-strategy/:taskId` | drill-down: conductor + agent タイムライン + outcome | — |
 | `GET /api/tokens` | timeline stacked area / Top tasks / per-role / per-task histogram | `?from&to` |
 | `GET /api/tasks` | per-task table（sortable / CSV export 用 source） | `?from&to` |
+| `GET /files/*` | docs / `.team/artifacts` / `.team/output` の閲覧（root index / dir index / file 配信。詳細は §8） | `?raw` `?prefix` |
 
 ### 4.1 共通 query
 
@@ -222,6 +224,7 @@ dashboard-server.ts は **集計しない**。SSOT は以下に分散:
 | `trace-store.ts` | 全 SQL（`countToolCallsByPeriod` / `failureRateByTool` / `aggregateApiUsageByBucket` 等の T414 追加分含む） |
 | `agent-strategy.ts` | 6 値分類 + agent_spawned 集約 + drill-down |
 | `dashboard-metrics.ts` | TUI Metrics タブ用（本タスクで未変更） |
+| `dashboard-files.ts` | `/files` の path 解決（traversal / symlink ガード）+ index HTML 生成 + markdown wrapper 生成（T033） |
 | `dashboard-server.ts` | routing + period parse + ResponseShape 整形 + timeout race のみ |
 
 dashboard-server は集計関数を **DI で受け取れる**（`opts.aggregators`）。テストで一部だけ never-resolve に差し替えて 503 race を検証する。
@@ -280,6 +283,8 @@ CI では SPA の自動描画テストはしない。本 spec のチェックリ
 - [ ] task drill-down: Tasks の行クリック → Agent Strategy drill-down にジャンプ
 - [ ] 30s auto refresh ON / OFF
 - [ ] 過去 task の Agent Strategy drill-down が timeline 表示される
+- [ ] sidebar の Files リンクで `/files/`（root index）が別タブで開く
+- [ ] Tasks の行内 output リンクで該当 taskRunId に絞られた `/files/output/` index が開く
 
 ---
 
@@ -300,16 +305,77 @@ CI では SPA の自動描画テストはしない。本 spec のチェックリ
 
 ---
 
-## 8. uPlot vendoring 方針
+## 8. ファイルビューワー（`/files`）— T033
 
-| | 方針 |
+### 8.1 目的
+
+Manager が動いているプロジェクトの成果物・知見を**通常ブラウザで閲覧する**ための read-only ビューワー:
+
+- dockeeper が更新する `docs/` のドキュメント
+- task の report HTML / Agent 出力（`.team/output/`）
+- artifacts（`.team/artifacts/`）
+
+c11 の browser surface は表示領域に制約があるため、その補完として通常ブラウザのタブで開ける経路を用意する（observatory の retrospective 観察を補強する read side 拡張）。
+
+### 8.2 URL 規則と rootKey
+
+| URL | 応答 |
 |---|---|
-| バージョン | uPlot **v1.6.31** （MIT） |
-| 配置 | `skills/cmux-team/manager/dashboard-web/vendor/uplot.min.js` + `uplot.min.css` |
-| バージョン管理 | `vendor/UPLOT_VERSION` プレーンテキストにバージョン番号 |
-| 更新 | 手動。npm dep を増やさない（ルート `package.json` を肥大化させない） |
-| ライセンス | MIT。再配布可 |
-| security advisory | 出たら `vendor/UPLOT_VERSION` を base に手動更新 |
+| `GET /files/` | root index（3 rootKey へのリンク一覧） |
+| `GET /files/<rootKey>/` | ディレクトリ index（HTML） |
+| `GET /files/<rootKey>/<relpath>` | ファイル配信 |
+
+rootKey は固定辞書で、これ以外は 404:
+
+| rootKey | 実体（projectRoot 相対） |
+|---|---|
+| `docs` | `docs/` |
+| `artifacts` | `.team/artifacts/` |
+| `output` | `.team/output/` |
+
+クエリ:
+
+- `?raw=1` — `.md` を wrapper にせず `text/plain` でそのまま返す
+- `?prefix=<str>` — dir index のエントリ名前方一致 filter（Tasks ページの output リンクが `?prefix=task-<id>-` で使用）
+
+### 8.3 レンダリング
+
+| 対象 | 応答 |
+|---|---|
+| ディレクトリ | index HTML（breadcrumb + エントリ一覧。表示テキストは HTML escape、href は segment 単位 `encodeURIComponent`。空 dir は 200 で "empty" 表示） |
+| `.md`（`?raw=1` なし） | markdown wrapper HTML（vendor の marked.min.js を inline し client side で描画。md 本文は `<script type="application/json">` に `JSON.stringify` + `<` escape で埋め込み） |
+| `.html` / `.png` / `.svg` ほか | `Bun.file` streaming でそのまま配信（Content-Type は拡張子マップ。未知拡張子は `application/octet-stream`） |
+
+### 8.4 セキュリティ
+
+path 解決（`resolveFilePath`）は以下の順で判定し、**throw しない**:
+
+1. segment 単位 `decodeURIComponent`（失敗 → 400）
+2. 制御文字 / `/` / `\` を含む segment → 400
+3. `..` / `.` / 空 segment → 404
+4. rootKey 辞書引き（不一致 → 404）
+5. join 後の `startsWith` backstop（root 外 → 404）
+6. `lstatSync` + `realpathSync` で symlink 解決後も root 境界内か検証（**root 側も realpath** — macOS `/var` → `/private/var` 対策）。境界外 symlink → 404
+7. `statSync` で file / dir 判定
+
+エラー設計: **malformed input のみ 400 `bad_request`、それ以外の拒否は一律 404 `not_found`**（パスの存在有無を漏らさない）。response body は §4.3 と同じ `{ "error": ... }` JSON。
+
+### 8.5 CSP と表示制約
+
+`/files` の全 response にも §3.2 の CSP と `Cache-Control: no-store` を付与する。`default-src 'self'` のため、**外部 CDN 等を参照する HTML は完全表示されない**。task report 等は self-contained HTML（CSS / JS inline）のみ完全表示できる、という制約を仕様として受け入れる（report 生成側がこの制約に合わせる）。
+
+---
+
+## 9. vendoring 方針（uPlot / marked）
+
+| | uPlot | marked |
+|---|---|---|
+| バージョン | **v1.6.31**（MIT） | **v15.0.12**（MIT） |
+| 配置 | `dashboard-web/vendor/uplot.min.js` + `uplot.min.css` | `dashboard-web/vendor/marked.min.js` |
+| バージョン管理 | `vendor/UPLOT_VERSION` プレーンテキスト | `vendor/MARKED_VERSION` プレーンテキスト |
+| 用途 | SPA グラフ描画（HTML に inline 連結） | `/files` の `.md` wrapper 描画（wrapper HTML に inline） |
+| 更新 | 手動。npm dep を増やさない | 同左 |
+| security advisory | 出たら VERSION ファイルを base に手動更新 | 同左 |
 
 **npm dep を増やさない理由**:
 
@@ -319,9 +385,9 @@ CI では SPA の自動描画テストはしない。本 spec のチェックリ
 
 ---
 
-## 9. TUI 連携（T415 で確定）
+## 10. TUI 連携（T415 で確定）
 
-### 9.1 Metrics タブの縮小後表示要素
+### 10.1 Metrics タブの縮小後表示要素
 
 T415 で Metrics タブの集計表示を Web ダッシュボードに移管した。TUI 側は「今危険か」を即座に見るための最小ヘッドラインに縮小し、以下の要素のみを描画する（順序は固定）:
 
@@ -333,7 +399,7 @@ T415 で Metrics タブの集計表示を Web ダッシュボードに移管し�
 
 旧 `By role` / `By task` セクション、および対応する `MetricsData.roleRows` / `taskRows` フィールドは削除した。集計値は引き続き `dashboard-server.ts` が独自に `aggregateApiUsageByRole` / `aggregateApiUsageByTask` を呼んで Web ダッシュボードに供給する（SSOT 維持）。
 
-### 9.2 `O` キー: ブラウザ起動
+### 10.2 `O` キー: ブラウザ起動
 
 Metrics タブ focus 中に `O` を押すと `team.json.dashboardServer.url` をブラウザで開く。
 
@@ -345,7 +411,7 @@ Metrics タブ focus 中に `O` を押すと `team.json.dashboardServer.url` を
 
 実装は `skills/cmux-team/manager/browser-open.ts` の `openDashboardUrlInBrowser(url, opts?)` で、`spawn` / `platform` を DI 引数で差し替え可能（`browser-open.test.ts` で検証）。Issues タブの `B` キーも本来 cross-platform に揃えたいが、本タスクではスコープ外（既存の `Bun.spawn(["open", url])` 直書きは維持）。
 
-### 9.3 URL 取得経路
+### 10.3 URL 取得経路
 
 Master / 周辺ツールから URL を参照する経路は 3 つ:
 
@@ -357,13 +423,14 @@ ephemeral port のため URL は daemon 再起動で変わる。固定 port が�
 
 ---
 
-## 10. 関連 spec / コード
+## 11. 関連 spec / コード
 
 - spec: [`11-metrics.md`](11-metrics.md)（CLI 側の SSOT）/ [`05-install-and-infrastructure.md`](05-install-and-infrastructure.md)（`.team/team.json` 構造）/ [`00-project-overview.md`](00-project-overview.md)（observatory コンセプト）
 - 実装:
-  - `skills/cmux-team/manager/dashboard-server.ts` — Bun.serve + routing + 7 endpoint + timeout race
+  - `skills/cmux-team/manager/dashboard-server.ts` — Bun.serve + routing + 7 endpoint + timeout race + `/files` 分岐（T033）
+  - `skills/cmux-team/manager/dashboard-files.ts` — `/files` の path 解決 / index HTML 生成 / markdown wrapper 生成（T033）
   - `skills/cmux-team/manager/dashboard-web-bundle.ts` — HTML/CSS/JS 連結
-  - `skills/cmux-team/manager/dashboard-web/` — index.html / style.css / app.js / vendor/
+  - `skills/cmux-team/manager/dashboard-web/` — index.html / style.css / app.js / vendor/（uplot.min.js / marked.min.js ほか）
   - `skills/cmux-team/manager/agent-strategy.ts` — 6 値分類 + drill-down
   - `skills/cmux-team/manager/trace-store.ts` — 新規 SQL: `countToolCallsByPeriod` / `failureRateByTool` / `aggregateApiUsageByBucket`
   - `skills/cmux-team/manager/main.ts` — startDashboardServer の lifecycle 統合
@@ -371,7 +438,8 @@ ephemeral port のため URL は daemon 再起動で変わる。固定 port が�
   - `skills/cmux-team/manager/dashboard-metrics.ts` — TUI Metrics タブの行ビルド（T415 で role/task セクション削除、URL 行追加）
   - `skills/cmux-team/manager/browser-open.ts` — T415 ブラウザ起動 helper（cross-platform）
 - テスト:
-  - `dashboard-server.test.ts` — health / endpoint shape / 400 / 404 / 503 timeout / HTML inline 置換
+  - `dashboard-server.test.ts` — health / endpoint shape / 400 / 404 / 503 timeout / HTML inline 置換 / `/files` 統合（I1〜I13、T033）
+  - `dashboard-files.test.ts` — resolver（traversal / symlink / decode 境界）/ Content-Type / index HTML / md wrapper（T033）
   - `agent-strategy.test.ts` — classifyStrategy 7 ケース / SQL 集計 / drill-down
   - `trace-store-metrics.test.ts` — 新規 SQL 4 ケース（空 / 件数降順 / since-until 境界 / hour vs day bucket key）
   - `dashboard-metrics.test.tsx` — TUI Metrics 行ビルド（T415 で URL 行 / status message / role/task 削除を追加）

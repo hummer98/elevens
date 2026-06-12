@@ -186,3 +186,8 @@ table.data tfoot { color: var(--fg-dim); font-size: 11px; }
 .uplot { background: transparent; color: var(--fg); font: inherit; }
 .uplot .u-title { color: var(--fg-dim); font-weight: 500; font-size: 11px; }
 .uplot .u-axis { color: var(--fg-dim); }
+
+/* T033: Files ビューワー導線 */
+#sidebar nav a.external { opacity: 0.8; font-size: 12px; margin-top: 8px; }
+.output-link { font-size: 12px; opacity: 0.6; }
+.output-link:hover { opacity: 1; text-decoration: none; }
