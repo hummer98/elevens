@@ -119,6 +119,7 @@ import {
   resolveAutoUpdateMode,
   resolveFetchBeforeWorktree,
   resolveGcConfig,
+  resolveDashboardPort,
   isTokenPoolEnabled,
   buildSelectTokenPolicy,
   DEFAULT_MODEL,
@@ -1231,14 +1232,25 @@ async function cmdStart(): Promise<void> {
   // 自前 initDB(PROJECT_ROOT) を呼ぶ B 案（plan §2.1）。失敗しても daemon 全体は継続
   // （fail-soft）。shutdown では明示停止しない（process.exit に委ねる、plan §5.1）。
   try {
+    // T034: dashboard.port config による固定 port（default 0 = ephemeral）。
+    // 不正値は ephemeral に倒して warn。bind 失敗時は ephemeral fallback せず
+    // 既存 catch（fail-soft）に乗る — message に要求 port が含まれる。
+    const dashPort = resolveDashboardPort(startConfig);
+    if (dashPort.invalidReason !== undefined) {
+      await log("dashboard_port_config_invalid", `reason=${dashPort.invalidReason}`);
+    }
     const dashboardHandle = await startDashboardServer({
       projectRoot: PROJECT_ROOT,
       version,
       getState: () => state,
       htmlBundle: getDashboardHtml,
+      port: dashPort.port,
     });
     state.dashboardServerUrl = dashboardHandle.url;
-    await log("dashboard_server_started", `url=${dashboardHandle.url}`);
+    await log(
+      "dashboard_server_started",
+      `url=${dashboardHandle.url} port=${dashboardHandle.port} port_source=${dashPort.source}`,
+    );
   } catch (e: any) {
     state.dashboardServerUrl = null;
     await log("dashboard_server_start_failed", e?.message ?? String(e));

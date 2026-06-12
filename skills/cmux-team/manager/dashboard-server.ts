@@ -45,7 +45,7 @@ import { handleFilesRequest } from "./dashboard-files";
 import { log } from "./logger";
 
 export interface DashboardServerHandle {
-  /** listen 中のポート番号（ephemeral） */
+  /** listen 中のポート番号（ephemeral または固定） */
   port: number;
   /** http://127.0.0.1:<port> 形式の URL */
   url: string;
@@ -96,6 +96,12 @@ export interface DashboardServerOptions {
   aggregators?: Partial<DashboardAggregators>;
   /** 任意: HTML を返す関数（Step 4 で実装）。未指定時は GET / は 404 */
   htmlBundle?: () => string;
+  /**
+   * 任意: listen port（T034）。未指定 / 0 = ephemeral（従来どおり）。
+   * 指定 port の bind 失敗時は ephemeral へフォールバックせず即 throw する
+   * （ユーザーが固定した意図に対する silent mutation を避ける）。
+   */
+  port?: number;
 }
 
 /**
@@ -856,11 +862,13 @@ export async function startDashboardServer(
     return errorResponse(404, { error: "not_found", endpoint: pathname });
   };
 
+  // T034: 固定 port 指定（default 0 = ephemeral）。bind 失敗時は fallback せず throw。
+  const requestedPort = opts.port ?? 0;
   let server: ReturnType<typeof Bun.serve>;
   try {
     server = Bun.serve({
       hostname: "127.0.0.1",
-      port: 0,
+      port: requestedPort,
       fetch: async (req) => {
         try {
           return await fetchHandler(req);
@@ -895,7 +903,17 @@ export async function startDashboardServer(
       development: false,
     });
   } catch (e: any) {
-    throw new Error(`dashboard server bind failed: ${e?.message ?? e}`);
+    // T034: 自前で開いた db は throw 前に close する（leak 修正）。所有権規則は stop() と同じ。
+    if (opts.db === undefined) {
+      try {
+        db.close();
+      } catch {
+        // 既に閉じている場合は無視
+      }
+    }
+    throw new Error(
+      `dashboard server bind failed (requested port=${requestedPort}): ${e?.message ?? e}`,
+    );
   }
 
   const port = server.port!;

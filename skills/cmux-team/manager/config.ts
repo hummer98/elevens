@@ -129,6 +129,14 @@ export interface TeamConfig {
    *   実機の W-A timing が将来 c11 update で変わったとき、再ビルド無しに延長可能にする。
    */
   cmux?: CmuxConfig;
+  /**
+   * dashboard server の設定（T034）。全フィールド optional。
+   *
+   * - `port`: 固定 listen port。未指定 / `0` = ephemeral（従来どおり）。
+   *   整数 [1, 65535] のみ受理。不正値は default（ephemeral）に倒し、呼び出し側が warn log を出す。
+   *   詳細は resolveDashboardPort / docs/spec/12-web-dashboard.md を参照。
+   */
+  dashboard?: DashboardConfig;
 }
 
 /**
@@ -157,6 +165,62 @@ export function resolveReservedRenameDelayMs(config: Pick<TeamConfig, "cmux">): 
   if (typeof raw !== "number" || !Number.isFinite(raw)) return DEFAULT_MS;
   if (raw < MIN_MS || raw > MAX_MS) return DEFAULT_MS;
   return raw;
+}
+
+/**
+ * dashboard server の設定（T034）。詳細は docs/spec/12-web-dashboard.md §2.3 / §10.3。
+ */
+export interface DashboardConfig {
+  /** 固定 listen port。未指定 / 0 = ephemeral（従来どおり）。整数 [1, 65535] のみ受理 */
+  port?: number;
+}
+
+/**
+ * `resolveDashboardPort` の解決結果（T034）。
+ *
+ * invalid を silent にしないため、reject 理由を `invalidReason` で返す。
+ * resolve 関数自体は log しない（呼び出し側 main.ts が warn log を出す既存流儀）。
+ */
+export interface DashboardPortResolution {
+  /** 解決された listen port。0 = ephemeral */
+  port: number;
+  /** 値の出所。config に有効値があれば "config"、未指定・不正値なら "default" */
+  source: "config" | "default";
+  /** 値はあったが reject した場合のみセット（呼び出し側の warn log 用） */
+  invalidReason?: string;
+}
+
+/**
+ * `dashboard.port` を解決する（T034）。
+ *
+ * - 未指定 → `{ port: 0, source: "default" }`（ephemeral、従来どおり）
+ * - `0` → `{ port: 0, source: "config" }`（明示 ephemeral として有効値扱い）
+ * - 整数 [1, 65535] → そのまま受理
+ * - 非 number / 非有限 / 非整数 / 範囲外 → default + invalidReason
+ *
+ * privileged port（1〜1023）は reject しない。bind 時に EACCES で fail し、
+ * bind 失敗経路（`dashboard_server_start_failed`）で明示ログが出るため、二重検証を持たない。
+ */
+export function resolveDashboardPort(
+  config: Pick<TeamConfig, "dashboard">,
+): DashboardPortResolution {
+  const raw = config.dashboard?.port;
+  if (raw === undefined) return { port: 0, source: "default" };
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return {
+      port: 0,
+      source: "default",
+      invalidReason: `dashboard.port must be an integer in [0, 65535], got ${JSON.stringify(raw)}`,
+    };
+  }
+  if (!Number.isInteger(raw) || raw < 0 || raw > 65535) {
+    return {
+      port: 0,
+      source: "default",
+      invalidReason: `dashboard.port must be an integer in [0, 65535], got ${raw}`,
+    };
+  }
+  return { port: raw, source: "config" };
 }
 
 /**

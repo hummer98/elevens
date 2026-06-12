@@ -1,6 +1,6 @@
 # 12. Web ダッシュボード
 
-> Manager daemon に同居する内部 HTTP server（`127.0.0.1:<ephemeral>`）が配信する 5 ページ SPA の仕様。
+> Manager daemon に同居する内部 HTTP server（`127.0.0.1:<port>`。default ephemeral、`dashboard.port` config で固定可、T034）が配信する 5 ページ SPA の仕様。
 > retrospective 観察（observatory）強化のための UI で、real-time 観察（cmux ペイン）と TUI Metrics タブと共存する。
 
 ---
@@ -20,7 +20,7 @@ cmux-team は **AI 観察箱（observatory）** であり（[`00-project-overvie
 
 | in scope | out of scope |
 |---|---|
-| Bun.serve 同居（`127.0.0.1:0` ephemeral） | 認証・ACL（127.0.0.1 限定でユーザー想定） |
+| Bun.serve 同居（`127.0.0.1`、default ephemeral / `dashboard.port` で固定可） | 認証・ACL（127.0.0.1 限定でユーザー想定） |
 | `team.json.dashboardServer.url` への atomic write | マルチ project 横断 |
 | 7 endpoint × `?from&to` 共通クエリ | SSE / WebSocket |
 | 5 ページ SPA（Overview / Tool Use / Agent Strategy / Tokens / Tasks） | サーバ側 export API |
@@ -38,7 +38,7 @@ cmux-team は **AI 観察箱（observatory）** であり（[`00-project-overvie
 ```
 [Manager daemon (Bun)]
   ├── proxy.ts             Bun.serve(port=preferredPort)        0.0.0.0
-  ├── dashboard-server.ts  Bun.serve({ hostname: "127.0.0.1", port: 0 })  ← 本 spec
+  ├── dashboard-server.ts  Bun.serve({ hostname: "127.0.0.1", port: <dashboard.port|0> })  ← 本 spec
   ├── EventBus / state
   └── dashboard.tsx (TUI)
 ```
@@ -66,7 +66,15 @@ dashboard-server は team.json を**直接書かない**。`DaemonState.dashboar
 }
 ```
 
-ephemeral port なので **daemon 再起動で URL は変わる**。ブックマークは無意味。利用側は `cat .team/team.json | jq -r .dashboardServer.url` で都度参照する。
+default は ephemeral port なので **daemon 再起動で URL は変わる**。利用側は `cat .team/team.json | jq -r .dashboardServer.url` で都度参照する。
+
+**固定 port（T034）**: `.team/config.json` の `dashboard.port`（整数 `[1, 65535]`）で listen port を固定できる。固定時は URL が daemon 再起動を跨いで安定するためブックマーク可能。未指定 / `0` は従来どおり ephemeral。不正値（非整数 / 範囲外 / 型違反）は ephemeral に倒し `dashboard_port_config_invalid` を warn log する。port が固定でも書き出し経路（`DaemonState.dashboardServerUrl` → `updateTeamJson`）は不変。
+
+```json
+{ "dashboard": { "port": 8765 } }
+```
+
+**bind 失敗時の挙動**: 指定 port の bind 失敗（EADDRINUSE / EACCES 等）時は **ephemeral へフォールバックせず** dashboard 起動を即時失敗させる（ユーザーが port を固定した意図に対する silent mutation を避ける fail-fast）。`startDashboardServer` が要求 port を含む error message で throw し、`main.ts` の既存 catch が `dashboard_server_start_failed` を log する。daemon 本体は継続（T414 の fail-soft 境界、§2.4 と同じ）。このとき `dashboardServerUrl=null` のため team.json に `dashboardServer` は載らず、TUI `O` キーは `metrics_url_not_running` 表示となる。起動成功時は `dashboard_server_started url=... port=... port_source=<config|default>` が log される。
 
 ### 2.4 lifecycle — shutdown 時に明示停止しない
 
@@ -86,7 +94,7 @@ ephemeral port なので **daemon 再起動で URL は変わる**。ブックマ
 
 ### 3.1 listen は 127.0.0.1 のみ
 
-`Bun.serve({ hostname: "127.0.0.1", port: 0 })` を必ず指定する。外部 interface には bind しない。`?from` `?to` parse 失敗・`from > to` などのバリデーションは API 層で行う。
+`hostname: "127.0.0.1"` を必ず指定する。port は `dashboard.port` config で解決した値（default 0 = ephemeral、§2.3 参照）。外部 interface には bind しない（listen address 制約は port 固定の有無と無関係に不変）。`?from` `?to` parse 失敗・`from > to` などのバリデーションは API 層で行う。
 
 > 注: macOS / Linux で `0.0.0.0` への fetch が `127.0.0.1` にルーティングされる挙動は OS 仕様であり、bind 制約とは別問題。テストは bind ルール (`hostname: "127.0.0.1"` 指定 + URL prefix `http://127.0.0.1:`) で代替検証する。
 
@@ -419,7 +427,7 @@ Master / 周辺ツールから URL を参照する経路は 3 つ:
 2. **shell**: `cat .team/team.json | jq -r .dashboardServer.url`
 3. **CLI**: `cmux-team status` の出力（`team.json` から読み出して表示）
 
-ephemeral port のため URL は daemon 再起動で変わる。固定 port が欲しい場合は別タスクで `dashboard.port` config を導入する余地あり。
+default（ephemeral port）では URL は daemon 再起動で変わる。固定したい場合は `.team/config.json` の `dashboard.port` を設定する（T034、§2.3 参照）。固定時は URL が再起動を跨いで安定するためブックマーク・外部ツール連携が可能。
 
 ---
 

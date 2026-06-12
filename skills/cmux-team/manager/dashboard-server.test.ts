@@ -612,3 +612,79 @@ describe("dashboard-server: parsePeriodQuery", () => {
     expect(() => parsePeriodQuery(url, now)).toThrow();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 固定 port (T034)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("dashboard-server: fixed port (T034)", () => {
+  let project: DummyProject;
+
+  beforeEach(async () => {
+    project = await createDummyProject({
+      prefix: "cmux-team-dashboard-fixed-port-",
+      subdirs: ["logs", "traces"],
+    });
+  });
+
+  afterEach(async () => {
+    await project.dispose();
+  });
+
+  test("port 指定 → 当該 port で listen し /api/health が 200 + serverPort 一致", async () => {
+    // 空き port を確保 → 解放 → 再 bind（ローカル直列テストでは実用上安定、plan §4.2-1）
+    const probe = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => new Response("probe"),
+    });
+    const freePort = probe.port!;
+    probe.stop(true);
+
+    const handle = await startDashboardServer({
+      projectRoot: project.root,
+      version: "test-1.0.0",
+      port: freePort,
+    });
+    try {
+      expect(handle.port).toBe(freePort);
+      expect(handle.url).toBe(`http://127.0.0.1:${freePort}`);
+      const res = await fetch(`${handle.url}/api/health`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.ok).toBe(true);
+      // 要求 port で listen していることを response からも検証（Design Review 指摘 4）
+      expect(body.serverPort).toBe(freePort);
+    } finally {
+      handle.stop();
+    }
+  });
+
+  test("bind 失敗 → reject し error message に要求 port を含む（ephemeral fallback しない）", async () => {
+    // blocker が port を握ったまま同じ port で起動を試みる。
+    // 自前 initDB 経路（db 未指定）で実行し、leak でランナーがハングしないことも兼ねる（plan §4.2-3）
+    const blocker = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => new Response("blocker"),
+    });
+    try {
+      const blockedPort = blocker.port!;
+      let err: Error | null = null;
+      try {
+        await startDashboardServer({
+          projectRoot: project.root,
+          port: blockedPort,
+        });
+      } catch (e: any) {
+        err = e;
+      }
+      // reject すること自体が ephemeral fallback 不在の検証
+      expect(err).not.toBeNull();
+      expect(err!.message).toContain("bind failed");
+      expect(err!.message).toContain(String(blockedPort));
+    } finally {
+      blocker.stop(true);
+    }
+  });
+});

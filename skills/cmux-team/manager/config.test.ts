@@ -16,6 +16,7 @@ import {
   resolveMetricsRefreshIntervalMs,
   resolveGcConfig,
   resolvePostMortemConfig,
+  resolveDashboardPort,
   loadGlobalConfig,
   type TeamConfig,
   type GlobalConfig,
@@ -609,5 +610,56 @@ describe("resolvePostMortemConfig (T010)", () => {
     expect(r.telemetryIntervalMs).toBe(30_000);
     expect(r.telemetryMaxBytes).toBe(5_242_880);
     expect(r.stderrRotateGenerations).toBe(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// resolveDashboardPort (T034)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("resolveDashboardPort (T034)", () => {
+  test("dashboard 未指定 → default ephemeral", () => {
+    const r = resolveDashboardPort({});
+    expect(r.port).toBe(0);
+    expect(r.source).toBe("default");
+    expect(r.invalidReason).toBeUndefined();
+  });
+
+  test("dashboard.port 未指定 → default ephemeral", () => {
+    const r = resolveDashboardPort({ dashboard: {} });
+    expect(r.port).toBe(0);
+    expect(r.source).toBe("default");
+    expect(r.invalidReason).toBeUndefined();
+  });
+
+  test("整数 port → config source でそのまま受理", () => {
+    const r = resolveDashboardPort({ dashboard: { port: 8765 } });
+    expect(r.port).toBe(8765);
+    expect(r.source).toBe("config");
+    expect(r.invalidReason).toBeUndefined();
+  });
+
+  test("0 → 明示 ephemeral として config source で受理", () => {
+    const r = resolveDashboardPort({ dashboard: { port: 0 } });
+    expect(r.port).toBe(0);
+    expect(r.source).toBe("config");
+    expect(r.invalidReason).toBeUndefined();
+  });
+
+  test("境界値 1 / 65535 はそのまま受理", () => {
+    expect(resolveDashboardPort({ dashboard: { port: 1 } }).port).toBe(1);
+    expect(resolveDashboardPort({ dashboard: { port: 65535 } }).port).toBe(65535);
+    expect(resolveDashboardPort({ dashboard: { port: 65535 } }).source).toBe("config");
+  });
+
+  test("範囲外 / 非整数 / 非有限 / 型違反 → default + invalidReason", () => {
+    const invalids: unknown[] = [65536, -1, 8765.5, NaN, Infinity, "8765"];
+    for (const v of invalids) {
+      const r = resolveDashboardPort({ dashboard: { port: v as number } });
+      expect(r.port).toBe(0);
+      expect(r.source).toBe("default");
+      expect(typeof r.invalidReason).toBe("string");
+      expect((r.invalidReason ?? "").length).toBeGreaterThan(0);
+    }
   });
 });
