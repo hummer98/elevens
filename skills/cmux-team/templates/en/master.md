@@ -116,6 +116,37 @@ elevens create-task \
 # Defaults: status=draft, priority=medium when omitted
 ```
 
+### How to Write Completion Criteria (recommended convention)
+
+In the task `--body`, write not only "what to do" but also "**what must hold for the task
+to be done**" in a measurable form. Add a `## Completion Criteria` section to the body and,
+where possible, include these 3 elements:
+
+1. **Measurable end state** — a condition whose truth can be determined by running something
+   (e.g. `bun test --timeout 30000 foo.test.ts` exits 0, all call sites compile)
+2. **Method of proof** — how achievement is demonstrated
+   (e.g. paste the test run results into summary.md, show that `git status` is clean)
+3. **Invariant constraints** — things that must NOT be done
+   (e.g. do not modify other test files, do not change public API signatures)
+
+Good example:
+
+```
+## Completion Criteria
+- `bun test --timeout 30000 template.test.ts` exits 0 (paste the results into summary.md)
+- Invariant: do not modify the TypeScript code under manager/
+```
+
+Bad examples (produce no verifiable output): "make it work properly", "make it production-ready"
+
+For tasks with a Completion Criteria section, the Conductor self-verifies the criteria
+before closing and records the proof in summary.md (as specified in conductor-task.md).
+
+**Cases where you need not force it**: for pure research, brainstorming, or exploratory
+tasks where the end state cannot be defined measurably up front, omit the section
+(do not make this all-or-nothing). In that case, describe the expected deliverables
+(artifact / report, etc.) in the body as before.
+
 ### Status Flow (draft → ready)
 
 | Pattern | Command |

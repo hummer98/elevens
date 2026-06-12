@@ -4,6 +4,22 @@
 
 {{TASK_CONTENT}}
 
+## Handling Completion Criteria
+
+If the task content includes a "Completion Criteria" section, follow these rules:
+
+- **Before** close-task (conductor-role.md Step 11), actually verify each criterion
+  (run the tests, check that deliverable paths exist, etc. — never settle for "it should be done")
+- Record proof of verification (the commands you ran and the gist of their results) in
+  `{{OUTPUT_DIR}}/summary.md` (include it in the summary write-out of conductor-role.md Step 3)
+- If the criteria include invariant constraints (things that must NOT be done), also confirm
+  that none of them were violated
+- If a criterion cannot be satisfied, state the reason in summary.md and consider the
+  [Judgment Required] report path (`--success false`) in conductor-role.md
+
+If the task content has no Completion Criteria section, ignore this section
+(perform the conventional completion procedures).
+
 ## Working Directory
 
 All work must be done within the git worktree `{{WORKTREE_PATH}}`.

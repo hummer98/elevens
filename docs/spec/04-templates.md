@@ -161,6 +161,9 @@ Master 固有のテンプレート。ユーザー対話・タスク作成・進�
 - **やること（追加、T283）**: git **読み取り**（`status` / `log` / `diff` / `branch -v`）、git **ローカル同期**（`fetch origin` / `pull --ff-only origin <mainBranch>`）。特に PR が server で `gh pr merge` された後は `git fetch origin && git pull --ff-only origin <mainBranch>` で local を origin に追従させておく（次タスク worktree が stale origin から切られる事故を防ぐため）
 - **やらないこと（デフォルト）**: 実装・テスト・リファクタリング・ファイル直接編集（`.team/tasks/` 以外）・git の**書き込み系操作**（`commit` / `branch <new>` / `merge` / `rebase` / `cherry-pick` 等）。ユーザーの明示指示があれば Master 自身が実行してよい
 - **明示指示があっても禁止**: `.team/tasks/` 配下の直接編集（CLI 経由必須）・assigned タスクの編集・Conductor/Agent の直接起動・ポーリング・破壊的 git 操作（push, force-push, reset --hard 等）
+- **完了条件の書き方（T032）**: タスク `--body` に `## 完了条件` セクションを設け、3要素
+  （測定可能な終了状態 / 証明方法 / 不変制約）を測れる形で書く推奨規約。純調査・壁打ち等、
+  事前定義できないタスクでは省略可（all-or-nothing にしない）
 
 **テンプレート変数:** `{{ROLE_ID}}`, `{{TASK_DESCRIPTION}}`, `{{PROJECT_ROOT}}`, `{{PROJECT_COMMON_INSTRUCTIONS}}`（T413: 全 sub-agent 共通 overlay）, `{{PROJECT_INSTRUCTIONS}}`（T342: Master 用テンプレート冒頭に配置）
 
@@ -187,6 +190,10 @@ Conductor のフルワークフロー定義。タスク分解 → Agent spawn �
 ### conductor-task.md（シンプル版）
 
 daemon がタスク割り当て時に使用する簡易テンプレート。タスク内容 + 作業ディレクトリ + 出力先 + 完了マーカーのみ。完了通知は `conductor-role.md` Step 11 の `close-task`（T295 以降 `--deliverable-kind` 必須）に集約されており、task 側からは `cmux-team send CONDUCTOR_DONE --success true` を呼ばない（T274、破壊的変更）。
+
+タスク本文に「完了条件」セクションがある場合、Conductor は close-task（conductor-role.md
+Step 11）前に条件を自己検証し、証明（実行コマンドと結果の要点）を summary.md に残す（T032）。
+完了条件セクションが無いタスクは従来どおり動く（後方互換）。
 
 **テンプレート変数:** `{{TASK_CONTENT}}`, `{{WORKTREE_PATH}}`, `{{CONDUCTOR_ID}}`, `{{OUTPUT_DIR}}`, `{{TASK_STATUS_FILE}}`, `{{BASE_BRANCH}}`, `{{MAIN_BRANCH}}`, `{{ARCHIVED_WORKTREE_SECTION}}`（T011: 同 task ID の最新 archive 案内 markdown section、archive 不在時は空文字で section ごと消える [M2]）
 

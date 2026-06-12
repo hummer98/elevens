@@ -118,6 +118,35 @@ elevens create-task \
 # status 省略時は draft、priority 省略時は medium
 ```
 
+### 完了条件の書き方（推奨規約）
+
+タスクの `--body` には「何をやるか」だけでなく「**何が満たされたら終わりか**」を
+測れる形で書く。本文に `## 完了条件` セクションを設け、可能な範囲で次の3要素を含める:
+
+1. **測定可能な終了状態** — 実行すれば真偽が判定できる条件
+   （例: `bun test --timeout 30000 foo.test.ts` が exit 0、全 call site がコンパイルを通る）
+2. **証明方法** — 達成をどう示すか
+   （例: テスト実行結果を summary.md に貼る、`git status` がクリーンであることを示す）
+3. **不変制約** — やってはいけないこと
+   （例: 他のテストファイルは変更しない、public API のシグネチャは変えない）
+
+良い例:
+
+```
+## 完了条件
+- `bun test --timeout 30000 template.test.ts` が exit 0（結果を summary.md に貼る）
+- 不変制約: manager/ の TypeScript コードは変更しない
+```
+
+悪い例（検証可能な出力を生まない）:「ちゃんと動くようにする」「production-ready にする」
+
+完了条件セクションのあるタスクは、Conductor が close 前に条件を自己検証し、
+証明を summary.md に残す（conductor-task.md の規定）。
+
+**無理に書かなくてよいケース**: 純調査・壁打ち・探索的タスク等、事前に終了状態を
+測定可能な形で定義できないタスクでは省略してよい（all-or-nothing にしない）。
+その場合は従来どおり期待する成果物（artifact / レポート等）を本文に書く。
+
 ### status フロー（draft → ready）
 
 | パターン | コマンド |
