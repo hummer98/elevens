@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.14.0] - 2026-06-14
+
+### Added
+
+- **dashboard server に `/files` ファイルビューワーを追加** (T033): Manager 同居の dashboard server から `docs/` / `.team/artifacts/` / `.team/output/` をブラウザで閲覧できるようにした。Markdown は marked（vendor 同梱、npm dep 増やさず）でレンダリング、HTML はそのまま表示、画像も配信。許可 3 ディレクトリ外・path traversal は拒否（多段ガード）。タブ散逸せず docs / task report を通常ブラウザで読めるようにする observatory 改善。詳細は `docs/spec/12-web-dashboard.md`
+- **dashboard.port config で固定 listen port を指定可能に** (T034): `.team/config.json` の `dashboard.port` で listen port を固定でき、ブックマーク可能に。未指定時は従来どおり ephemeral port。指定 port の bind 失敗は fail-fast でログ記録し daemon は継続
+- **TUI Tasks リストで `r` キーから draft → ready 昇格** (T035): Tasks リストで選択中の draft タスクを `r` キー一発で ready に昇格できるようにした。昇格は CLI と同一経路で Ready sync state ガードを通す（拒否時は理由を表示）。draft 以外は no-op + toast
+
+### Changed
+
+- **デフォルトモデルを `claude-fable-5` → `claude-opus-4-8` に変更**: fable-5 が法的事由で当面利用不可のため、`config.ts` の `DEFAULT_MODEL`・`main.ts` の opencode agent fallback・同梱 `.team/config.json` の `models` override をいずれも opus-4-8 に統一。タスク割当時の conductor kill+spawn を通じて稼働中セッションも opus に切り替わる
+- **cmux-team-guide スキルにデフォルトモデル設定方法を追記** (T037): `config.models[role]` / `DEFAULT_MODEL` / 解決順 / Settings タブ表示 / 設定例を guide に追記。あわせて `docs/spec/05-install-and-infrastructure.md` の DEFAULT_MODEL 値を opus に訂正
+
 ## [0.13.0] - 2026-06-12
 
 ### Added

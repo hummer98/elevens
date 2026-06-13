@@ -96,6 +96,7 @@ Created per-project by `elevens start`. All keys are optional — the file can b
 | `sleepPrevention` | `"off"` \| `"idle"` \| `"aggressive"` \| boolean | `"aggressive"` | macOS sleep prevention mode. `aggressive` = `caffeinate -dis` (block display + idle + system sleep, default since T256), `idle` = `caffeinate -i` (block user-idle only; allows display sleep), `off` = no caffeinate. Boolean is accepted for backward compatibility (`true` → `aggressive`, `false` → `off`). Override: CLI `--sleep-prevention <mode>` or `--no-sleep-prevention`. |
 | `autoUpdate` | `"off"` \| `"notify"` | `"off"` | Version detection mode (see above). Override: env `CMUX_TEAM_AUTO_UPDATE`. |
 | `models.master` / `models.conductor` / `models.agent` | string | Claude defaults | Per-role model selection (e.g. `"claude-sonnet-4-6"`). |
+| `dashboard.port` | number | `0` (ephemeral) | Fixed listen port for the web dashboard server (T034). Accepts integers in `[1, 65535]` only. Pinning it keeps the URL stable across daemon restarts (bookmarkable). Unset / `0` / invalid values fall back to an ephemeral port. See `docs/spec/12-web-dashboard.md`. |
 | `envrcHookPromptSkipped` | boolean | `false` | Internal flag set when the user declines the direnv hook prompt — normally not edited by hand. |
 | `cmux.reservedRenameDelayMs` | number | `800` | c11 title-pinning tuning knob (T026). Delay (ms, clamped to `[0, 60000]`) before re-renaming a reserved Conductor pane so the fixed tab name wins over c11's default title setter. Raise this if a future c11 update shifts the title timing. |
 

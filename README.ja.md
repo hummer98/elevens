@@ -96,6 +96,7 @@ elevens は `c11` バイナリを次の順で探します: (1) c11.app から la
 | `sleepPrevention` | `"off"` \| `"idle"` \| `"aggressive"` \| boolean | `"aggressive"` | macOS スリープ抑止モード。`aggressive` = `caffeinate -dis`（display + idle + system sleep を全抑止、T256 以降のデフォルト）、`idle` = `caffeinate -i`（user idle のみ抑止、display sleep は許可）、`off` = caffeinate を起動しない。boolean も後方互換で受理（`true` → `aggressive`、`false` → `off`）。上書き: CLI `--sleep-prevention <mode>` または `--no-sleep-prevention`。 |
 | `autoUpdate` | `"off"` \| `"notify"` | `"off"` | バージョン検出モード（上記参照）。上書き: 環境変数 `CMUX_TEAM_AUTO_UPDATE`。 |
 | `models.master` / `models.conductor` / `models.agent` | string | Claude デフォルト | ロール別モデル指定（例: `"claude-sonnet-4-6"`）。 |
+| `dashboard.port` | number | `0`（ephemeral） | Web dashboard server の固定 listen port (T034)。整数 `[1, 65535]` のみ受理。固定すると daemon 再起動を跨いで URL が安定しブックマーク可能。未指定 / `0` / 不正値は ephemeral にフォールバック。詳細は `docs/spec/12-web-dashboard.md`。 |
 | `envrcHookPromptSkipped` | boolean | `false` | direnv hook プロンプトをスキップした際の内部フラグ。通常手動編集しません。 |
 | `cmux.reservedRenameDelayMs` | number | `800` | c11 のタブ名固定タイミング調整 (T026)。reserved Conductor pane を再 rename するまでの遅延（ms、`[0, 60000]` にクランプ）。c11 の default title setter に後着で勝つための待ち時間で、将来の c11 update で title timing が変わったら延長する。 |
 

@@ -135,6 +135,13 @@ description: >
 | `f` | type filter 切替（all / research / decision / session / spec / report） |
 | `c c` | 選択中 artifact の絶対パスを clipboard (`pbcopy`) にコピー (T439)。1 回目押下後 500ms 以内に再度 `c` で確定。途中で別キーを押すとキャンセル。待機中は status bar の `cc` 表示が `c-` に切り替わる。成功/失敗は body 末尾に 2 秒間 toast 表示（成功: 緑 `✓ Copied: <path>`、失敗: 赤 `✗ <stderr 1 行目>`）。`pbcopy` 不在時は失敗 toast |
 
+**Dashboard Tasks タブのキー (T035)**:
+
+| キー | 動作 |
+|------|------|
+| `Enter` / `o` | 選択中タスクをビューアで開く |
+| `r` | 選択中の **draft** タスクを ready に昇格（`r` = ready）。CLI `cmux-team update-task --status ready` と**同一経路・同一セマンティクス**（ready sync guard → `applyTaskEvent(UPDATE_STATUS to=ready)` → proxy `/api/messages` で `[TASK_CREATED]` 通知）。draft 以外は no-op + toast、sync guard 拒否は理由を toast 表示。TUI からは `--force` / `--no-auto-pull` 相当の bypass は提供しない（必要なケースは CLI に誘導）。実装は `dashboard-promote.ts`（`decidePromote` pure + `promoteTaskToReady` DI）、sync guard は CLI と共通の `ready-guard.ts` |
+
 ### 2. トレーサビリティ
 
 daemon 起動時に API Proxy が自動起動し、全 API リクエストを SQLite FTS5 データベースに記録する。Master が過去の作業ログを検索・分析する際に活用できる。
