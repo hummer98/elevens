@@ -65,6 +65,25 @@ elevens start
 - 4ペインは不動。サブエージェントは Conductor ペイン内にタブとして作成される
 - 最大3タスク並列、4つ目以降はキューイング
 
+### モデル設定（.team/config.json の models）
+
+Master / Conductor / Agent が使う Claude モデルはロール別に override できる。
+
+- `.team/config.json` の `models` フィールドで指定する（**任意の override**。このフィールドは自動生成されず、書かなくてよい）。
+- 未指定のロールは**コード既定 `DEFAULT_MODEL`**（`skills/cmux-team/manager/config.ts` の現在値。執筆時点では `claude-opus-4-8`）に解決される。
+- **解決順:** `--model` CLI フラグ > `config.models[<role>]` > `DEFAULT_MODEL`
+- 解決後の値は TUI dashboard の **Settings タブ**に `models.<role>` として表示される。
+
+設定例（コスト調整で agent だけ別モデルに下げる）:
+
+```json
+{
+  "models": { "agent": "claude-haiku-4-5-20251001" }
+}
+```
+
+master / conductor は未指定なので `DEFAULT_MODEL` に解決される。
+
 ## 3. タスク管理
 
 **ライフサイクル:** draft → ready → assigned → closed/aborted
