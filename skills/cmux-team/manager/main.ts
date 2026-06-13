@@ -4802,47 +4802,85 @@ async function cmdAwaitTask(): Promise<void> {
     process.exit(0);
   }
 
-  // fs.watch で task-state.json を監視
-  const taskStateFile = join(PROJECT_ROOT, ".team/task-state.json");
+  // task-state.json は tmp+rename の atomic write で更新される（saveTaskState）。
+  // 単一ファイルを fs.watch すると rename 後に古い inode へ張り付き、以降の更新
+  // イベントを取りこぼす（特に macOS の FSEvents）。closed の更新が届かず timeout まで
+  // ハングするため、(1) 親ディレクトリ `.team/` を watch して rename-into を拾い、
+  // (2) periodic poll を安全網として併用する二重化で確実に検出する。
+  const teamDir = join(PROJECT_ROOT, ".team");
   const ac = new AbortController();
 
-  // タイムアウトタイマー
-  const timer = setTimeout(() => {
+  let finalized = false;
+  let timer: ReturnType<typeof setTimeout>;
+  let poller: ReturnType<typeof setInterval>;
+
+  const cleanup = (): void => {
     ac.abort();
+    clearTimeout(timer);
+    clearInterval(poller);
+  };
+
+  // closed/aborted を判定して確定したら exit する。watcher と poll の双方から
+  // 呼ばれるため finalized ガードで二重終了・二重 printSummaries を防ぐ。
+  const evaluate = async (): Promise<void> => {
+    if (finalized) return;
+    let state: Awaited<ReturnType<typeof loadTaskState>>;
+    try {
+      state = await loadTaskState(PROJECT_ROOT);
+    } catch {
+      // JSON パースエラー（tmp 書き込み中など）は無視して次のイベント/poll を待つ
+      return;
+    }
+    for (const id of [...remaining]) {
+      const st = state[id];
+      if (st?.status === "aborted") {
+        if (finalized) return;
+        finalized = true;
+        cleanup();
+        console.error(formatAbortedTaskLine(id, st.journal));
+        process.exit(1);
+      }
+      if (st?.status === "closed") {
+        remaining.delete(id);
+      }
+    }
+    if (remaining.size === 0) {
+      if (finalized) return;
+      finalized = true;
+      cleanup();
+      await printSummaries(taskIds);
+      process.exit(0);
+    }
+  };
+
+  // タイムアウトタイマー
+  timer = setTimeout(() => {
+    finalized = true;
+    cleanup();
     console.error(`Timeout: ${timeoutSec}s elapsed, tasks still pending: ${[...remaining].join(",")}`);
     process.exit(2);
   }, timeoutSec * 1000);
 
+  // 安全網: fs.watch がイベントを取りこぼしても poll で確実に検出する
+  poller = setInterval(() => { void evaluate(); }, 1000);
+
   try {
-    const watcher = watch(taskStateFile, { signal: ac.signal }, async () => {
-      try {
-        const state = await loadTaskState(PROJECT_ROOT);
-        for (const id of [...remaining]) {
-          const st = state[id];
-          if (st?.status === "closed") {
-            remaining.delete(id);
-          }
-          if (st?.status === "aborted") {
-            clearTimeout(timer);
-            watcher.close();
-            console.error(formatAbortedTaskLine(id, st.journal));
-            process.exit(1);
-          }
-        }
-        if (remaining.size === 0) {
-          clearTimeout(timer);
-          watcher.close();
-          await printSummaries(taskIds);
-          process.exit(0);
-        }
-      } catch {
-        // JSON パースエラーなどは無視（一時ファイル書き込み中の可能性）
-      }
+    const watcher = watch(teamDir, { signal: ac.signal }, (_event, filename) => {
+      // task-state.json（および rename 元の .tmp）以外のイベントは無視。
+      // filename が null のプラットフォームでは保険として evaluate を回す。
+      if (filename && filename !== "task-state.json" && filename !== "task-state.json.tmp") return;
+      void evaluate();
     });
+    void watcher; // 明示 close は不要（cleanup の ac.abort() で停止）
   } catch (e: any) {
     if (e?.name === "AbortError") return;
+    cleanup();
     throw e;
   }
+
+  // TOCTOU: 初期チェックと watcher 設置の隙間で closed/aborted になったケースを
+  // 取りこぼさないよう、watcher 設置後に即時評価する。
+  await evaluate();
 }
 
 /**
