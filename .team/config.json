@@ -1,5 +1,10 @@
 {
   "mainBranch": "main",
+  "models": {
+    "master": "claude-opus-4-8",
+    "conductor": "claude-opus-4-8",
+    "agent": "claude-opus-4-8"
+  },
   "tokenPool": {
     "enabled": true,
     "default": "@tayo",

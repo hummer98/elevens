@@ -3588,7 +3588,7 @@ async function cmdSpawnAgent(): Promise<void> {
   const spawnConfig = await loadConfig(PROJECT_ROOT);
   if (spawnConfig.opencode?.agentEnabled) {
     const ocServerUrl = spawnConfig.opencode.serverUrl ?? "http://localhost:54321";
-    const ocModel = spawnConfig.opencode.agentModel ?? "anthropic/claude-fable-5";
+    const ocModel = spawnConfig.opencode.agentModel ?? "anthropic/claude-opus-4-8";
 
     // prompt テキストを解決（promptFile があれば読んで展開する）
     let ocPromptText = prompt ?? "";

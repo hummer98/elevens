@@ -18,7 +18,7 @@ import { normalizeAutoUpdate, normalizeSleepPrevention } from "./schema";
  * main.ts（getModelForRole）と dashboard.tsx（Settings タブ表示）の両方が参照するため、
  * literal の drift を避けて config モジュールに集約する。
  */
-export const DEFAULT_MODEL = "claude-fable-5";
+export const DEFAULT_MODEL = "claude-opus-4-8";
 
 export interface TeamConfig {
   models?: {
@@ -45,10 +45,10 @@ export interface TeamConfig {
      */
     agentEnabled?: boolean;
     /**
-     * opencode Agent で使うモデル名（デフォルト: "anthropic/claude-fable-5"）。Issue #37
+     * opencode Agent で使うモデル名（デフォルト: "anthropic/claude-opus-4-8"）。Issue #37
      * "providerID/modelID" 形式（スラッシュ必須）で opencode provider layer に渡す。
      * スラッシュが無い値は model 指定として渡らず opencode 側デフォルトにフォールバックする。
-     * 例: "anthropic/claude-fable-5", "openrouter/anthropic/claude-haiku-4.5"
+     * 例: "anthropic/claude-opus-4-8", "openrouter/anthropic/claude-haiku-4.5"
      */
     agentModel?: string;
   };
