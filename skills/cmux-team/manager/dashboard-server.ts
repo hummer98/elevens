@@ -117,6 +117,16 @@ const CSP_HEADER =
   "base-uri 'self'; " +
   "frame-ancestors 'none'";
 
+/**
+ * `/files` 系専用 CSP。右ペイン iframe（同一オリジン `/files/<path>`）を表示するため
+ * `frame-ancestors` を `'self'` に緩める（他オリジンからの埋め込みは引き続き禁止）。
+ * SPA(`/`) / API(`/api/*`) は `CSP_HEADER`（`frame-ancestors 'none'`）のまま据え置く。
+ */
+const FILES_CSP_HEADER = CSP_HEADER.replace(
+  "frame-ancestors 'none'",
+  "frame-ancestors 'self'",
+);
+
 const DEFAULT_TIMEOUT_MS = 5000;
 
 const TIMEOUT_SENTINEL = Symbol("dashboard-server.timeout");
@@ -807,7 +817,7 @@ export async function startDashboardServer(
     if (pathname === "/files" || pathname.startsWith("/files/")) {
       return handleFilesRequest(projectRoot, url, {
         "Cache-Control": "no-store",
-        "Content-Security-Policy": CSP_HEADER,
+        "Content-Security-Policy": FILES_CSP_HEADER,
       });
     }
 

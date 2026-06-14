@@ -14,6 +14,7 @@ import {
   resolveFilePath,
   contentTypeFor,
   handleFilesRequest,
+  formatLocalMtime,
 } from "./dashboard-files";
 
 const BASE_HEADERS = {
@@ -276,5 +277,107 @@ describe("dashboard-files: handleFilesRequest（index / wrapper 生成）", () =
     const nf = filesRequest("/files/docs/nope.md");
     expect(nf.status).toBe(404);
     expect(((await nf.json()) as any).error).toBe("not_found");
+  });
+});
+
+describe("dashboard-files: 2 ペイン shell + JSON / ローカルタイム (T038)", () => {
+  test("N5: formatLocalMtime は YYYY-MM-DD HH:mm（Z 無し）、null は -", () => {
+    // 固定 ms（絶対値は TZ 依存なのでパターンと非 ISO のみ検証）
+    const s = formatLocalMtime(Date.parse("2026-06-15T03:04:05.000Z"));
+    expect(s).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    expect(s).not.toContain("Z");
+    expect(s).not.toContain("T");
+    expect(formatLocalMtime(null)).toBe("-");
+  });
+
+  test("N1: /files/?format=json は 3 rootKey の JSON entries を返す", async () => {
+    const res = filesRequest("/files/?format=json");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type") ?? "").toContain("application/json");
+    const data = (await res.json()) as any;
+    const names = data.entries.map((e: any) => e.name).sort();
+    expect(names).toEqual(["artifacts", "docs", "output"]);
+    expect(data.entries.every((e: any) => e.isDir === true)).toBe(true);
+  });
+
+  test("N2: dir ?format=json は entries に name/isDir/size/mtimeLocal（mtimeMs 無し）", async () => {
+    const res = filesRequest("/files/docs/?format=json");
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as any;
+    const sub = data.entries.find((e: any) => e.name === "sub");
+    expect(sub).toBeDefined();
+    expect(sub.isDir).toBe(true);
+    expect("size" in sub).toBe(true);
+    expect("mtimeLocal" in sub).toBe(true);
+    expect("mtimeMs" in sub).toBe(false);
+    expect(data.rootKey).toBe("docs");
+  });
+
+  test("N3: dir ?format=json + ?prefix= で前方一致 filter", async () => {
+    const res = filesRequest("/files/output/?format=json&prefix=task-001-");
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as any;
+    const names = data.entries.map((e: any) => e.name);
+    expect(names).toContain("task-001-100");
+    expect(names).not.toContain("task-002-200");
+  });
+
+  test("N4: JSON entries の mtimeLocal は ISO/Z でなくローカルタイム形式", async () => {
+    // mtime を持つファイルエントリで検証
+    const res = filesRequest("/files/docs/sub/?format=json");
+    const data = (await res.json()) as any;
+    const file = data.entries.find((e: any) => e.name === "file.md");
+    expect(file).toBeDefined();
+    expect(file.mtimeLocal).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    expect(file.mtimeLocal).not.toMatch(/Z$/);
+    expect(file.mtimeLocal).not.toMatch(/T\d/);
+  });
+
+  test("N6: GET /files（format 無し）は 2 ペイン shell（#tree + iframe#view）", async () => {
+    const res = filesRequest("/files/");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type") ?? "").toContain("text/html");
+    const body = await res.text();
+    expect(body).toContain('id="tree"');
+    expect(body).toContain('<iframe id="view"');
+  });
+
+  test("N7: shell は外部 src を参照しない（inline のみ）", async () => {
+    const body = await filesRequest("/files/").text();
+    expect(body).not.toContain("http://");
+    expect(body).not.toContain("https://");
+  });
+
+  test("N8: shell の noscript に 3 rootKey 直リンクが含まれる", async () => {
+    const body = await filesRequest("/files/").text();
+    expect(body).toContain("<noscript>");
+    expect(body).toContain('href="/files/docs/"');
+    expect(body).toContain('href="/files/artifacts/"');
+    expect(body).toContain('href="/files/output/"');
+  });
+
+  test("N9: format=json でも baseHeaders（no-store / CSP）が付与される", async () => {
+    const res = filesRequest("/files/docs/?format=json");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(res.headers.get("Content-Security-Policy") ?? "").toContain(
+      "default-src 'self'",
+    );
+  });
+
+  test("N10: file に ?format=json を付けても従来配信（md wrapper）", async () => {
+    const res = filesRequest("/files/docs/sub/file.md?format=json");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type") ?? "").toContain("text/html");
+    const body = await res.text();
+    expect(body).toContain("marked.parse");
+  });
+
+  test("N11: shell / wrapper の inline style はダーク背景でライト本文色を含まない", async () => {
+    const shell = await filesRequest("/files/").text();
+    expect(shell).toContain("#0e1116");
+    expect(shell).not.toContain("#24292f");
+    const wrapper = await filesRequest("/files/docs/sub/file.md").text();
+    expect(wrapper).toContain("#0e1116");
+    expect(wrapper).not.toContain("#24292f");
   });
 });

@@ -578,6 +578,23 @@ describe("dashboard-server: /files ファイルビューワー (T033)", () => {
     const res = await fetch(`${handle.url}/files/docs/spec/x.md`, { method: "POST" });
     expect(res.status).toBe(404);
   });
+
+  test("N12: /files 系応答 CSP は frame-ancestors 'self'、SPA/API は 'none' 据え置き (T038)", async () => {
+    // shell（親）
+    const shell = await fetch(`${handle.url}/files/`);
+    const shellCsp = shell.headers.get("Content-Security-Policy") ?? "";
+    expect(shellCsp).toContain("frame-ancestors 'self'");
+    expect(shellCsp).not.toContain("frame-ancestors 'none'");
+    // iframe 子文書相当（md ファイル配信）
+    const child = await fetch(`${handle.url}/files/docs/spec/x.md`);
+    const childCsp = child.headers.get("Content-Security-Policy") ?? "";
+    expect(childCsp).toContain("frame-ancestors 'self'");
+    expect(childCsp).not.toContain("frame-ancestors 'none'");
+    // API は frame-ancestors 'none' 据え置き
+    const api = await fetch(`${handle.url}/api/health`);
+    const apiCsp = api.headers.get("Content-Security-Policy") ?? "";
+    expect(apiCsp).toContain("frame-ancestors 'none'");
+  });
 });
 
 describe("dashboard-server: parsePeriodQuery", () => {

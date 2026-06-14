@@ -126,7 +126,7 @@ inline `<style>` / `<script>` を許可するため `style-src` / `script-src` �
 | `GET /api/agent-strategy/:taskId` | drill-down: conductor + agent タイムライン + outcome | — |
 | `GET /api/tokens` | timeline stacked area / Top tasks / per-role / per-task histogram | `?from&to` |
 | `GET /api/tasks` | per-task table（sortable / CSV export 用 source） | `?from&to` |
-| `GET /files/*` | docs / `.team/artifacts` / `.team/output` の閲覧（root index / dir index / file 配信。詳細は §8） | `?raw` `?prefix` |
+| `GET /files/*` | docs / `.team/artifacts` / `.team/output` の閲覧（2 ペイン shell / dir・root JSON / dir index / file 配信。詳細は §8） | `?format=json` `?raw` `?prefix` |
 
 ### 4.1 共通 query
 
@@ -232,7 +232,7 @@ dashboard-server.ts は **集計しない**。SSOT は以下に分散:
 | `trace-store.ts` | 全 SQL（`countToolCallsByPeriod` / `failureRateByTool` / `aggregateApiUsageByBucket` 等の T414 追加分含む） |
 | `agent-strategy.ts` | 6 値分類 + agent_spawned 集約 + drill-down |
 | `dashboard-metrics.ts` | TUI Metrics タブ用（本タスクで未変更） |
-| `dashboard-files.ts` | `/files` の path 解決（traversal / symlink ガード）+ index HTML 生成 + markdown wrapper 生成（T033） |
+| `dashboard-files.ts` | `/files` の path 解決（traversal / symlink ガード）+ 2 ペイン shell 生成 + dir/root JSON serialize（ローカルタイム mtime）+ dir index HTML + markdown wrapper 生成（T033 / T038） |
 | `dashboard-server.ts` | routing + period parse + ResponseShape 整形 + timeout race のみ |
 
 dashboard-server は集計関数を **DI で受け取れる**（`opts.aggregators`）。テストで一部だけ never-resolve に差し替えて 503 race を検証する。
@@ -291,8 +291,10 @@ CI では SPA の自動描画テストはしない。本 spec のチェックリ
 - [ ] task drill-down: Tasks の行クリック → Agent Strategy drill-down にジャンプ
 - [ ] 30s auto refresh ON / OFF
 - [ ] 過去 task の Agent Strategy drill-down が timeline 表示される
-- [ ] sidebar の Files リンクで `/files/`（root index）が別タブで開く
+- [ ] sidebar の Files リンクで `/files/`（2 ペイン shell）が別タブで開く
 - [ ] Tasks の行内 output リンクで該当 taskRunId に絞られた `/files/output/` index が開く
+- [ ] `/files` の左ツリーから任意ファイルを右ペイン（iframe）で開ける（ダークテーマ）
+- [ ] `/files` 応答 CSP が `frame-ancestors 'self'`（SPA/API は `'none'` 据え置き）
 
 ---
 
@@ -313,7 +315,7 @@ CI では SPA の自動描画テストはしない。本 spec のチェックリ
 
 ---
 
-## 8. ファイルビューワー（`/files`）— T033
+## 8. ファイルビューワー（`/files`）— T033 / 2 ペイン刷新 T038
 
 ### 8.1 目的
 
@@ -325,12 +327,16 @@ Manager が動いているプロジェクトの成果物・知見を**通常ブ�
 
 c11 の browser surface は表示領域に制約があるため、その補完として通常ブラウザのタブで開ける経路を用意する（observatory の retrospective 観察を補強する read side 拡張）。
 
+T038 で UI を **左サイドバー = ファイル/ディレクトリツリー、右ペイン = 内容表示（iframe）の 2 ペイン構成**に刷新し、配色を SPA ダッシュボード（`dashboard-web/style.css`）と揃えた**ダークテーマ**にした。ツリーはクリックで展開/折りたたみ、ファイルクリックで右ペイン iframe に内容を表示する。右ペインは既存の `/files/<rootKey>/<relpath>` 配信経路（md wrapper / raw / html / 画像）を**そのまま再利用**するため、レンダリングロジックを二重実装しない。
+
 ### 8.2 URL 規則と rootKey
 
 | URL | 応答 |
 |---|---|
-| `GET /files/` | root index（3 rootKey へのリンク一覧） |
-| `GET /files/<rootKey>/` | ディレクトリ index（HTML） |
+| `GET /files`（`format` なし） | 2 ペイン shell HTML（左ツリー + 右 iframe、ダークテーマ inline） |
+| `GET /files/?format=json` | rootKey 一覧 JSON（`{ entries: [{ name, isDir:true }] }`） |
+| `GET /files/<rootKey>/<dir>?format=json` | dir entries JSON（ツリー lazy load 用、後述） |
+| `GET /files/<rootKey>/` | ディレクトリ index HTML（`?format` なし時のフォールバック） |
 | `GET /files/<rootKey>/<relpath>` | ファイル配信 |
 
 rootKey は固定辞書で、これ以外は 404:
@@ -343,16 +349,21 @@ rootKey は固定辞書で、これ以外は 404:
 
 クエリ:
 
+- `?format=json` — **dir / root_index のみ**有効。dir entries / rootKey 一覧を JSON で返す（ツリー lazy load）。file には無効（無視して従来配信）
 - `?raw=1` — `.md` を wrapper にせず `text/plain` でそのまま返す
-- `?prefix=<str>` — dir index のエントリ名前方一致 filter（Tasks ページの output リンクが `?prefix=task-<id>-` で使用）
+- `?prefix=<str>` — dir index / dir JSON のエントリ名前方一致 filter（Tasks ページの output リンクが `?prefix=task-<id>-` で使用）
 
 ### 8.3 レンダリング
 
 | 対象 | 応答 |
 |---|---|
-| ディレクトリ | index HTML（breadcrumb + エントリ一覧。表示テキストは HTML escape、href は segment 単位 `encodeURIComponent`。空 dir は 200 で "empty" 表示） |
-| `.md`（`?raw=1` なし） | markdown wrapper HTML（vendor の marked.min.js を inline し client side で描画。md 本文は `<script type="application/json">` に `JSON.stringify` + `<` escape で埋め込み） |
+| `GET /files`（root） | 2 ペイン shell HTML。左 `#tree` が起動時 `/files/?format=json` を fetch して rootKey を描画、各 dir はクリックで `?format=json` を lazy fetch して 1 階層展開。右 `#view`（iframe）にファイルを表示。`<noscript>` に 3 rootKey 直リンクを残す（JS 無効フォールバック） |
+| dir `?format=json` | entries JSON `{ rootKey, relPath, entries: [{ name, isDir, size, mtimeLocal }] }`。`mtimeLocal` は**サーバローカルタイム** `YYYY-MM-DD HH:mm` 文字列（stat 失敗時 `null`）、`size` は dir / stat 失敗時 `null`。**`mtimeMs`（数値）は JSON に載せない**（表示専用に正規化済み） |
+| ディレクトリ（`?format` なし） | index HTML（breadcrumb + エントリ一覧。表示テキストは HTML escape、href は segment 単位 `encodeURIComponent`。空 dir は 200 で "empty" 表示）。mtime はローカルタイム表示 |
+| `.md`（`?raw=1` なし） | markdown wrapper HTML（vendor の marked.min.js を inline し client side で描画。md 本文は `<script type="application/json">` に `JSON.stringify` + `<` escape で埋め込み）。ダークテーマ |
 | `.html` / `.png` / `.svg` ほか | `Bun.file` streaming でそのまま配信（Content-Type は拡張子マップ。未知拡張子は `application/octet-stream`） |
+
+mtime 表示はすべて**サーバのローカルタイムゾーン**で整形する（`formatLocalMtime`。`toISOString()` = UTC/Z 付きは使わない）。
 
 ### 8.4 セキュリティ
 
@@ -368,9 +379,18 @@ path 解決（`resolveFilePath`）は以下の順で判定し、**throw しな�
 
 エラー設計: **malformed input のみ 400 `bad_request`、それ以外の拒否は一律 404 `not_found`**（パスの存在有無を漏らさない）。response body は §4.3 と同じ `{ "error": ... }` JSON。
 
+ツリーの lazy load は**新たな walk を実装せず**、各展開を既存 `resolveFilePath`（kind=dir）+ `listDirEntries` に乗せる（`?format=json` はシリアライズ先を変えるだけ）。新しい境界を増やさないため、既存セキュリティテスト（U1–U12 / I8–I11）がそのままカバーする。
+
+右ペイン iframe には **`sandbox` を付けない**（md wrapper はインライン `<script>` で marked を実行するため、素の sandbox だと描画されない）。隔離は **CSP（同一オリジン制約）+ `resolveFilePath` のパス境界 + rootKey allowlist** に委ねる。read-only・127.0.0.1 限定の前提とあわせ追加 attack surface は最小。
+
 ### 8.5 CSP と表示制約
 
-`/files` の全 response にも §3.2 の CSP と `Cache-Control: no-store` を付与する。`default-src 'self'` のため、**外部 CDN 等を参照する HTML は完全表示されない**。task report 等は self-contained HTML（CSS / JS inline）のみ完全表示できる、という制約を仕様として受け入れる（report 生成側がこの制約に合わせる）。
+`/files` の全 response には専用 CSP（`FILES_CSP_HEADER`）と `Cache-Control: no-store` を付与する。これは共通 `CSP_HEADER`（§3.2）の **`frame-ancestors 'none'` を `'self'` に差し替えたもの**で、右ペイン iframe が同一オリジンの `/files/<path>` を埋め込めるようにする（他オリジンからの埋め込みは引き続き禁止）。
+
+- **`frame-ancestors 'self'`**: shell（親）も iframe 子文書（`/files/<path>`）も同じ CSP を背負い、同一オリジン埋め込みが成立する。`frame-ancestors 'none'` は同一オリジンを含む全埋め込みを子文書側で拒否してしまうため iframe が表示できない（C1）。
+- **SPA(`/`) / API(`/api/*`)** の response は `CSP_HEADER`（`frame-ancestors 'none'`）のまま据え置き。
+- ツリー JSON の lazy fetch は `connect-src 'self'` で許可済み。
+- `default-src 'self'` のため**外部 CDN 等を参照する HTML は完全表示されない**。task report 等は self-contained HTML（CSS / JS inline）のみ完全表示できる、という制約を仕様として受け入れる（report 生成側がこの制約に合わせる）。`dashboard-server.ts` の変更は `/files` 委譲時の CSP 1 行差し替えのみで、routing 構造・`CSP_HEADER` 本体は不変。
 
 ---
 
@@ -435,8 +455,8 @@ default（ephemeral port）では URL は daemon 再起動で変わる。固定�
 
 - spec: [`11-metrics.md`](11-metrics.md)（CLI 側の SSOT）/ [`05-install-and-infrastructure.md`](05-install-and-infrastructure.md)（`.team/team.json` 構造）/ [`00-project-overview.md`](00-project-overview.md)（observatory コンセプト）
 - 実装:
-  - `skills/cmux-team/manager/dashboard-server.ts` — Bun.serve + routing + 7 endpoint + timeout race + `/files` 分岐（T033）
-  - `skills/cmux-team/manager/dashboard-files.ts` — `/files` の path 解決 / index HTML 生成 / markdown wrapper 生成（T033）
+  - `skills/cmux-team/manager/dashboard-server.ts` — Bun.serve + routing + 7 endpoint + timeout race + `/files` 分岐（T033）+ `/files` 専用 CSP（`FILES_CSP_HEADER`、frame-ancestors 'self'、T038）
+  - `skills/cmux-team/manager/dashboard-files.ts` — `/files` の path 解決 / 2 ペイン shell + dir/root JSON（ローカルタイム mtime）/ dir index HTML / markdown wrapper 生成（T033 / T038）
   - `skills/cmux-team/manager/dashboard-web-bundle.ts` — HTML/CSS/JS 連結
   - `skills/cmux-team/manager/dashboard-web/` — index.html / style.css / app.js / vendor/（uplot.min.js / marked.min.js ほか）
   - `skills/cmux-team/manager/agent-strategy.ts` — 6 値分類 + drill-down
@@ -446,8 +466,8 @@ default（ephemeral port）では URL は daemon 再起動で変わる。固定�
   - `skills/cmux-team/manager/dashboard-metrics.ts` — TUI Metrics タブの行ビルド（T415 で role/task セクション削除、URL 行追加）
   - `skills/cmux-team/manager/browser-open.ts` — T415 ブラウザ起動 helper（cross-platform）
 - テスト:
-  - `dashboard-server.test.ts` — health / endpoint shape / 400 / 404 / 503 timeout / HTML inline 置換 / `/files` 統合（I1〜I13、T033）
-  - `dashboard-files.test.ts` — resolver（traversal / symlink / decode 境界）/ Content-Type / index HTML / md wrapper（T033）
+  - `dashboard-server.test.ts` — health / endpoint shape / 400 / 404 / 503 timeout / HTML inline 置換 / `/files` 統合（I1〜I13、T033）+ N12 実 CSP 回帰（frame-ancestors 'self' / 'none' 据え置き、T038）
+  - `dashboard-files.test.ts` — resolver（traversal / symlink / decode 境界）/ Content-Type / index HTML / md wrapper（T033）+ 2 ペイン shell / dir・root JSON / ローカルタイム mtime（N1〜N11、T038）
   - `agent-strategy.test.ts` — classifyStrategy 7 ケース / SQL 集計 / drill-down
   - `trace-store-metrics.test.ts` — 新規 SQL 4 ケース（空 / 件数降順 / since-until 境界 / hour vs day bucket key）
   - `dashboard-metrics.test.tsx` — TUI Metrics 行ビルド（T415 で URL 行 / status message / role/task 削除を追加）
