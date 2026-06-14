@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.14.1] - 2026-06-14
+
+### Fixed
+
+- **`await-task` が完了を検出できず timeout までハングする不具合を修正**: `task-state.json` は tmp+rename の atomic write で更新されるが、`await-task` は単一ファイルを `fs.watch` していたため、rename でファイルが置き換わると古い inode に張り付き以降の `closed` 更新イベントを取りこぼしていた（特に macOS）。監視対象を親ディレクトリ `.team/` に変更（rename-into を確実に検出）し、periodic poll（1s）を安全網として併用、watcher 先置きで初期チェックとの TOCTOU も解消。実機検証で atomic rename 経由の closed を遅延ほぼ 0 で検出することを確認
+
 ## [0.14.0] - 2026-06-14
 
 ### Added
