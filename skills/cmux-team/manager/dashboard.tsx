@@ -1285,15 +1285,16 @@ export function buildIssueRows(state: AppState): any[] {
   }
 
   const rows: any[] = [];
+  const spinChar = SPINNER_FRAMES[state.spinnerFrame % SPINNER_FRAMES.length]!;
   if (state.issueLastSync) {
     rows.push(
       ui.text(
-        `last sync: ${state.issueLastSync}${state.issueSyncing ? " • " + t("gh_tui_syncing") : ""}`,
+        `last sync: ${state.issueLastSync}${state.issueSyncing ? ` • ${spinChar} ${t("gh_tui_syncing")}` : ""}`,
         { dim: true },
       ),
     );
   } else if (state.issueSyncing) {
-    rows.push(ui.text(t("gh_tui_syncing"), { dim: true }));
+    rows.push(ui.text(`${spinChar} ${t("gh_tui_syncing")}`, { dim: true }));
   }
 
   if (state.issueItems.length === 0) {
@@ -2770,20 +2771,26 @@ export async function startDashboard(
   spinnerInterval = setInterval(() => {
     try {
       const daemon = getState();
-      const needsAnimation =
+      const daemonAnimating =
         [...daemon.masters.values()].some(m => m.status === "running") ||
         [...daemon.conductors.values()].some(c => c.status === "running" || c.status === "starting" || c.status === "assigning") ||
         // T236: Conductor が idle でも Agent のみ running/starting の状況で spinner フレームを前進させる
         [...daemon.conductors.values()].some(c => (c.agents ?? []).some(a => a.status === "running" || a.status === "starting"));
 
-      if (needsAnimation) {
-        wasAnimating = true;
-        app.update((s) => ({ ...s, daemon, spinnerFrame: s.spinnerFrame + 1 }));
-      } else if (wasAnimating) {
-        // アニメーション → idle 遷移時: 最後の1回で idle 状態を反映
-        wasAnimating = false;
-        app.update((s) => ({ ...s, daemon }));
-      }
+      // T039: issueSyncing は AppState 側にあり getState(daemon) には無いため updater 内で OR 合成する。
+      // idle 時は同一参照 s を返し、commitUpdates の参照比較で再描画をスキップする。
+      app.update((s) => {
+        const needsAnimation = daemonAnimating || s.issueSyncing;
+        if (needsAnimation) {
+          wasAnimating = true;
+          return { ...s, daemon, spinnerFrame: s.spinnerFrame + 1 };
+        } else if (wasAnimating) {
+          // アニメーション → idle 遷移時: 最後の1回で idle 状態を反映
+          wasAnimating = false;
+          return { ...s, daemon };
+        }
+        return s; // 変化なし → 再描画スキップ
+      });
     } catch {}
   }, SPINNER_INTERVAL);
   refresh();

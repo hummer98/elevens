@@ -231,4 +231,36 @@ describe("buildIssueRows", () => {
     expect(s).toContain(`"#1"`);
     expect(s).toContain(`"#3"`);
   });
+
+  // T039: 同期中スピナーアニメーション
+  // SPINNER_FRAMES は非 export のためリテラルでハードコードして some 判定する
+  const SPINNER_CHARS = ["▖", "▘", "▝", "▗"];
+
+  test("初回同期中はスピナー文字が表示される", () => {
+    const rows = buildIssueRows(
+      makeState({ issueLastSync: null, issueSyncing: true, issueItems: [], spinnerFrame: 1 }),
+    );
+    const s = stringifyRows(rows);
+    expect(SPINNER_CHARS.some((f) => s.includes(f))).toBe(true);
+    // 既存テキストも温存されている
+    expect(s.toLowerCase().includes("syncing") || s.includes("同期")).toBe(true);
+  });
+
+  test("再同期中（last sync あり）もスピナー文字が表示される", () => {
+    const rows = buildIssueRows(
+      makeState({ issueLastSync: "2026-04-20T12:00:00Z", issueSyncing: true, issueItems: [], spinnerFrame: 2 }),
+    );
+    const s = stringifyRows(rows);
+    expect(SPINNER_CHARS.some((f) => s.includes(f))).toBe(true);
+    expect(s).toContain("last sync");
+    expect(s).toContain("2026-04-20T12:00:00Z");
+  });
+
+  test("非同期中（issueSyncing=false）はスピナー文字を出さない", () => {
+    const rows = buildIssueRows(
+      makeState({ issueLastSync: "2026-04-20T12:00:00Z", issueSyncing: false, issueItems: [], spinnerFrame: 3 }),
+    );
+    const s = stringifyRows(rows);
+    expect(SPINNER_CHARS.some((f) => s.includes(f))).toBe(false);
+  });
 });
