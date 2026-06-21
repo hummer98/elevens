@@ -135,6 +135,7 @@ elevens delete-task --task-id 42 --journal "理由"
 | `elevens trace` | API トレース検索（`--task`, `--search`, `--show`, `--conductor`, `--role`, `--limit`） |
 | `elevens trace-hooks` | hook シグナル履歴検索（`--type`, `--surface`, `--task-run`, `--limit`（デフォルト 50）, `--json`）。T217 |
 | `elevens artifacts` | アーティファクト管理（サブコマンド: `add`, `show`, `open`, `search`。オプション: `--validate`） |
+| `elevens open <file>` | `<file>`（docs/ / .team/artifacts/ / .team/output/ 配下）を Web ファイルビューワー（`/files`）で表示。開いている viewer タブが ~1s 以内に該当ファイルへ自動で切り替わる（追従モード、タブは増やさない）。`--no-launch` でブラウザ起動を抑止 |
 | `elevens metrics` | タスク lifecycle / tool call / token の集計サマリ（`--since <range>`, `--group-by day`, `--format csv`）。サブコマンド: `snapshot` / `compare` / `health` / `query`（DuckDB ad-hoc）。詳細は `docs/spec/11-metrics.md` |
 | `elevens events` | events stream（`.team/logs/events.jsonl`）を tail / filter（`--follow`, `--types <names>`, `--format json\|tsv`）。詳細は `docs/spec/10-events-stream.md` |
 | `elevens spawn-conductor [--resume <session-id>] [--task-prompt <path>] [--model <model>]` | Conductor 用 Claude Code を起動・登録（内部用）。`--resume` で既存セッション復元、`--task-prompt` で起動時にプロンプトを CLI 引数として atomic 注入（T421/D7） |
@@ -196,6 +197,26 @@ elevens delete-task --task-id 42 --journal "理由"
 | Conductor 状態 | TUI の Conductor セクション or `cmux tree` |
 | タスク進捗 | TUI の Tasks パネル or `.team/task-state.json` |
 | 完了履歴 | TUI の Journal タブ or `.team/logs/manager.log` |
+
+### Web ダッシュボード / ファイルビューワー（ブラウザ）
+
+Manager daemon に同居する内部 HTTP server（`127.0.0.1:<port>`、外部公開なし）が、TUI とは別にブラウザ向けの 2 種を配信する。
+
+- **メトリクス SPA**: 時系列グラフ・分布・drill-down。TUI Metrics タブで `Ctrl+o`（or `O`）から起動。
+- **ファイルビューワー `/files`**: `docs/` / `.team/artifacts/` / `.team/output/` を**ブラウザで 2 ペイン閲覧**できる。左ツリーで辿り、右ペインに表示。Markdown はレンダリング、HTML レポートや画像はそのまま表示（task report を普通のブラウザで開ける）。
+  - **左ペインヘッダ**: `sort`（`name` / `mtime` / `size`。アクティブキー再クリックで昇降トグル。**既定は更新日時の降順**）と `show` フィルター（`md` / `html` / `img` の表示 On/Off）。設定はブラウザに保存。
+  - 任意の HTML は**白背景**で表示され、白前提のレポートも判読できる。
+  - **追従モード**: `elevens open <file>` を実行すると、開いている viewer タブが新規タブを増やさずに ~1s 以内で該当ファイルへ自動で切り替わる（CLI が `.team/files-focus.json` を書き、SPA がポーリングして移動。spec §8.7）。
+
+URL は ephemeral（daemon 再起動で変わる）なので次で取得する。`.team/config.json` の `dashboard.port` を設定すると固定でき、ブックマーク可能になる（T034）。
+
+```bash
+# ダッシュボード URL を取得し、/files を開く
+cat .team/team.json | jq -r .dashboardServer.url   # 例: http://127.0.0.1:58417
+# → 末尾に /files を付けてブラウザで開く
+```
+
+> 詳細仕様は `docs/spec/12-web-dashboard.md`（§8 ファイルビューワー）を参照。
 
 ## 7. Artifacts（知見の記録）
 

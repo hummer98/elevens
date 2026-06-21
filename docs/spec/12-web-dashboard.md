@@ -363,6 +363,8 @@ rootKey は固定辞書で、これ以外は 404:
 | `.md`（`?raw=1` なし） | markdown wrapper HTML（vendor の marked.min.js を inline し client side で描画。md 本文は `<script type="application/json">` に `JSON.stringify` + `<` escape で埋め込み）。ダークテーマ |
 | `.html` / `.png` / `.svg` ほか | `Bun.file` streaming でそのまま配信（Content-Type は拡張子マップ。未知拡張子は `application/octet-stream`） |
 
+**右ペイン iframe(`#view`) の既定背景は白**（`background:#fff`）。配信ファイルは任意の raw HTML を含むため、ブラウザ既定どおり「白い紙」の上に映す。背景色を明示しない白前提 HTML（task report 等）の黒文字が下地のダークに透けて判読不能になるのを防ぐ。ビューワー自身が生成するダークページ（dir index / md wrapper）は `html{background:#0e1116}` + `body` 背景で**自前で全面ダークを塗る**ため、白縁を出さず従来の見た目を保つ（iframe 既定の白はファイル内容にのみ作用）。
+
 mtime 表示はすべて**サーバのローカルタイムゾーン**で整形する（`formatLocalMtime`。`toISOString()` = UTC/Z 付きは使わない）。
 
 ### 8.4 セキュリティ
@@ -391,6 +393,28 @@ path 解決（`resolveFilePath`）は以下の順で判定し、**throw しな�
 - **SPA(`/`) / API(`/api/*`)** の response は `CSP_HEADER`（`frame-ancestors 'none'`）のまま据え置き。
 - ツリー JSON の lazy fetch は `connect-src 'self'` で許可済み。
 - `default-src 'self'` のため**外部 CDN 等を参照する HTML は完全表示されない**。task report 等は self-contained HTML（CSS / JS inline）のみ完全表示できる、という制約を仕様として受け入れる（report 生成側がこの制約に合わせる）。`dashboard-server.ts` の変更は `/files` 委譲時の CSP 1 行差し替えのみで、routing 構造・`CSP_HEADER` 本体は不変。
+
+### 8.6 左ペインヘッダ — sort / type filter
+
+左ペイン `#tree` は **固定ヘッダ `#treehdr`（sticky）+ スクロール本体 `#treebody`** の 2 段構成。全処理は SPA の inline JS（外部 src なし）で完結し、サーバ JSON（§8.3 の `?format=json`）の追加は不要。
+
+- **sort**: `name` / `mtime` / `size` のアイコンチップ。アクティブキーを再クリックで昇順 ⇄ 降順をトグル（アクティブに `▾`/`▴` を表示）。**既定は `mtime` 降順**（新着アーティファクトが上＝observatory の既定）。
+  - 並べ替えは**既存 DOM ノードを `appendChild` で移動**して行うため、展開済みサブツリー・選択状態を破壊しない。`mtime` は `mtimeLocal`（`YYYY-MM-DD HH:mm`）の辞書順＝時系列順を利用（数値 `mtimeMs` は §8.3 どおり JSON に載せない）。同値は名前で tiebreak。**ディレクトリは常に先頭・名前昇順固定**（ナビゲーション安定性のため）。
+- **type filter**: `md` / `html` / `image` の On/Off チップ。OFF にすると `#tree` に `hide-<type>` クラスが付き、CSS `#tree.hide-<type> .node[data-type="<type>"]{display:none}` で該当 **file ノードのみ**隠す（**dir は常に表示**、`other` 型は対象外で常に表示）。DOM 再構築せず class トグルのみなので展開状態を保つ。`image` は `png/jpg/jpeg/gif/svg/webp/bmp/ico/avif`。
+- **永続化**: sort 設定は `localStorage["filesSort"]`、filter 設定は `localStorage["filesFilter"]` にクライアント側保存（リロードで復元）。サーバ状態は持たない。
+
+### 8.7 追従モード（`elevens open <file>`）
+
+開いている viewer タブを**新規タブを増やさずにその場で該当ファイルへ切り替える**ための仕組み。CLI が「今見せたいファイル」を外部ファイルに書き、SPA がそれをポーリングして自動移動する（state を外部化・observer は pull、という設計原則に沿う）。
+
+- **CLI**: `elevens open <file> [--no-launch]`（実装 `files-open.ts` + `main.ts:cmdOpen`）。
+  1. `<file>`（cwd 相対 / 絶対）を rootKey + relPath に解決。許可 root（`ROOT_DIRS` = docs / .team/artifacts / .team/output）外 / 不存在は exit 1（fail-fast）。symlink・macOS `/var`→`/private/var` は realpath で吸収。
+  2. `.team/files-focus.json`（`{ rootKey, relPath, ts }`、`ts`=`Date.now()`）を **atomic（tmp + rename）** に書く。
+  3. `team.json.dashboardServer.url` を読み、未取得（daemon 未起動）なら exit 1。
+  4. `--no-launch` でなければ `open <url>/files` でシステムブラウザを起動。**URL は固定 `/files` 一本**なので、既に同 URL のタブが開いていれば前面化のみでタブは増えない。
+- **server**: `GET /files/_focus` が `.team/files-focus.json` を素通しで返す（無ければ `{}`）。実 path 解決の前に分岐する read-only endpoint。
+- **SPA**: ~1s 間隔で `/files/_focus` をポーリングし、`ts` が前回と変われば `expandTo(rootKey, relPath)` でツリーを該当パスまで lazy 展開しつつ右 iframe を差し替える（`_open`/`_select` を programmatic に呼ぶ。click と同じ経路）。`ts` 不変の間は何もしない。
+- **追加 state を持たない**: focus は単一ファイルの last-write-wins。複数 viewer が開いていれば全タブが同じ focus に追従する。`.team/files-focus.json` は per-project runtime（`.gitignore` 対象）。
 
 ---
 

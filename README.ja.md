@@ -282,6 +282,7 @@ Manager は Claude Code セッションではなく、**TypeScript の決定論�
 - **ファイルベースのタスク状態**（`.team/tasks/` + `task-state.json`）
 - **zod** によるメッセージスキーマ検証
 - **ink** ベースの TUI ダッシュボード
+- **Web ファイルビューワー** (`/files`) — `docs/` / `.team/artifacts/` / `.team/output/` をブラウザで 2 ペイン閲覧（Markdown レンダリング・HTML レポート/画像表示・更新日時ソート・タイプフィルター）。URL は `.team/team.json` の `dashboardServer.url` + `/files`。`elevens open <file>` で開いているタブが該当ファイルに自動追従（タブを増やさない）
 - **タスク依存解決** (`depends_on` フィールド)
 - **優先度ソート** (high > medium > low)
 - **Agent 完了は fs.watch**（Agent の Stop / SessionEnd hook が done マーカーを書き、Conductor が `elevens await-agent` で待機。busy polling 不要、T181）

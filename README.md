@@ -285,6 +285,7 @@ The Manager is **not** a Claude Code session. It's a TypeScript program with a d
 - **File-based task state** (`.team/tasks/` + `task-state.json`)
 - **zod** schema validation for all messages
 - **ink** TUI dashboard
+- **Web file viewer** (`/files`) — browse `docs/` / `.team/artifacts/` / `.team/output/` in a browser with a 2-pane layout (Markdown rendering, HTML report / image serving, mtime sorting, type filtering). URL is `dashboardServer.url` in `.team/team.json` + `/files`. `elevens open <file>` makes the open tab follow to that file (no new tabs)
 - **Task dependency resolution** via `depends_on` field
 - **Priority sorting** (high > medium > low)
 - **Agent completion via fs.watch** — Agent's Stop / SessionEnd hook writes a done marker, Conductor awaits it with `elevens await-agent` (no busy polling, T181)

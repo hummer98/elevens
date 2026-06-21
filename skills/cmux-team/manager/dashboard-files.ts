@@ -13,7 +13,7 @@
  *  - realpath 境界チェックで root 外へ抜ける symlink を 404 に閉じる
  *    （root 側も realpath する — macOS の /var → /private/var 対策）
  */
-import { lstatSync, realpathSync, statSync, readdirSync, readFileSync } from "fs";
+import { lstatSync, realpathSync, statSync, readdirSync, readFileSync, existsSync } from "fs";
 import { join, sep, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -21,12 +21,19 @@ import { fileURLToPath } from "url";
 // resolver
 // ────────────────────────────────────────────────────────────────────────
 
-/** rootKey → projectRoot 起点の実パス（allowlist そのもの） */
-const ROOT_DIRS: Record<string, string> = {
+/**
+ * rootKey → projectRoot 起点の実パス（allowlist そのもの）。
+ * `elevens open` の focus 解決（files-open.ts）も同じ map を参照し、ビューワーと
+ * CLI で許可 root を一元化する。
+ */
+export const ROOT_DIRS: Record<string, string> = {
   docs: "docs",
   artifacts: join(".team", "artifacts"),
   output: join(".team", "output"),
 };
+
+/** 追従モード（`elevens open`）の focus 状態ファイル（projectRoot 起点） */
+export const FILES_FOCUS_REL = join(".team", "files-focus.json");
 
 export type ResolveResult =
   | { kind: "root_index" }
@@ -204,6 +211,7 @@ function breadcrumbHtml(segments: string[], lastIsLink: boolean): string {
 }
 
 const INDEX_STYLE = `
+html{background:#0e1116}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:24px;color:#d4d8df;background:#0e1116}
 nav{margin-bottom:16px;font-size:14px}
 table{border-collapse:collapse;font-size:14px}
@@ -226,9 +234,23 @@ const SHELL_STYLE = `
 html,body{height:100%;margin:0}
 body{font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--fg);background:var(--bg)}
 #app{display:flex;height:100vh}
-#tree{width:280px;min-width:280px;overflow:auto;background:var(--panel);border-right:1px solid var(--border);padding:8px 0}
+#tree{width:280px;min-width:280px;display:flex;flex-direction:column;background:var(--panel);border-right:1px solid var(--border)}
+#treehdr{flex:none;position:sticky;top:0;z-index:1;background:var(--panel);border-bottom:1px solid var(--border);padding:6px 8px;display:flex;flex-direction:column;gap:6px}
+#treebody{flex:1;overflow:auto;padding:8px 0}
+.hgroup{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.hlabel{color:var(--fg-dim);font-size:10px;text-transform:uppercase;letter-spacing:.04em;margin-right:2px;flex:none}
+.btn{cursor:pointer;border:1px solid var(--border);background:var(--bg);color:var(--fg-dim);border-radius:4px;padding:2px 7px;font-size:11px;line-height:1.4;user-select:none}
+.btn:hover{border-color:var(--accent)}
+.btn.on{background:var(--panel2);color:var(--accent);border-color:var(--accent)}
+.btn .arw{font-size:9px}
+/* タイプフィルター: チップ OFF で該当タイプの file ノードを隠す（dir は常に表示） */
+#tree.hide-md .node[data-type="md"]{display:none}
+#tree.hide-html .node[data-type="html"]{display:none}
+#tree.hide-image .node[data-type="image"]{display:none}
 #viewpane{flex:1;min-width:0}
-#view{width:100%;height:100%;border:0;background:var(--bg)}
+/* iframe 要素はブラウザ既定どおり白地（任意 raw HTML を「白い紙」の上に忠実表示）。
+   ビューワー生成ページ（md wrapper / dir index）は自前で html ごとダークを塗るため影響なし。 */
+#view{width:100%;height:100%;border:0;background:#fff}
 .node{font-size:13px}
 .children{margin-left:14px;border-left:1px solid var(--border)}
 .row{display:flex;align-items:center;gap:8px;padding:3px 10px;cursor:pointer;white-space:nowrap;color:var(--fg)}
@@ -247,14 +269,50 @@ body{font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif
 const SHELL_SCRIPT = `
 (function(){
   var tree=document.getElementById("tree");
+  var treebody=document.getElementById("treebody");
   var view=document.getElementById("view");
   var selected=null;
+  var IMG=["png","jpg","jpeg","gif","svg","webp","bmp","ico","avif"];
+  var sortKey="mtime",sortDir="desc";       // 既定: 更新日降順
+  var containers=[];                          // 既ロード children コンテナ（sort 再適用用）
+  try{var p=JSON.parse(localStorage.getItem("filesSort")||"{}");if(p.key)sortKey=p.key;if(p.dir)sortDir=p.dir;}catch(e){}
   function enc(segs){return segs.map(encodeURIComponent).join("/");}
   function dash(v){return (v===null||v===undefined||v==="")?"-":String(v);}
+  function typeOf(name){
+    var dot=name.lastIndexOf("."),ext=dot<0?"":name.slice(dot+1).toLowerCase();
+    if(ext==="md")return "md";
+    if(ext==="html"||ext==="htm")return "html";
+    if(IMG.indexOf(ext)>=0)return "image";
+    return "other";
+  }
+  function nameCmp(a,b){return a.dataset.name<b.dataset.name?-1:(a.dataset.name>b.dataset.name?1:0);}
+  function cmp(a,b){
+    var ad=a.dataset.isdir==="1",bd=b.dataset.isdir==="1";
+    if(ad!==bd)return ad?-1:1;              // dir を常に先頭
+    if(ad)return nameCmp(a,b);              // dir 同士は名前昇順固定
+    var r;
+    if(sortKey==="size")r=(+a.dataset.size)-(+b.dataset.size);
+    else if(sortKey==="mtime")r=a.dataset.mtime<b.dataset.mtime?-1:(a.dataset.mtime>b.dataset.mtime?1:0);
+    else r=nameCmp(a,b);
+    if(r===0)r=nameCmp(a,b);                // tiebreak は名前
+    return sortDir==="desc"?-r:r;
+  }
+  function sortContainer(c){
+    var n=[],i;for(i=0;i<c.children.length;i++)n.push(c.children[i]);
+    n.sort(cmp);for(i=0;i<n.length;i++)c.appendChild(n[i]); // appendChild は既存ノードを移動（subtree/展開状態を保持）
+  }
+  function resortAll(){for(var i=0;i<containers.length;i++)sortContainer(containers[i]);}
   function makeNode(entry,parentSegs){
     var segs=parentSegs.concat([entry.name]);
     var node=document.createElement("div");
     node.className="node";
+    node.dataset.isdir=entry.isDir?"1":"0";
+    node.dataset.name=String(entry.name).toLowerCase();
+    if(!entry.isDir){
+      node.dataset.type=typeOf(entry.name);
+      node.dataset.size=(entry.size==null?-1:entry.size);
+      node.dataset.mtime=entry.mtimeLocal||"";
+    }
     var row=document.createElement("div");
     row.className="row "+(entry.isDir?"dir":"file");
     var label=document.createElement("span");
@@ -268,29 +326,92 @@ const SHELL_SCRIPT = `
       row.appendChild(meta);
     }
     node.appendChild(row);
-    var box=null,loaded=false;
-    row.addEventListener("click",function(){
-      if(entry.isDir){
+    node._name=entry.name;                  // 追従モードの programmatic 展開用（exact name 一致）
+    if(entry.isDir){
+      var box=null,loadP=null;
+      node._open=function(){                // 展開（必要なら lazy load）。children コンテナの Promise を返す
         if(!box){box=document.createElement("div");box.className="children";node.appendChild(box);}
-        if(!loaded){loaded=true;loadDir(box,segs);box.style.display="";row.classList.add("open");}
-        else{var hidden=box.style.display==="none";box.style.display=hidden?"":"none";row.classList.toggle("open",hidden);}
-      }else{
+        if(!loadP)loadP=loadDir(box,segs);
+        box.style.display="";row.classList.add("open");
+        return loadP.then(function(){return box;});
+      };
+      row.addEventListener("click",function(){
+        if(box&&loadP){var hidden=box.style.display==="none";box.style.display=hidden?"":"none";row.classList.toggle("open",hidden);}
+        else node._open();
+      });
+    }else{
+      node._select=function(){
         if(selected)selected.classList.remove("selected");
         row.classList.add("selected");selected=row;
         view.src="/files/"+enc(segs);
-      }
-    });
+        node.scrollIntoView({block:"nearest"});
+      };
+      row.addEventListener("click",node._select);
+    }
     return node;
   }
   function loadInto(container,segs,url){
-    fetch(url).then(function(r){return r.json();}).then(function(data){
+    if(containers.indexOf(container)<0)containers.push(container);
+    return fetch(url).then(function(r){return r.json();}).then(function(data){
       container.textContent="";
       var entries=(data&&data.entries)||[];
       for(var i=0;i<entries.length;i++)container.appendChild(makeNode(entries[i],segs));
+      sortContainer(container);
     }).catch(function(){container.textContent="(error)";});
   }
-  function loadDir(container,segs){loadInto(container,segs,"/files/"+enc(segs)+"/?format=json");}
-  loadInto(tree,[],"/files/?format=json");
+  function loadDir(container,segs){return loadInto(container,segs,"/files/"+enc(segs)+"/?format=json");}
+  // ---- sort header ----
+  var sortBtns=document.querySelectorAll("#sortgrp .btn");
+  function paintSort(){
+    for(var i=0;i<sortBtns.length;i++){
+      var b=sortBtns[i],on=b.dataset.key===sortKey,old=b.querySelector(".arw");
+      if(old)b.removeChild(old);
+      b.classList.toggle("on",on);
+      if(on){var s=document.createElement("span");s.className="arw";s.textContent=sortDir==="desc"?" \\u25be":" \\u25b4";b.appendChild(s);}
+    }
+  }
+  for(var si=0;si<sortBtns.length;si++){(function(b){
+    b.addEventListener("click",function(){
+      if(sortKey===b.dataset.key)sortDir=sortDir==="desc"?"asc":"desc";
+      else{sortKey=b.dataset.key;sortDir=(b.dataset.key==="name"?"asc":"desc");}
+      try{localStorage.setItem("filesSort",JSON.stringify({key:sortKey,dir:sortDir}));}catch(e){}
+      paintSort();resortAll();
+    });
+  })(sortBtns[si]);}
+  // ---- type filter ----
+  var filtBtns=document.querySelectorAll("#filtergrp .btn");
+  for(var fi=0;fi<filtBtns.length;fi++){(function(b){
+    var t=b.dataset.type,on=true;
+    try{var fp=JSON.parse(localStorage.getItem("filesFilter")||"{}");if(t in fp)on=!!fp[t];}catch(e){}
+    b.classList.toggle("on",on);tree.classList.toggle("hide-"+t,!on);
+    b.addEventListener("click",function(){
+      on=!on;b.classList.toggle("on",on);tree.classList.toggle("hide-"+t,!on);
+      try{var f=JSON.parse(localStorage.getItem("filesFilter")||"{}");f[t]=on;localStorage.setItem("filesFilter",JSON.stringify(f));}catch(e){}
+    });
+  })(filtBtns[fi]);}
+  paintSort();
+  // ---- 追従モード（elevens open）: /files/_focus を ~1s ポーリングし該当ファイルへ自動移動 ----
+  var focusTs=0;
+  function findChild(c,name){for(var i=0;i<c.children.length;i++){if(c.children[i]._name===name)return c.children[i];}return null;}
+  function expandTo(rootKey,relPath){
+    var parts=[rootKey],rest=(relPath||"").split("/");
+    for(var i=0;i<rest.length;i++){if(rest[i])parts.push(rest[i]);}
+    var container=treebody,idx=0;
+    (function step(){
+      if(idx>=parts.length)return;
+      var node=findChild(container,parts[idx]);
+      if(!node)return;                      // 未ロード / 不一致なら打ち切り（次 poll で再試行されうる）
+      if(idx===parts.length-1){if(node._select)node._select();else if(node._open)node._open();return;}
+      if(node._open)node._open().then(function(box){container=box;idx++;step();});
+    })();
+  }
+  function pollFocus(){
+    fetch("/files/_focus").then(function(r){return r.json();}).then(function(f){
+      if(f&&f.ts&&f.ts!==focusTs){focusTs=f.ts;expandTo(f.rootKey,f.relPath);}
+    }).catch(function(){});
+  }
+  loadInto(treebody,[],"/files/?format=json").then(function(){pollFocus();}); // root ノード生成後に初回 poll
+  setInterval(pollFocus,1000);
 })();
 `.trim();
 
@@ -312,7 +433,19 @@ function renderFilesShellHtml(): string {
     `<!doctype html><html><head><meta charset="utf-8"><title>files</title>` +
     `<style>${SHELL_STYLE}</style></head><body>` +
     `<div id="app">` +
-    `<aside id="tree" aria-label="file tree"></aside>` +
+    `<aside id="tree" aria-label="file tree">` +
+    `<div id="treehdr">` +
+    `<div class="hgroup" id="sortgrp"><span class="hlabel">sort</span>` +
+    `<span class="btn" data-key="name" title="名前順">name</span>` +
+    `<span class="btn" data-key="mtime" title="更新日時順">mtime</span>` +
+    `<span class="btn" data-key="size" title="サイズ順">size</span></div>` +
+    `<div class="hgroup" id="filtergrp"><span class="hlabel">show</span>` +
+    `<span class="btn" data-type="md" title="Markdown の表示切替">md</span>` +
+    `<span class="btn" data-type="html" title="HTML の表示切替">html</span>` +
+    `<span class="btn" data-type="image" title="画像の表示切替">img</span></div>` +
+    `</div>` +
+    `<div id="treebody"></div>` +
+    `</aside>` +
     `<main id="viewpane"><iframe id="view" title="file view"></iframe></main>` +
     `</div>` +
     `<noscript><div class="ns"><p>JavaScript を有効にするとツリー表示が使えます。</p>` +
@@ -391,6 +524,7 @@ function getMarkedJs(): string {
 }
 
 const WRAPPER_STYLE = `
+html{background:#0e1116}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0 auto;max-width:860px;padding:24px;color:#d4d8df;background:#0e1116;line-height:1.6}
 nav{margin-bottom:16px;font-size:14px;border-bottom:1px solid #2a313c;padding-bottom:8px}
 a{text-decoration:none;color:#58a6ff}
@@ -460,6 +594,20 @@ function fileErrorResponse(
 }
 
 /**
+ * 追従モードの focus 状態を読む。壊れた / 無い場合は `{}` を返す（SPA は ts 差分でのみ反応）。
+ * 返す形は `{ rootKey, relPath, ts }`（`files-open.ts` が書く形）。
+ */
+function readFilesFocus(projectRoot: string): unknown {
+  const p = join(projectRoot, FILES_FOCUS_REL);
+  if (!existsSync(p)) return {};
+  try {
+    return JSON.parse(readFileSync(p, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+/**
  * `/files` 系 request の entry point。dashboard-server.ts の fetchHandler から
  * 委譲される。baseHeaders には CSP / Cache-Control を渡す（全 response に付与）。
  */
@@ -468,6 +616,11 @@ export function handleFilesRequest(
   url: URL,
   baseHeaders: Record<string, string>,
 ): Response {
+  // 追従モード（`elevens open`）: SPA が ~1s ポーリングする focus 状態。
+  // `.team/files-focus.json` を素通しで返す（無ければ空オブジェクト）。実 path 解決の前に分岐する。
+  if (url.pathname === "/files/_focus") {
+    return fileJsonResponse(readFilesFocus(projectRoot), baseHeaders);
+  }
   const r = resolveFilePath(projectRoot, url.pathname);
   // dir / root_index は ?format=json で JSON serialize（ツリー lazy load 用）。
   // file は format を無視して従来配信する。

@@ -86,6 +86,7 @@ import { loadTaskState, loadTasks, saveTaskState, createTaskProgrammatic, cascad
 import { applyTaskEvent, refreshTaskStateFromDisk } from "./state-machine/task-state-store";
 import { loadArtifacts, searchArtifacts, validateArtifact, addArtifact } from "./artifact";
 import { loadEpics, readEpic, createEpic, updateEpicStatus, listEpicTasks, EPIC_STATUSES, type EpicStatus } from "./epic";
+import { resolveFocusTarget, writeFilesFocus, readDashboardUrl, filesViewerUrl } from "./files-open";
 import {
   loadIntegItems,
   readIntegItem,
@@ -333,6 +334,7 @@ const WRITE_COMMANDS: Record<string, true | Set<string>> = {
   "reset-master": true,
   "set-agent-instructions": true,
   "delete-agent-instructions": true,
+  open: true, // `.team/files-focus.json` を書く（追従モード）
   artifacts: new Set(["add"]),
   token: new Set(["add", "remove", "rotate", "set-plan", "promote", "migrate-subscription"]),
   epic: new Set(["create", "resume", "abort"]),
@@ -6911,6 +6913,53 @@ async function cmdWorktreeArchivePrune(): Promise<void> {
 }
 
 /**
+ * `elevens open <file>` — 追従モード。ファイルを `/files` ビューワーで表示する。
+ * spec: docs/spec/12-web-dashboard.md §8.7。helper は files-open.ts。
+ */
+async function cmdOpen(): Promise<void> {
+  const fileArg = args[1] && !args[1].startsWith("--") ? args[1] : undefined;
+  if (!fileArg || hasHelpFlag()) {
+    console.log(`Usage: elevens open <file> [--no-launch]
+
+  <file> を Web ファイルビューワー（/files）で表示する（追従モード）。
+  対象は docs/ / .team/artifacts/ / .team/output/ 配下のファイルのみ。
+  既に開いている viewer タブが ~1s 以内に該当ファイルへ自動で切り替わる（タブは増やさない）。
+  --no-launch: ブラウザを起動せず focus 状態の更新のみ行う。
+
+詳細仕様: docs/spec/12-web-dashboard.md §8.7`);
+    return;
+  }
+  const target = resolveFocusTarget(PROJECT_ROOT, process.cwd(), fileArg);
+  if ("error" in target) {
+    console.error(`Error: ${target.error}`);
+    process.exit(1);
+  }
+  writeFilesFocus(PROJECT_ROOT, target, Date.now());
+  const dashboardUrl = readDashboardUrl(PROJECT_ROOT);
+  if (!dashboardUrl) {
+    console.error(
+      "Error: dashboard server URL を .team/team.json から取得できません（daemon 未起動?）。`elevens start` で daemon を起動してください。",
+    );
+    process.exit(1);
+  }
+  const url = filesViewerUrl(dashboardUrl);
+  console.log(`focus → ${target.rootKey}/${target.relPath}`);
+  console.log(url);
+  if (!hasFlag("no-launch")) {
+    try {
+      const proc = Bun.spawn(["open", url], { stdout: "ignore", stderr: "pipe" });
+      const code = await proc.exited;
+      if (code !== 0) {
+        const err = (await new Response(proc.stderr).text()).trim();
+        console.error(`warn: ブラウザ起動に失敗 (open exit ${code}): ${err}`);
+      }
+    } catch (e) {
+      console.error(`warn: ブラウザ起動に失敗: ${String(e)}`);
+    }
+  }
+}
+
+/**
  * Epic（PoC）サブコマンド本体。spec: docs/spec/14-epic.md。
  * create / list / show / resume / abort をサポート。start は Phase 2 で daemon 統合。
  */
@@ -7428,6 +7477,9 @@ switch (command) {
     break;
   case "pr":
     await cmdPr();
+    break;
+  case "open":
+    await cmdOpen();
     break;
   default:
     if (!command || hasHelpFlag()) {

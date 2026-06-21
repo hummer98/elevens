@@ -7,7 +7,7 @@
  */
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtemp, rm, mkdir, writeFile, symlink } from "fs/promises";
-import { realpathSync } from "fs";
+import { realpathSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
@@ -379,5 +379,73 @@ describe("dashboard-files: 2 ペイン shell + JSON / ローカルタイム (T03
     const wrapper = await filesRequest("/files/docs/sub/file.md").text();
     expect(wrapper).toContain("#0e1116");
     expect(wrapper).not.toContain("#24292f");
+  });
+
+  test("N12: コンテンツ iframe(#view) はブラウザ既定の白地（白前提 raw HTML の判読性確保）", async () => {
+    const shell = await filesRequest("/files/").text();
+    // #view 要素にダーク var(--bg) を塗らない。任意 raw HTML を白い紙の上に映す
+    expect(shell).toMatch(/#view\{[^}]*background:#fff/);
+    expect(shell).not.toMatch(/#view\{[^}]*background:var\(--bg\)/);
+    // ビューワー生成ページ（dir index / md wrapper）は html ごとダークを塗り、白縁を出さない
+    const dirIndex = await filesRequest("/files/docs/").text();
+    expect(dirIndex).toContain("html{background:#0e1116}");
+    const wrapper = await filesRequest("/files/docs/sub/file.md").text();
+    expect(wrapper).toContain("html{background:#0e1116}");
+  });
+
+  test("N13: 左ペインヘッダに sort アイコン + type フィルターチップを持つ", async () => {
+    const shell = await filesRequest("/files/").text();
+    expect(shell).toContain('id="treehdr"');
+    expect(shell).toContain('id="treebody"'); // ツリー本体は分離したスクロール領域
+    // sort: name / mtime / size
+    expect(shell).toContain('data-key="name"');
+    expect(shell).toContain('data-key="mtime"');
+    expect(shell).toContain('data-key="size"');
+    // filter: md / html / image
+    expect(shell).toContain('data-type="md"');
+    expect(shell).toContain('data-type="html"');
+    expect(shell).toContain('data-type="image"');
+    // フィルター CSS（OFF 時に該当 file ノードを隠す）
+    expect(shell).toContain('#tree.hide-md .node[data-type="md"]');
+  });
+
+  test("N14: shell の inline JS は構文的に妥当 + 既定ソートは mtime 降順", async () => {
+    const shell = await filesRequest("/files/").text();
+    // 既定ソートキー / 方向
+    expect(shell).toContain('sortKey="mtime",sortDir="desc"');
+    // <script>…</script> を取り出して構文チェック（document 等は実行しないので未定義でも可）
+    const m = shell.match(/<script>([\s\S]*?)<\/script>/);
+    expect(m).not.toBeNull();
+    // new Function は本体を実行せず構文だけ検証する（throw すれば SyntaxError）
+    expect(() => new Function(m![1])).not.toThrow();
+  });
+
+  test("N15: /files/_focus は files-focus.json を返す（無ければ {}）", async () => {
+    const res0 = filesRequest("/files/_focus");
+    expect(res0.status).toBe(200);
+    expect(await res0.json()).toEqual({}); // 未作成時
+    const fp = join(root, ".team/files-focus.json");
+    writeFileSync(
+      fp,
+      JSON.stringify({ rootKey: "docs", relPath: "sub/file.md", ts: 123 }),
+    );
+    try {
+      const res = filesRequest("/files/_focus");
+      expect(res.headers.get("Content-Type") ?? "").toContain("application/json");
+      expect(await res.json()).toEqual({
+        rootKey: "docs",
+        relPath: "sub/file.md",
+        ts: 123,
+      });
+    } finally {
+      rmSync(fp);
+    }
+  });
+
+  test("N16: shell に追従モードのポーリング（/files/_focus）と expandTo がある", async () => {
+    const shell = await filesRequest("/files/").text();
+    expect(shell).toContain('fetch("/files/_focus")');
+    expect(shell).toContain("setInterval(pollFocus,1000)");
+    expect(shell).toContain("function expandTo(");
   });
 });
