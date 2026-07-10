@@ -1941,10 +1941,8 @@ export async function startDashboard(
         left: state.confirmingFullQuit
           ? [
               ui.text(t("key_modal_full_quit_prompt"), { bold: true }),
-              ui.kbd("Y"),
-              ui.text(t("key_modal_confirm")),
-              ui.kbd("n"),
-              ui.text(t("key_modal_cancel")),
+              ui.row({ gap: 0 }, [ui.kbd("Y"), ui.text(t("key_modal_confirm"))]),
+              ui.row({ gap: 0 }, [ui.kbd("n"), ui.text(t("key_modal_cancel"))]),
             ]
           : (() => {
               // T435: registry-driven status bar (旧 8 分岐の手書き定義は廃止)
@@ -1955,8 +1953,7 @@ export async function startDashboard(
                 const keyLabel = it.key === "cc" && state.cChordPending != null
                   ? t("chord_pending_indicator")
                   : it.key;
-                out.push(ui.kbd(keyLabel));
-                out.push(ui.text(it.text));
+                out.push(ui.row({ gap: 0 }, [ui.kbd(keyLabel), ui.text(it.text)]));
               }
               return out;
             })(),
