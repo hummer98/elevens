@@ -244,3 +244,70 @@ describe("planLayoutRestore: T027 broken+surface_missing 早期 discard", () => 
     expect(plan.discarded).toHaveLength(0);
   });
 });
+
+describe("planLayoutRestore: daemon 自 surface の self-close guard", () => {
+  // 回帰: 過去に Conductor だった surface で `elevens start` すると、pid_dead のまま
+  //   残った entry が C (cleanup-stale) に分類され、daemon が起動直後に自分の pane を
+  //   閉じて SIGTERM で自滅していた（Brainship 2026-07-18 23:59 / uptime 5s）。
+  test("daemonSurface が C 分類に該当しても cleanup されず discard に倒れる", () => {
+    const conductors = [{ surface: "surface:165", pid: 9001 }];
+    const live = new Set(["surface:165"]);
+    const plan = planLayoutRestore(
+      conductors,
+      live,
+      ALL_DEAD,
+      [],
+      "surface:165",
+    );
+    // 自分の surface は絶対に閉じない
+    expect(plan.cleanup).toHaveLength(0);
+    // entry 自体は stale なので pool からは外す
+    expect(plan.alive).toHaveLength(0);
+    expect(plan.discarded).toEqual([
+      { surface: "surface:165", reason: "daemon_surface_self_close_guard" },
+    ]);
+  });
+
+  test("daemonSurface 以外の C 該当 surface は従来通り cleanup される", () => {
+    const conductors = [
+      { surface: "surface:165", pid: 9001 },
+      { surface: "surface:166", pid: 9002 },
+    ];
+    const live = new Set(["surface:165", "surface:166"]);
+    const plan = planLayoutRestore(
+      conductors,
+      live,
+      ALL_DEAD,
+      [],
+      "surface:165",
+    );
+    expect(plan.cleanup).toEqual(["surface:166"]);
+    expect(plan.discarded).toEqual([
+      { surface: "surface:165", reason: "daemon_surface_self_close_guard" },
+      { surface: "surface:166", reason: "pid_dead_idle_cleanup" },
+    ]);
+  });
+
+  test("daemonSurface 未指定なら guard は無効（既存挙動を維持）", () => {
+    const conductors = [{ surface: "surface:165", pid: 9001 }];
+    const live = new Set(["surface:165"]);
+    const plan = planLayoutRestore(conductors, live, ALL_DEAD, []);
+    expect(plan.cleanup).toEqual(["surface:165"]);
+    expect(plan.discarded[0]!.reason).toBe("pid_dead_idle_cleanup");
+  });
+
+  test("daemonSurface が pid 生存なら A (keep-alive) のままで guard は介入しない", () => {
+    const conductors = [{ surface: "surface:165", pid: 9001 }];
+    const live = new Set(["surface:165"]);
+    const plan = planLayoutRestore(
+      conductors,
+      live,
+      aliveOf(9001),
+      [],
+      "surface:165",
+    );
+    expect(plan.alive).toHaveLength(1);
+    expect(plan.cleanup).toHaveLength(0);
+    expect(plan.discarded).toHaveLength(0);
+  });
+});

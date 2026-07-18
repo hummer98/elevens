@@ -59,12 +59,15 @@ export interface LayoutRestorePlan {
  * @param liveSurfaces       c11 tree から取得した実在 surface の集合（必須。tree 失敗時は呼び出し元が exit 1 する）
  * @param isAlive            PID 生存判定（テスト時は mock で差し替える）
  * @param resumePlan         main.ts 側で worktree 実在 + sessionId 有を保証済みの resume 計画
+ * @param daemonSurface      daemon 自身が動作している surface。C (cleanup-stale) の close 対象から
+ *                           除外する self-close guard に使う（未指定なら guard 無効）
  */
 export function planLayoutRestore(
   conductorsFromJson: any[],
   liveSurfaces: Set<string>,
   isAlive: (pid: number) => boolean,
   resumePlan: ResumePlanItem[],
+  daemonSurface?: string | null,
 ): LayoutRestorePlan {
   const alive: RestoreEntry[] = [];
   const resumeExisting: RestoreEntry[] = [];
@@ -119,6 +122,17 @@ export function planLayoutRestore(
     }
     if (surfaceExists && !runningTask) {
       // C: pid 死亡 + idle の残骸 pane → close
+      //   self-close guard: daemon 自身が動作している surface は絶対に close しない。
+      //   過去に Conductor だった surface で `elevens start` すると、その entry が
+      //   team.json に pid_dead のまま残っているため C に分類され、daemon が起動直後に
+      //   自分の足元の pane を閉じて SIGTERM で自滅する事故があった
+      //   （Brainship 2026-07-18 23:59: daemon_surface M[165] の 1 秒後に
+      //     surface_closed surface:165 reason=conductor_stale_pid_dead_idle → uptime 5s）。
+      //   entry は stale なので pool からは外すが、surface には触れず discard に倒す。
+      if (daemonSurface && c.surface === daemonSurface) {
+        discarded.push({ surface: c.surface, reason: "daemon_surface_self_close_guard" });
+        continue;
+      }
       cleanup.push(c.surface);
       discarded.push({ surface: c.surface, reason: "pid_dead_idle_cleanup" });
       continue;

@@ -1390,6 +1390,12 @@ async function applyDiscardOnly(
         "conductor_pruned",
         `${formatSurface(d.surface, "C")} reason=${d.reason}`,
       );
+    } else if (d.reason === "daemon_surface_self_close_guard") {
+      // self-close guard 発動は必ず観測できるようにする（起動時自滅の再発検知用）。
+      await log(
+        "conductor_self_close_guarded",
+        `${formatSurface(d.surface, "C")} reason=${d.reason} detail=daemon_own_surface_kept_open`,
+      );
     }
   }
 }
@@ -1487,6 +1493,9 @@ export async function initializeLayout(
     liveSurfaces,
     cmux.isAlive,
     resumePlan ?? [],
+    // self-close guard: daemon 自身の surface を C (close) 対象から外す。
+    //   引数の daemonSurface は state.daemonSurface より先に確定するため優先で使う。
+    daemonSurface ?? state.daemonSurface,
   );
 
   // T286 + T346: A=0 かつ B=0 (keep-alive も既存 pane resume も無い) なら
