@@ -24,7 +24,7 @@
  */
 
 import { join, dirname, basename, resolve } from "path";
-import { existsSync, writeFileSync, mkdirSync, watch, realpathSync } from "fs";
+import { existsSync, writeFileSync, mkdirSync, watch, realpathSync, statSync, readFileSync } from "fs";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "os";
 import { readFile, readdir, writeFile, mkdir, stat, unlink } from "fs/promises";
@@ -121,6 +121,7 @@ import {
   resolveFetchBeforeWorktree,
   resolveGcConfig,
   resolveDashboardPort,
+  resolveDashboardLanAccess,
   isTokenPoolEnabled,
   buildSelectTokenPolicy,
   DEFAULT_MODEL,
@@ -217,6 +218,65 @@ export class RegisterSelfError extends Error {
   }
 }
 
+/**
+ * `dir` が git linked worktree のルートなら、その worktree が属する main worktree
+ * root を返す。`dir` が主 worktree / 通常 repo / 非 git なら null を返す。
+ *
+ * 判定は `<dir>/.git` の形態で行う（サブプロセス不要・純粋 sync fs）:
+ *  - directory → 主 worktree または通常 repo → null
+ *  - file（gitfile "gitdir: <path>"）→ linked worktree
+ *    gitdir から `commondir`（通常 "../.."）を辿って main の共通 .git を得て、
+ *    その親を main worktree root として返す。
+ *
+ * `findProjectRoot` は同期関数かつモジュールロード時に呼ばれるため、git コマンドの
+ * spawn を避けてこの gitfile 直読方式を採る。worktree の配置場所（`.worktrees/` 規約か
+ * 否か）にも依存しない。
+ */
+export function linkedWorktreeMainRoot(dir: string): string | null {
+  const gitPath = join(dir, ".git");
+  let st: ReturnType<typeof statSync>;
+  try {
+    st = statSync(gitPath);
+  } catch {
+    return null; // .git が無い → 非 git
+  }
+  if (st.isDirectory()) return null; // 主 worktree or 通常 repo
+  let content: string;
+  try {
+    content = readFileSync(gitPath, "utf-8");
+  } catch {
+    return null;
+  }
+  const m = content.match(/^gitdir:\s*(.+)$/m);
+  if (!m || !m[1]) return null; // gitfile ではない（submodule 以外の未知形式含む）
+  const gitDir = resolve(dir, m[1].trim()); // <root>/.git/worktrees/<name>
+  let commonDir: string;
+  try {
+    commonDir = resolve(gitDir, readFileSync(join(gitDir, "commondir"), "utf-8").trim());
+  } catch {
+    commonDir = resolve(gitDir, "../.."); // commondir 不在時の標準レイアウト fallback
+  }
+  return dirname(commonDir); // <root>
+}
+
+/**
+ * `cwd` が git linked worktree 配下なら、その worktree root を返す。違えば null。
+ *
+ * `findProjectRoot` は worktree→main root へ自動アタッチするため戻り値からは worktree で
+ * 動いていることが分からない。CLI 表示（`status` ヘッダ等）で「worktree から実行中」を
+ * 明示するために cwd 側から独立して判定する。
+ */
+export function detectInvocationWorktree(cwd: string = process.cwd()): string | null {
+  let dir = cwd;
+  for (let i = 0; i < 20; i++) {
+    if (linkedWorktreeMainRoot(dir) !== null) return dir; // dir が worktree root
+    const parent = join(dir, "..");
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
 export function findProjectRoot(opts?: { flag?: string }): string {
   // 1. --project-root flag（最優先、strict 検証あり、throw する）
   //    library import 経路（flag 未指定）は throw しないので、現行 fall-through を維持する
@@ -238,7 +298,17 @@ export function findProjectRoot(opts?: { flag?: string }): string {
   // 3. .team/ を含むディレクトリを探す
   let dir = process.cwd();
   for (let i = 0; i < 10; i++) {
-    if (existsSync(join(dir, ".team"))) return dir;
+    if (existsSync(join(dir, ".team"))) {
+      // linked worktree 内で見つけた .team/ は checkout されたコピーであり、
+      // ランタイム state（team.json 等）は main worktree root にしか無い。
+      // worktree なら親（main root）へ自動アタッチする。ただし main root も elevens
+      // project（.team/ を持つ）であることを確認し、submodule 誤検出を弾く。
+      const mainRoot = linkedWorktreeMainRoot(dir);
+      if (mainRoot && mainRoot !== dir && existsSync(join(mainRoot, ".team"))) {
+        return mainRoot;
+      }
+      return dir;
+    }
     const parent = join(dir, "..");
     if (parent === dir) break;
     dir = parent;
@@ -488,6 +558,10 @@ function hasFlag(name: string): boolean {
 //   3. env を flag 由来値で再上書き
 let PROJECT_ROOT = findProjectRoot();
 process.env.PROJECT_ROOT = PROJECT_ROOT;
+
+// CLI が worktree 配下から起動されたかを、下の `process.chdir(PROJECT_ROOT)` で
+// 元 cwd が失われる前に一度だけ捕捉する。`status` ヘッダの worktree 注記に使う。
+const INVOCATION_WORKTREE = detectInvocationWorktree();
 
 /** Task 440: write gate 用の snapshot。flag 経路でのみ設定される。 */
 let CWD_ROOT_FOR_GATE: string | undefined;
@@ -2087,6 +2161,13 @@ async function cmdStatus(): Promise<void> {
   const status = alive ? "RUNNING" : "STOPPED";
   const layout = typeof teamJson.layout === "string" ? teamJson.layout : "16x9";
   console.log(`elevens  ${status}  PID ${pid || "-"}  conductors ${conductors.length}  layout=${layout}`);
+
+  // worktree から実行された場合は main root にアタッチしている旨を明示する。
+  // （findProjectRoot が worktree→main root へ自動解決するため、戻り値だけでは分からない。
+  //   元 cwd は起動時 chdir で失われるので module-load 時に捕捉した値を使う）
+  if (INVOCATION_WORKTREE && INVOCATION_WORKTREE !== PROJECT_ROOT) {
+    console.log(t("status_worktree_note", { worktree: INVOCATION_WORKTREE, root: PROJECT_ROOT }));
+  }
 
   // T374: pool ヘッダー（forecast7d スパークライン + next 候補）を 1 行で表示。
   // OFF / 失敗時は summary=null となり pool ヘッダー行ごと省略する。

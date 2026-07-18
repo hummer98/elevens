@@ -160,8 +160,17 @@ skills/cmux-team/manager/
 |------|--------|---------|
 | 1 | `--project-root <path>` flag | 最優先 + strict。path 不在 → exit 1 (`error: project root not found: <path>`)。`<path>/.team/` 不在 → exit 1 (`error: not a cmux-team project: <path>`)。flag が指定されたら env は無視される |
 | 2 | `PROJECT_ROOT` env | 後方互換。path 不在は黙ってフォールバック（warn のみ）。throw しない |
-| 3 | cwd up-walk（最大 10 階層） | `.team/` を含む最近接 dir を採用 |
+| 3 | cwd up-walk（最大 10 階層） | `.team/` を含む最近接 dir を採用。ただし採用先が **linked worktree** なら main worktree root へ自動アタッチする（下記） |
 | 4 | `process.cwd()` fallback | 最後の手段 |
+
+**linked worktree からの自動アタッチ**: `.team/` は git 管理下（artifacts / agent-instructions）なので、
+`.worktrees/<taskRunId>/` にも `.team/` の**チェックアウトされたコピー**が存在する。ここには
+`team.json` / `task-state.json` といったランタイム state が無いため、worktree 内で `elevens` を
+実行すると誤った root に bind されていた。step 3 は採用候補が linked worktree（`.git` が gitfile で
+`commondir` を持つ）だと判定した場合、main worktree root に解決し直す。判定は git subprocess を使わず
+純粋な同期 fs 読みで行う（`findProjectRoot` が module load 時に走るため）。main root 側に `.team/` が
+無ければアタッチしない（submodule 誤検出の除外）。`status` は worktree から実行されたとき
+`↳ worktree <path> から実行（main root <path> にアタッチ）` を表示する。
 
 flag 経由で resolve した場合、`process.env.PROJECT_ROOT` も flag 由来値で再上書きされ、
 子プロセス（spawn-conductor / spawn-master / spawn-agent）にも継承される。

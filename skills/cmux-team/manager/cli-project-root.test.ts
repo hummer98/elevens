@@ -378,7 +378,7 @@ describe("--project-root read 系", () => {
         { cwd: proj.root },
       );
       expect(r.code).toBe(1);
-      expect(r.stderr).toContain("not a cmux-team project");
+      expect(r.stderr).toContain("not an elevens project");
     } finally {
       await proj.dispose();
       await rm(plain, { recursive: true, force: true });

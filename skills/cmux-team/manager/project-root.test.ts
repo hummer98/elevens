@@ -5,10 +5,10 @@
  * 既存経路は throw しない fall-through を維持することを保証する。
  */
 import { describe, test, expect, afterEach, beforeEach } from "bun:test";
-import { mkdtemp, mkdir, rm } from "fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, realpath } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import { findProjectRoot, ProjectRootError } from "./main";
+import { findProjectRoot, ProjectRootError, linkedWorktreeMainRoot, detectInvocationWorktree } from "./main";
 
 // 各テストで env / cwd を退避・復元する
 const ORIGINAL_PROJECT_ROOT = process.env.PROJECT_ROOT;
@@ -38,6 +38,37 @@ async function makeTeamProject(): Promise<{ root: string; dispose: () => Promise
     root,
     dispose: async () => {
       await rm(root, { recursive: true, force: true });
+    },
+  };
+}
+
+/**
+ * 主 worktree + linked worktree の最小レイアウトを組み立てる。
+ * git を実行せず、`.git`（dir）/ `.git`（gitfile）/ `commondir` を手で配置する。
+ *
+ *   <base>/main/                 ← main root（.team/ + .git ディレクトリ）
+ *          .git/worktrees/wt/commondir → "../.."
+ *          .worktrees/wt/        ← linked worktree（.team/ + .git gitfile）
+ */
+async function makeWorktreeProject(): Promise<{
+  mainRoot: string;
+  worktree: string;
+  dispose: () => Promise<void>;
+}> {
+  const base = await mkdtemp(join(tmpdir(), "cmux-team-wt-"));
+  const mainRoot = join(base, "main");
+  const worktree = join(mainRoot, ".worktrees", "wt");
+  const wtGitDir = join(mainRoot, ".git", "worktrees", "wt");
+  await mkdir(join(mainRoot, ".team"), { recursive: true });
+  await mkdir(join(worktree, ".team"), { recursive: true }); // checkout された .team/ コピー
+  await mkdir(wtGitDir, { recursive: true });
+  await writeFile(join(wtGitDir, "commondir"), "../..\n");
+  await writeFile(join(worktree, ".git"), `gitdir: ${wtGitDir}\n`);
+  return {
+    mainRoot,
+    worktree,
+    dispose: async () => {
+      await rm(base, { recursive: true, force: true });
     },
   };
 }
@@ -90,7 +121,7 @@ describe("findProjectRoot({ flag })", () => {
       }
       expect(captured).toBeInstanceOf(ProjectRootError);
       expect((captured as ProjectRootError).kind).toBe("not_a_project");
-      expect((captured as Error).message).toContain("not a cmux-team project");
+      expect((captured as Error).message).toContain("not an elevens project");
     } finally {
       await plain.dispose();
     }
@@ -147,6 +178,82 @@ describe("findProjectRoot({ flag })", () => {
       expect(r.endsWith(plain.root.split("/").pop()!)).toBe(true);
     } finally {
       await plain.dispose();
+    }
+  });
+
+  test("linked worktree 配下 → main root へ自動アタッチする", async () => {
+    const proj = await makeWorktreeProject();
+    try {
+      process.chdir(proj.worktree);
+      const r = findProjectRoot();
+      expect(await realpath(r)).toBe(await realpath(proj.mainRoot));
+    } finally {
+      await proj.dispose();
+    }
+  });
+
+  test("linked worktree の subdir 配下でも main root へ自動アタッチする", async () => {
+    const proj = await makeWorktreeProject();
+    try {
+      const sub = join(proj.worktree, "skills", "cmux-team");
+      await mkdir(sub, { recursive: true });
+      process.chdir(sub);
+      const r = findProjectRoot();
+      expect(await realpath(r)).toBe(await realpath(proj.mainRoot));
+    } finally {
+      await proj.dispose();
+    }
+  });
+});
+
+describe("linkedWorktreeMainRoot / detectInvocationWorktree", () => {
+  test("linkedWorktreeMainRoot: worktree root → main root を返す", async () => {
+    const proj = await makeWorktreeProject();
+    try {
+      const r = linkedWorktreeMainRoot(proj.worktree);
+      expect(r).not.toBeNull();
+      expect(await realpath(r!)).toBe(await realpath(proj.mainRoot));
+    } finally {
+      await proj.dispose();
+    }
+  });
+
+  test("linkedWorktreeMainRoot: 主 worktree（.git が dir）→ null", async () => {
+    const proj = await makeWorktreeProject();
+    try {
+      // mainRoot は .git ディレクトリを持つので null
+      expect(linkedWorktreeMainRoot(proj.mainRoot)).toBeNull();
+    } finally {
+      await proj.dispose();
+    }
+  });
+
+  test("linkedWorktreeMainRoot: 非 git ディレクトリ → null", async () => {
+    const plain = await makePlainDir();
+    try {
+      expect(linkedWorktreeMainRoot(plain.root)).toBeNull();
+    } finally {
+      await plain.dispose();
+    }
+  });
+
+  test("detectInvocationWorktree: worktree subdir → worktree root を返す", async () => {
+    const proj = await makeWorktreeProject();
+    try {
+      const sub = join(proj.worktree, "a", "b");
+      await mkdir(sub, { recursive: true });
+      expect(await realpath(detectInvocationWorktree(sub)!)).toBe(await realpath(proj.worktree));
+    } finally {
+      await proj.dispose();
+    }
+  });
+
+  test("detectInvocationWorktree: 主 worktree 配下 → null", async () => {
+    const proj = await makeWorktreeProject();
+    try {
+      expect(detectInvocationWorktree(proj.mainRoot)).toBeNull();
+    } finally {
+      await proj.dispose();
     }
   });
 });

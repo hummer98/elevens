@@ -38,6 +38,7 @@ const en = {
     "Error: daemon is not running (proxy-port file not found)",
   team_not_started_start: "Team not started. Run `start` to initialize.",
   team_not_started: "Team not started.",
+  status_worktree_note: "↳ running from worktree {worktree} (attached to main root {root})",
   no_running_agents: "No running agents.",
   no_artifacts: "No artifacts found.",
   artifact_id_required:
@@ -1218,6 +1219,7 @@ const ja: typeof en = {
     "Error: daemon が起動していません（proxy-port が見つかりません）",
   team_not_started_start: "チーム未起動。`start` で起動してください。",
   team_not_started: "チーム未起動。",
+  status_worktree_note: "↳ worktree {worktree} から実行（main root {root} にアタッチ）",
   no_running_agents: "稼働中のエージェントはありません。",
   no_artifacts: "アーティファクトが見つかりません",
   artifact_id_required:
