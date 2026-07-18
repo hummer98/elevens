@@ -183,6 +183,12 @@ export interface DaemonState {
    */
   dashboardServerUrl?: string | null;
   /**
+   * dashboard server の LAN 公開 URL（`http://<LAN-IP>:<port>`）。`dashboard.lanAccess`
+   * 有効かつ LAN IPv4 検出時のみ非 null。updateTeamJson が `dashboardServer.lanUrl`
+   * として外部に公開し、Settings タブが QR 化する。loopback のみなら null。
+   */
+  dashboardServerLanUrl?: string | null;
+  /**
    * T416: 自動 GC の周期 timer ハンドル。cmdStart が `setInterval` で仕掛け、
    * stopDaemon が `clearInterval` で解放する。periodic GC が無効な場合は undefined。
    */
@@ -467,6 +473,7 @@ export async function createDaemon(
     tokenDbInitFailed: false,
     startedAt: "",
     dashboardServerUrl: null,
+    dashboardServerLanUrl: null,
     gcInterval: undefined,
     gcInFlight: false,
   };
@@ -5055,7 +5062,12 @@ export async function updateTeamJson(state: DaemonState): Promise<void> {
     // T414: 内部 Web ダッシュボードの URL を外部に公開する。dashboard 起動失敗時は
     // フィールド自体を削除する（古い値が残らないように）。
     if (state.dashboardServerUrl) {
-      teamJson.dashboardServer = { url: state.dashboardServerUrl, schemaVersion: 1 };
+      teamJson.dashboardServer = {
+        url: state.dashboardServerUrl,
+        // LAN 公開 URL（lanAccess 有効時のみ）。loopback のみなら lanUrl は省略する。
+        ...(state.dashboardServerLanUrl ? { lanUrl: state.dashboardServerLanUrl } : {}),
+        schemaVersion: 1,
+      };
     } else {
       delete teamJson.dashboardServer;
     }

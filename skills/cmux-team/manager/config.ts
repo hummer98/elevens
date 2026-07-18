@@ -173,6 +173,30 @@ export function resolveReservedRenameDelayMs(config: Pick<TeamConfig, "cmux">): 
 export interface DashboardConfig {
   /** 固定 listen port。未指定 / 0 = ephemeral（従来どおり）。整数 [1, 65535] のみ受理 */
   port?: number;
+  /**
+   * LAN 公開を有効にするか（default false）。
+   *
+   * - `false`（既定）: `127.0.0.1` のみに bind（loopback、従来どおり安全側）。
+   * - `true`: `0.0.0.0` に bind し、同一 LAN の他デバイス（スマホ等）から
+   *   `/files` ビューワーや metrics を閲覧可能にする。Settings タブに LAN URL の
+   *   QR コードを表示する。
+   *
+   * 観察箱をネットワークに晒す opt-in 設定。有効時は LAN 内の誰でも docs / metrics を
+   * 閲覧できる点に注意（認証は無い）。boolean 以外は false 扱い（fail-safe）。
+   */
+  lanAccess?: boolean;
+}
+
+/**
+ * `dashboard.lanAccess` を解決する。
+ *
+ * - 厳密に `true` のときのみ LAN 公開を有効化する。
+ * - undefined / false / 非 boolean → false（loopback、安全側）。
+ */
+export function resolveDashboardLanAccess(
+  config: Pick<TeamConfig, "dashboard">,
+): boolean {
+  return config.dashboard?.lanAccess === true;
 }
 
 /**

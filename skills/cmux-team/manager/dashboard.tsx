@@ -29,9 +29,12 @@ import {
   loadConfig,
   resolveMetricsRefreshIntervalMs,
   resolveProjectTokenPool,
+  resolveDashboardLanAccess,
   DEFAULT_MODEL,
   type TeamConfig,
 } from "./config";
+import { readDashboardLanUrl, filesViewerUrl } from "./files-open";
+import { buildQrMatrix } from "./dashboard-qr";
 // T035: Tasks リスト r キー昇格（task-state-store は dashboard を import しないため循環なし）
 import { applyTaskEvent } from "./state-machine/task-state-store";
 import { runReadySyncGuard } from "./ready-guard";
@@ -235,6 +238,10 @@ const YELLOW = rgb(200, 160, 0);
 const RED = rgb(180, 40, 40);
 const CYAN = rgb(0, 180, 180);
 const GRAY = rgb(130, 130, 130);
+// QR レンダ用。dark は純黒（rgb(0,0,0) は rezi の unset sentinel なので near-black に逃がす）、
+// light は白。各モジュールを 2 スペース幅で塗ってアスペクト比を正方形に近づける。
+const QR_DARK = rgb(8, 8, 8);
+const QR_LIGHT = rgb(255, 255, 255);
 
 function nerdIcon(nerd: string, fallback: string): string {
   return process.env.CMUX_NERD_FONT === "0" ? fallback : nerd;
@@ -552,6 +559,27 @@ async function loadSettingsItems(projectRoot: string): Promise<SettingsItem[]> {
       cfg.metricsRefreshIntervalMs === undefined ? " (default)" : ""
     }`,
   });
+  items.push({
+    kind: "config",
+    label: "dashboard.lanAccess",
+    value: resolveDashboardLanAccess(cfg) ? "true" : "false (default)",
+  });
+
+  // docs WebServer (/files ビューワー) の LAN QR。lanAccess 有効かつ LAN URL 取得時のみ
+  // QR を描く。無効時は有効化方法のヒントを表示する（matrix=null）。
+  items.push({ kind: "section", label: "Docs WebServer (scan to read on phone)" });
+  const lanAccess = resolveDashboardLanAccess(cfg);
+  const lanUrl = readDashboardLanUrl(projectRoot);
+  const filesUrl = lanUrl ? filesViewerUrl(lanUrl) : null;
+  let matrix: boolean[][] | null = null;
+  if (filesUrl) {
+    try {
+      matrix = buildQrMatrix(filesUrl);
+    } catch {
+      matrix = null; // QR 生成失敗時は URL だけ表示する
+    }
+  }
+  items.push({ kind: "qr", lanAccess, url: filesUrl, matrix });
 
   return items;
 }
@@ -579,6 +607,13 @@ type SettingsItem =
       kind: "config";
       label: string;
       value: string;
+    }
+  | {
+      // docs WebServer の LAN QR（lanAccess 有効時のみ matrix/url が埋まる）
+      kind: "qr";
+      lanAccess: boolean;
+      url: string | null; // filesViewerUrl(lanUrl)。未公開なら null
+      matrix: boolean[][] | null; // url があれば QR 行列、無ければ null
     };
 
 export interface IssueListItem {
@@ -1362,7 +1397,30 @@ function buildLogRows(lines: string[]) {
   });
 }
 
-function buildSettingsRows(state: AppState): any[] {
+/**
+ * QR 行列を rezi-ui ノード（1 行 = ui.row）に変換する。各 dark/light モジュールを
+ * 2 スペース幅の bg 色で塗る。同色の連続モジュールは 1 つの ui.text に run-length
+ * 圧縮してノード数を抑える（version 3 で 33×33 → 行あたり最大数十ノード）。
+ */
+function buildQrUiRows(matrix: boolean[][]): any[] {
+  const rows: any[] = [];
+  for (const line of matrix) {
+    const segs: any[] = [];
+    let runStart = 0;
+    for (let c = 1; c <= line.length; c++) {
+      if (c === line.length || line[c] !== line[runStart]) {
+        const runLen = c - runStart;
+        const color = line[runStart] ? QR_DARK : QR_LIGHT;
+        segs.push(ui.text("  ".repeat(runLen), { style: { bg: color } }));
+        runStart = c;
+      }
+    }
+    rows.push(ui.row({}, segs));
+  }
+  return rows;
+}
+
+export function buildSettingsRows(state: AppState): any[] {
   const items = state.settingsItems;
   if (items.length === 0) {
     return [ui.text("loading settings…", { dim: true })];
@@ -1392,6 +1450,24 @@ function buildSettingsRows(state: AppState): any[] {
           ui.text(sizeLabel, { dim: true }),
         ]),
       );
+      continue;
+    }
+
+    if (item.kind === "qr") {
+      if (!item.lanAccess) {
+        rows.push(ui.text("  LAN 公開は無効です（dashboard.lanAccess: false）", { dim: true }));
+        rows.push(ui.text("  .team/config.json に \"dashboard\": { \"lanAccess\": true } を設定し", { dim: true }));
+        rows.push(ui.text("  daemon を再起動するとスマホ用 QR を表示します", { dim: true }));
+      } else if (!item.url || !item.matrix) {
+        rows.push(ui.text("  LAN 公開は有効ですが URL を取得できません", { dim: true }));
+        rows.push(ui.text("  （daemon 未起動 / LAN IPv4 未検出）", { dim: true }));
+      } else {
+        rows.push(ui.text("  スマホのカメラで読み取って docs を開く:", { dim: true }));
+        rows.push(ui.text(""));
+        for (const r of buildQrUiRows(item.matrix)) rows.push(r);
+        rows.push(ui.text(""));
+        rows.push(ui.text(`  ${item.url}`, { style: { fg: CYAN } }));
+      }
       continue;
     }
 

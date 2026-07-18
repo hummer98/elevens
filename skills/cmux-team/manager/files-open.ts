@@ -82,6 +82,22 @@ export function readDashboardUrl(projectRoot: string): string | null {
   }
 }
 
+/**
+ * `.team/team.json` から dashboard server の LAN 公開 URL を読む。
+ * `dashboard.lanAccess` 無効 or LAN IP 不明なら null（フィールド自体が無い）。
+ */
+export function readDashboardLanUrl(projectRoot: string): string | null {
+  const p = join(projectRoot, ".team", "team.json");
+  if (!existsSync(p)) return null;
+  try {
+    const tj = JSON.parse(readFileSync(p, "utf-8"));
+    const url = tj?.dashboardServer?.lanUrl;
+    return typeof url === "string" && url ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 /** dashboard URL から `/files` ビューワー URL を組む（末尾 slash を正規化）。 */
 export function filesViewerUrl(dashboardUrl: string): string {
   return dashboardUrl.replace(/\/+$/, "") + "/files";

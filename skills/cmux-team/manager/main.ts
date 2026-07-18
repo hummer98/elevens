@@ -1315,20 +1315,29 @@ async function cmdStart(): Promise<void> {
     if (dashPort.invalidReason !== undefined) {
       await log("dashboard_port_config_invalid", `reason=${dashPort.invalidReason}`);
     }
+    const dashLanAccess = resolveDashboardLanAccess(startConfig);
     const dashboardHandle = await startDashboardServer({
       projectRoot: PROJECT_ROOT,
       version,
       getState: () => state,
       htmlBundle: getDashboardHtml,
       port: dashPort.port,
+      lanAccess: dashLanAccess,
     });
     state.dashboardServerUrl = dashboardHandle.url;
+    state.dashboardServerLanUrl = dashboardHandle.lanUrl;
     await log(
       "dashboard_server_started",
-      `url=${dashboardHandle.url} port=${dashboardHandle.port} port_source=${dashPort.source}`,
+      `url=${dashboardHandle.url} lan_url=${dashboardHandle.lanUrl ?? "(none)"} ` +
+        `lan_access=${dashLanAccess} port=${dashboardHandle.port} port_source=${dashPort.source}`,
     );
+    if (dashLanAccess && dashboardHandle.lanUrl === null) {
+      // LAN 公開を要求したが IPv4 を検出できなかった。loopback では使えるが QR は出ない。
+      await log("dashboard_lan_ip_not_found", "lanAccess=true but no non-internal IPv4 interface");
+    }
   } catch (e: any) {
     state.dashboardServerUrl = null;
+    state.dashboardServerLanUrl = null;
     await log("dashboard_server_start_failed", e?.message ?? String(e));
   }
 

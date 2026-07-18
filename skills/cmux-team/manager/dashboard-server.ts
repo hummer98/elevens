@@ -13,6 +13,7 @@
  */
 import { Database } from "bun:sqlite";
 import { join } from "path";
+import { networkInterfaces } from "os";
 import {
   initDB,
   countToolCallsByPeriod,
@@ -47,8 +48,14 @@ import { log } from "./logger";
 export interface DashboardServerHandle {
   /** listen 中のポート番号（ephemeral または固定） */
   port: number;
-  /** http://127.0.0.1:<port> 形式の URL */
+  /** http://127.0.0.1:<port> 形式の URL（同一マシン向け、常にセット） */
   url: string;
+  /**
+   * http://<LAN-IP>:<port> 形式の URL（別デバイス向け）。
+   * `lanAccess` 有効かつ LAN IPv4 を検出できたときのみ非 null。
+   * loopback のみ（lanAccess=false）or LAN IP 不明なら null。
+   */
+  lanUrl: string | null;
   /** server を停止する。本番 lifecycle では呼ばないが、テストで Bun ランナーをハングさせない用途 */
   stop: () => void;
 }
@@ -102,6 +109,12 @@ export interface DashboardServerOptions {
    * （ユーザーが固定した意図に対する silent mutation を避ける）。
    */
   port?: number;
+  /**
+   * LAN 公開を有効にするか（default false）。
+   * true のとき `0.0.0.0` に bind し、`lanUrl`（http://<LAN-IP>:<port>）を算出する。
+   * false（既定）は `127.0.0.1` のみに bind し `lanUrl` は null。
+   */
+  lanAccess?: boolean;
 }
 
 /**
@@ -737,6 +750,27 @@ async function safeReadLifecycle(
   }
 }
 
+/**
+ * 非 internal な IPv4 アドレス（LAN IP）を 1 つ返す。検出できなければ null。
+ *
+ * - link-local（169.254.x.x）は除外する（DHCP 失敗時のアドレスで到達性が無い）。
+ * - 複数 NIC がある場合は networkInterfaces の列挙順で最初に見つかったものを採用する。
+ *   仮想 NIC（VPN / docker bridge 等）が先に来ると意図しない IP を拾う可能性はあるが、
+ *   LAN 公開は opt-in かつ QR / team.json で実 URL を確認できるため許容する。
+ */
+export function getLanIPv4(): string | null {
+  const ifaces = networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const info of ifaces[name] ?? []) {
+      if (info.family !== "IPv4") continue;
+      if (info.internal) continue;
+      if (info.address.startsWith("169.254.")) continue;
+      return info.address;
+    }
+  }
+  return null;
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // startDashboardServer
 // ────────────────────────────────────────────────────────────────────────
@@ -874,10 +908,13 @@ export async function startDashboardServer(
 
   // T034: 固定 port 指定（default 0 = ephemeral）。bind 失敗時は fallback せず throw。
   const requestedPort = opts.port ?? 0;
+  // LAN 公開（opt-in）。有効時は全 IF に bind し別デバイスから到達可能にする。
+  const lanAccess = opts.lanAccess === true;
+  const hostname = lanAccess ? "0.0.0.0" : "127.0.0.1";
   let server: ReturnType<typeof Bun.serve>;
   try {
     server = Bun.serve({
-      hostname: "127.0.0.1",
+      hostname,
       port: requestedPort,
       fetch: async (req) => {
         try {
@@ -928,10 +965,18 @@ export async function startDashboardServer(
 
   const port = server.port!;
   const url = `http://127.0.0.1:${port}`;
+  // LAN 公開時のみ別デバイス向け URL を算出する。LAN IP 不明なら null（bind は成功
+  // しているので server 自体は loopback では使える）。
+  let lanUrl: string | null = null;
+  if (lanAccess) {
+    const ip = getLanIPv4();
+    lanUrl = ip ? `http://${ip}:${port}` : null;
+  }
 
   return {
     port,
     url,
+    lanUrl,
     stop: () => {
       try {
         server.stop();

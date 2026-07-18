@@ -8,6 +8,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import {
   startDashboardServer,
   parsePeriodQuery,
+  getLanIPv4,
   type DashboardServerHandle,
 } from "./dashboard-server";
 import { createDummyProject, type DummyProject } from "./test-project";
@@ -702,6 +703,58 @@ describe("dashboard-server: fixed port (T034)", () => {
       expect(err!.message).toContain(String(blockedPort));
     } finally {
       blocker.stop(true);
+    }
+  });
+});
+
+describe("dashboard-server: LAN 公開 (lanAccess) と lanUrl", () => {
+  let project: DummyProject;
+  let handle: DashboardServerHandle | null = null;
+
+  beforeEach(async () => {
+    project = await createDummyProject({
+      prefix: "cmux-team-dashboard-lan-",
+      subdirs: ["logs", "traces"],
+    });
+  });
+
+  afterEach(async () => {
+    handle?.stop();
+    handle = null;
+    await project.dispose();
+  });
+
+  test("lanAccess 未指定 → lanUrl は null（loopback のみ）", async () => {
+    handle = await startDashboardServer({ projectRoot: project.root });
+    expect(handle.lanUrl).toBeNull();
+    expect(handle.url).toContain("127.0.0.1");
+  });
+
+  test("lanAccess=false → lanUrl は null", async () => {
+    handle = await startDashboardServer({ projectRoot: project.root, lanAccess: false });
+    expect(handle.lanUrl).toBeNull();
+  });
+
+  test("lanAccess=true → lanUrl は LAN IP があれば http://<ip>:<port>、無ければ null", async () => {
+    handle = await startDashboardServer({ projectRoot: project.root, lanAccess: true });
+    const ip = getLanIPv4();
+    if (ip) {
+      expect(handle.lanUrl).toBe(`http://${ip}:${handle.port}`);
+      // loopback URL も従来どおりセットされる
+      expect(handle.url).toBe(`http://127.0.0.1:${handle.port}`);
+      // LAN 公開時も loopback 経由でアクセスできる（0.0.0.0 bind）
+      const res = await fetch(`${handle.url}/api/health`);
+      expect(res.status).toBe(200);
+    } else {
+      expect(handle.lanUrl).toBeNull();
+    }
+  });
+
+  test("getLanIPv4 は string | null を返し throw しない", () => {
+    const ip = getLanIPv4();
+    expect(ip === null || typeof ip === "string").toBe(true);
+    if (ip) {
+      expect(ip.startsWith("169.254.")).toBe(false);
     }
   });
 });

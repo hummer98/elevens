@@ -17,6 +17,7 @@ import {
   resolveGcConfig,
   resolvePostMortemConfig,
   resolveDashboardPort,
+  resolveDashboardLanAccess,
   loadGlobalConfig,
   type TeamConfig,
   type GlobalConfig,
@@ -660,6 +661,34 @@ describe("resolveDashboardPort (T034)", () => {
       expect(r.source).toBe("default");
       expect(typeof r.invalidReason).toBe("string");
       expect((r.invalidReason ?? "").length).toBeGreaterThan(0);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// resolveDashboardLanAccess (docs WebServer QR)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("resolveDashboardLanAccess", () => {
+  test("未指定 → false（loopback、安全側）", () => {
+    expect(resolveDashboardLanAccess({})).toBe(false);
+    expect(resolveDashboardLanAccess({ dashboard: {} })).toBe(false);
+  });
+
+  test("true のときだけ有効", () => {
+    expect(resolveDashboardLanAccess({ dashboard: { lanAccess: true } })).toBe(true);
+  });
+
+  test("false → false", () => {
+    expect(resolveDashboardLanAccess({ dashboard: { lanAccess: false } })).toBe(false);
+  });
+
+  test("非 boolean（truthy 含む）は false 扱い（fail-safe）", () => {
+    const bogus: unknown[] = [1, "true", {}, [], "yes"];
+    for (const v of bogus) {
+      expect(
+        resolveDashboardLanAccess({ dashboard: { lanAccess: v as boolean } }),
+      ).toBe(false);
     }
   });
 });

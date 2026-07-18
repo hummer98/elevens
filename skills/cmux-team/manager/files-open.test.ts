@@ -11,6 +11,7 @@ import {
   resolveFocusTarget,
   writeFilesFocus,
   readDashboardUrl,
+  readDashboardLanUrl,
   filesViewerUrl,
 } from "./files-open";
 
@@ -87,5 +88,23 @@ describe("files-open: writeFilesFocus / readDashboardUrl / filesViewerUrl", () =
   test("filesViewerUrl は末尾 slash を正規化して /files を付ける", () => {
     expect(filesViewerUrl("http://127.0.0.1:8765")).toBe("http://127.0.0.1:8765/files");
     expect(filesViewerUrl("http://127.0.0.1:8765/")).toBe("http://127.0.0.1:8765/files");
+  });
+
+  test("readDashboardLanUrl は dashboardServer.lanUrl を返す / 無ければ null", async () => {
+    // 直前テストで url のみの team.json が書かれている → lanUrl は無いので null
+    expect(readDashboardLanUrl(root)).toBeNull();
+    await writeFile(
+      join(root, ".team/team.json"),
+      JSON.stringify({
+        dashboardServer: {
+          url: "http://127.0.0.1:8765",
+          lanUrl: "http://192.168.1.50:8765",
+          schemaVersion: 1,
+        },
+      }),
+    );
+    expect(readDashboardLanUrl(root)).toBe("http://192.168.1.50:8765");
+    // url は据え置きで読める
+    expect(readDashboardUrl(root)).toBe("http://127.0.0.1:8765");
   });
 });

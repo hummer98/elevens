@@ -76,6 +76,29 @@ default は ephemeral port なので **daemon 再起動で URL は変わる**。
 
 **bind 失敗時の挙動**: 指定 port の bind 失敗（EADDRINUSE / EACCES 等）時は **ephemeral へフォールバックせず** dashboard 起動を即時失敗させる（ユーザーが port を固定した意図に対する silent mutation を避ける fail-fast）。`startDashboardServer` が要求 port を含む error message で throw し、`main.ts` の既存 catch が `dashboard_server_start_failed` を log する。daemon 本体は継続（T414 の fail-soft 境界、§2.4 と同じ）。このとき `dashboardServerUrl=null` のため team.json に `dashboardServer` は載らず、TUI `O` キーは `metrics_url_not_running` 表示となる。起動成功時は `dashboard_server_started url=... port=... port_source=<config|default>` が log される。
 
+### 2.3.1 LAN 公開（`dashboard.lanAccess`）+ QR コード
+
+スマホ等の別デバイスから `/files` ビューワーや metrics を閲覧するための **opt-in** 設定。
+
+```json
+{ "dashboard": { "lanAccess": true } }
+```
+
+| | `lanAccess: false`（既定） | `lanAccess: true` |
+|---|---|---|
+| bind アドレス | `127.0.0.1`（loopback のみ） | `0.0.0.0`（全インターフェース） |
+| `dashboardServer.url` | `http://127.0.0.1:<port>` | 同左（常にセット） |
+| `dashboardServer.lanUrl` | フィールドごと無し | `http://<LAN-IP>:<port>` |
+| 別デバイスからの到達 | 不可（接続拒否） | 可能 |
+
+> ⚠️ **認証は一切ない。** 有効化すると、到達可能なネットワーク上の誰でも `/files`（`docs/` / `.team/artifacts/` / `.team/output/`）と metrics API を閲覧できる。bind 先は `0.0.0.0` = 全インターフェースであり、公衆 Wi-Fi やグローバル IP を持つ環境では LAN を超えて露出する。信頼できるネットワークでのみ有効化すること。
+
+**解決経路**: `config.lanAccess` → `resolveDashboardLanAccess`（`=== true` の厳密判定。非 boolean / undefined は `false` に倒す fail-safe）→ `startDashboardServer({ lanAccess })` → `0.0.0.0` bind + `getLanIPv4()` → `handle.lanUrl` → `DaemonState.dashboardServerLanUrl` → `updateTeamJson` が `dashboardServer.lanUrl` として書き出す（`url` と同じ atomic write 経路）。
+
+**LAN IP の選択**: `getLanIPv4()` は `os.networkInterfaces()` の列挙順で最初の非 internal IPv4 を採る（link-local `169.254.x.x` は除外）。VPN / docker bridge の仮想 NIC が先に来ると意図しない IP を拾いうるが、実 URL は QR と `team.json` で確認できるため許容する。`lanAccess: true` でも IPv4 を検出できなければ `lanUrl` は `null` のままで `dashboard_lan_ip_not_found` を log する（bind 自体は成功しており loopback では引き続き使える）。
+
+**TUI Settings タブの QR**: `lanUrl` が取れているとき、Settings タブに `/files` ビューワー URL の QR コードを描画する（`dashboard-qr.ts` の `buildQrMatrix` / `buildQrUiRows`、`qrcode-generator` 依存）。`lanUrl` が無い場合は QR の代わりに URL を取得できない旨のヒントを表示する。
+
 ### 2.4 lifecycle — shutdown 時に明示停止しない
 
 `shutdown()` (`main.ts:816`) および `onFullQuit` 経路では **`server.stop()` を呼ばない**。process.exit による OS 級の close に委ねる。
