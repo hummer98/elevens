@@ -214,6 +214,24 @@ c11 substrate の default title setter（W-A: c11 binary 由来、常時発火�
 
 > スコープ注記: タスク名による recap 上書き（動的書き換え）は本対応の範囲外で、`title_reassert` ログ + c11 `get-metadata` による継続観察に委ねる。
 
+### 1.9 daemon 起動時の layout restore (A〜E) と self-close guard
+
+daemon 起動時、`initializeLayout` は `team.json` の `conductors` 配列を `planLayoutRestore`（`layout-restore.ts`、副作用なしの pure function）で **A〜E** に分類する。判定材料は「surface が c11 tree に実在するか」「`pid` が生存しているか」「その Conductor に running task（`resumePlan` にマッチする `taskId`）があるか」の 3 つ。
+
+| 分類 | 条件 | 動作 |
+|---|---|---|
+| A `keep-alive` | PID 生存 | そのまま `state.conductors` に登録 |
+| B `resume-existing` | surface 実在 + PID 死亡 + running task | 既存 pane に対して session-id resume |
+| C `cleanup-stale` | surface 実在 + PID 死亡 + task なし | 残骸 pane を `closeSurface(..., "conductor_stale_pid_dead_idle")` で close |
+| D `resume-new-surface` | surface 消失 + running task | 新 pane を作って session-id resume |
+| E `discard` | surface 消失 + task なし | entry のみ破棄（`surface_missing_no_task`） |
+
+- 例外 1（T027 / C-I6）: `status=broken && surface ∉ tree` は PID 判定より**先に** E に倒す（`broken_surface_missing`）。broken Conductor は `pid` がクリアされないまま team.json に残るため、PID recycle で誤って A に流入するのを防ぐ。
+- 例外 2（**self-close guard**）: C に該当しても、その surface が **daemon 自身が動作している surface**（`initializeLayout` の `daemonSurface` 引数 → なければ `state.daemonSurface`）なら close せず E 相当の discard に倒す（`daemon_surface_self_close_guard`）。entry は stale なので pool からは外すが、pane には触れない。
+- tree 取得に失敗した場合は pid のみでの degrade 判定を行わず、呼び出し元（`daemon.ts`）が retry → exit 1 する（T016）。
+
+**self-close guard の背景**: 過去に Conductor だった surface で `elevens start` すると、`pid_dead` のまま残った entry が C に分類され、daemon が起動直後に自分の足元の pane を close して SIGTERM で自滅する事故があった（`daemon_surface M[165]` の 1 秒後に `surface_closed reason=conductor_stale_pid_dead_idle` → `daemon_stopped uptime_sec=5`）。ガードは pure function 側に置いてあるため、`applyRestorePlan` / `applyDiscardOnly` の両経路が同時に守られる。発動時は `conductor_self_close_guarded ... detail=daemon_own_surface_kept_open` を `manager.log` に記録し、再発を retrospective に検知できるようにする（observatory 原則: 無言で分岐しない）。
+
 ## 2. Task FSM
 
 ### 2.1 状態一覧 (6 値)

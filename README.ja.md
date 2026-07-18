@@ -97,6 +97,7 @@ elevens は `c11` バイナリを次の順で探します: (1) c11.app から la
 | `autoUpdate` | `"off"` \| `"notify"` | `"off"` | バージョン検出モード（上記参照）。上書き: 環境変数 `CMUX_TEAM_AUTO_UPDATE`。 |
 | `models.master` / `models.conductor` / `models.agent` | string | Claude デフォルト | ロール別モデル指定（例: `"claude-sonnet-4-6"`）。 |
 | `dashboard.port` | number | `0`（ephemeral） | Web dashboard server の固定 listen port (T034)。整数 `[1, 65535]` のみ受理。固定すると daemon 再起動を跨いで URL が安定しブックマーク可能。未指定 / `0` / 不正値は ephemeral にフォールバック。詳細は `docs/spec/12-web-dashboard.md`。 |
+| `dashboard.lanAccess` | boolean | `false` | Web dashboard を LAN に公開し、スマホ等の別デバイスから `/files` を閲覧できるようにする opt-in 設定。`true` で `0.0.0.0` に bind し、`.team/team.json` に `dashboardServer.lanUrl`（`http://<LAN-IP>:<port>`）を書き出して TUI の `Settings` タブ（`4` キー）に `/files` ビューワーの QR コードを表示します。厳密に `true` のときだけ有効（それ以外は `false` に倒す）。**⚠️ 認証はありません** — 到達可能なネットワーク上の誰でも `docs/` / `.team/artifacts/` / `.team/output/` と metrics API を閲覧できます。信頼できるネットワークでのみ有効にしてください。詳細は `docs/spec/12-web-dashboard.md` §2.3.1。 |
 | `envrcHookPromptSkipped` | boolean | `false` | direnv hook プロンプトをスキップした際の内部フラグ。通常手動編集しません。 |
 | `cmux.reservedRenameDelayMs` | number | `800` | c11 のタブ名固定タイミング調整 (T026)。reserved Conductor pane を再 rename するまでの遅延（ms、`[0, 60000]` にクランプ）。c11 の default title setter に後着で勝つための待ち時間で、将来の c11 update で title timing が変わったら延長する。 |
 
@@ -282,7 +283,7 @@ Manager は Claude Code セッションではなく、**TypeScript の決定論�
 - **ファイルベースのタスク状態**（`.team/tasks/` + `task-state.json`）
 - **zod** によるメッセージスキーマ検証
 - **ink** ベースの TUI ダッシュボード
-- **Web ファイルビューワー** (`/files`) — `docs/` / `.team/artifacts/` / `.team/output/` をブラウザで 2 ペイン閲覧（Markdown レンダリング・HTML レポート/画像表示・更新日時ソート・タイプフィルター）。URL は `.team/team.json` の `dashboardServer.url` + `/files`。`elevens open <file>` で開いているタブが該当ファイルに自動追従（タブを増やさない）
+- **Web ファイルビューワー** (`/files`) — `docs/` / `.team/artifacts/` / `.team/output/` をブラウザで 2 ペイン閲覧（Markdown レンダリング・HTML レポート/画像表示・更新日時ソート・タイプフィルター）。**時系列モード**（`time` チップ）では 3 ルートを横断して更新が新しい順にタイトルで一覧でき、ペイン間の仕切りはドラッグで幅変更できます（どちらも `localStorage` に保存）。URL は `.team/team.json` の `dashboardServer.url` + `/files`。`elevens open <file>` で開いているタブが該当ファイルに自動追従（タブを増やさない）。`dashboard.lanAccess: true` にするとスマホから LAN 経由で閲覧できます（TUI `Settings` タブに QR コード。**認証は無い**点に注意）
 - **タスク依存解決** (`depends_on` フィールド)
 - **優先度ソート** (high > medium > low)
 - **Agent 完了は fs.watch**（Agent の Stop / SessionEnd hook が done マーカーを書き、Conductor が `elevens await-agent` で待機。busy polling 不要、T181）

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.0] - 2026-07-19
+
+### Added
+
+- **dashboard の LAN 公開と QR コード表示を追加**: `.team/config.json` に `{"dashboard": {"lanAccess": true}}` を設定すると dashboard server が LAN からアクセス可能になり、TUI の Settings タブに `/files` ビューワーの QR コードが表示される。スマホなど別デバイスからドキュメントや成果物を閲覧できる。**認証は無いため、到達可能なネットワーク上の誰でも `docs/` / `.team/artifacts/` / `.team/output/` と metrics を閲覧できる点に注意**（既定は `false` で従来どおり `127.0.0.1` のみに bind）。詳細は `docs/spec/12-web-dashboard.md` §2.3.1
+- **`/files` ビューワーに時系列モードを追加**: 左ペインの view 切替で、`docs/` / `.team/artifacts/` / `.team/output/` を横断した「最近更新された順」の一覧を表示できる。ツリーを辿らずに直近の成果物へ到達できる。左ペインは可動スプリッターで幅を変更でき、表示モードと幅はブラウザに保存される。詳細は §8.8
+
+### Fixed
+
+- **worktree 内で `elevens` コマンドが誤ったプロジェクトに紐づく不具合を修正**: `.team/` は git 管理下にあるため `.worktrees/<taskRunId>/` にもコピーが存在し、worktree 内でコマンドを実行するとランタイム状態を持たないそのコピーを project root として採用してしまっていた。linked worktree を検出して main worktree root へ自動的にアタッチするようにした。`elevens status` は worktree から実行された場合にアタッチ先を表示する
+- **daemon が起動直後に自分自身の surface を閉じて自滅する不具合を修正**: 過去に Conductor だった surface で `elevens start` を実行すると、`team.json` に残った古いエントリが「pid の死んだ残骸」と判定され、daemon が自分の動作している pane を閉じて数秒で終了していた。起動時の layout 復元で daemon 自身の surface を close 対象から除外するガードを追加した
+- **`clear-conductor` した surface で `spawn-conductor` すると Master として登録されてしまう不具合を修正**: `clear-conductor` された surface からの再登録を無言で恒久拒否していたため、その後 `spawn-conductor` を実行しても Conductor として登録されず、Master 用のフォールバック経路に落ちていた。この恒久拒否を撤去し、クリア後の surface を通常どおり Conductor として再利用できるようにした。あわせて `clear-conductor` は自分が起動した Agent の surface のみを閉じるようにし、同じ pane に同居する無関係な surface を巻き込まないようにした
+- **dashboard footer のキーヒント表示を修正** (T040): キーと説明が離れて表示されていたのを密着表示にした
+
 ## [0.16.0] - 2026-06-22
 
 ### Added

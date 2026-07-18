@@ -467,7 +467,7 @@ e2e-results/
 
 `output/`, `prompts/`, `queue/` はタスク中心フォルダ集約への移行で実体としては未使用だが、過去バージョンとの互換のため引き続き ignore に列挙されている。`team.json` は daemon が自動更新する派生物のため追跡しない（以前は追跡対象だったが v3.41 以降で無視に変更）。`task-state.json` は resume に必要なため追跡する。
 
-**`team.json` の主要フィールド** (T414): `manager` / `masters[]` / `conductors[]` / `phase` / `layout` に加え、daemon が internal Web ダッシュボード起動時に `dashboardServer: { url: "http://127.0.0.1:<port>", schemaVersion: 1 }` を atomic write する（外部から read-only で参照する公開チャネル）。詳細は [`12-web-dashboard.md`](12-web-dashboard.md) §2.3。
+**`team.json` の主要フィールド** (T414): `manager` / `masters[]` / `conductors[]` / `phase` / `layout` に加え、daemon が internal Web ダッシュボード起動時に `dashboardServer: { url: "http://127.0.0.1:<port>", schemaVersion: 1 }` を atomic write する（外部から read-only で参照する公開チャネル）。`dashboard.lanAccess` 有効かつ LAN IPv4 を検出できたときのみ `lanUrl: "http://<LAN-IP>:<port>"` が追加される（無効時・IP 未検出時はフィールドごと省略）。詳細は [`12-web-dashboard.md`](12-web-dashboard.md) §2.3 / §2.3.1。
 
 **Post-mortem evidence files** (T010): daemon は起動時から以下のファイルを書き始める。詳細は [`15-post-mortem-evidence.md`](15-post-mortem-evidence.md):
 

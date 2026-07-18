@@ -97,6 +97,7 @@ Created per-project by `elevens start`. All keys are optional — the file can b
 | `autoUpdate` | `"off"` \| `"notify"` | `"off"` | Version detection mode (see above). Override: env `CMUX_TEAM_AUTO_UPDATE`. |
 | `models.master` / `models.conductor` / `models.agent` | string | Claude defaults | Per-role model selection (e.g. `"claude-sonnet-4-6"`). |
 | `dashboard.port` | number | `0` (ephemeral) | Fixed listen port for the web dashboard server (T034). Accepts integers in `[1, 65535]` only. Pinning it keeps the URL stable across daemon restarts (bookmarkable). Unset / `0` / invalid values fall back to an ephemeral port. See `docs/spec/12-web-dashboard.md`. |
+| `dashboard.lanAccess` | boolean | `false` | Expose the web dashboard on your LAN so you can read `/files` from a phone or another machine. `true` binds to `0.0.0.0` and writes `dashboardServer.lanUrl` (`http://<LAN-IP>:<port>`) to `.team/team.json`; the TUI `Settings` tab (`4` key) then shows a QR code for the `/files` viewer. Only the literal value `true` enables it (anything else falls back to `false`). **⚠️ There is no authentication** — anyone who can reach your machine on the network can read `docs/` / `.team/artifacts/` / `.team/output/` and the metrics API. Enable it only on trusted networks. See `docs/spec/12-web-dashboard.md` §2.3.1. |
 | `envrcHookPromptSkipped` | boolean | `false` | Internal flag set when the user declines the direnv hook prompt — normally not edited by hand. |
 | `cmux.reservedRenameDelayMs` | number | `800` | c11 title-pinning tuning knob (T026). Delay (ms, clamped to `[0, 60000]`) before re-renaming a reserved Conductor pane so the fixed tab name wins over c11's default title setter. Raise this if a future c11 update shifts the title timing. |
 
@@ -285,7 +286,7 @@ The Manager is **not** a Claude Code session. It's a TypeScript program with a d
 - **File-based task state** (`.team/tasks/` + `task-state.json`)
 - **zod** schema validation for all messages
 - **ink** TUI dashboard
-- **Web file viewer** (`/files`) — browse `docs/` / `.team/artifacts/` / `.team/output/` in a browser with a 2-pane layout (Markdown rendering, HTML report / image serving, mtime sorting, type filtering). URL is `dashboardServer.url` in `.team/team.json` + `/files`. `elevens open <file>` makes the open tab follow to that file (no new tabs)
+- **Web file viewer** (`/files`) — browse `docs/` / `.team/artifacts/` / `.team/output/` in a browser with a 2-pane layout (Markdown rendering, HTML report / image serving, mtime sorting, type filtering). A **time-series mode** (`time` chip) lists every file across all three roots newest-first by title instead of by directory, and the pane divider is draggable — both are remembered in `localStorage`. URL is `dashboardServer.url` in `.team/team.json` + `/files`. `elevens open <file>` makes the open tab follow to that file (no new tabs). Set `dashboard.lanAccess: true` to read it from a phone over the LAN (QR code in the TUI `Settings` tab — note there is **no authentication**)
 - **Task dependency resolution** via `depends_on` field
 - **Priority sorting** (high > medium > low)
 - **Agent completion via fs.watch** — Agent's Stop / SessionEnd hook writes a done marker, Conductor awaits it with `elevens await-agent` (no busy polling, T181)
