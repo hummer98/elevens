@@ -13,7 +13,17 @@
  *  - realpath 境界チェックで root 外へ抜ける symlink を 404 に閉じる
  *    （root 側も realpath する — macOS の /var → /private/var 対策）
  */
-import { lstatSync, realpathSync, statSync, readdirSync, readFileSync, existsSync } from "fs";
+import {
+  lstatSync,
+  realpathSync,
+  statSync,
+  readdirSync,
+  readFileSync,
+  existsSync,
+  openSync,
+  readSync,
+  closeSync,
+} from "fs";
 import { join, sep, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -234,9 +244,17 @@ const SHELL_STYLE = `
 html,body{height:100%;margin:0}
 body{font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--fg);background:var(--bg)}
 #app{display:flex;height:100vh}
-#tree{width:280px;min-width:280px;display:flex;flex-direction:column;background:var(--panel);border-right:1px solid var(--border)}
+#tree{width:280px;min-width:160px;max-width:70vw;flex:none;display:flex;flex-direction:column;background:var(--panel)}
 #treehdr{flex:none;position:sticky;top:0;z-index:1;background:var(--panel);border-bottom:1px solid var(--border);padding:6px 8px;display:flex;flex-direction:column;gap:6px}
-#treebody{flex:1;overflow:auto;padding:8px 0}
+#treebody,#flatbody{flex:1;overflow:auto;padding:8px 0}
+/* 表示モード: mode-time で tree を隠し flat list を出す。sort は tree 専用（時系列固定） */
+#flatbody{display:none}
+#tree.mode-time #treebody{display:none}
+#tree.mode-time #flatbody{display:block}
+#tree.mode-time #sortgrp{display:none}
+/* スプリッター: ドラッグで左ペイン幅を変更 */
+#splitter{flex:none;width:5px;cursor:col-resize;background:var(--border)}
+#splitter:hover,#splitter.drag{background:var(--accent)}
 .hgroup{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
 .hlabel{color:var(--fg-dim);font-size:10px;text-transform:uppercase;letter-spacing:.04em;margin-right:2px;flex:none}
 .btn{cursor:pointer;border:1px solid var(--border);background:var(--bg);color:var(--fg-dim);border-radius:4px;padding:2px 7px;font-size:11px;line-height:1.4;user-select:none}
@@ -260,6 +278,9 @@ body{font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif
 .row.dir.open>.label::before{content:"\\25be ";color:var(--fg-dim)}
 .row.dir>.label::before{content:"\\25b8 ";color:var(--fg-dim)}
 .row .meta{margin-left:auto;color:var(--fg-dim);font-size:11px;flex:none}
+/* flat 行: タイトルは ellipsis で切る（時系列モードはタイトルが主役） */
+.row.flat>.label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.trunc{color:var(--fg-dim);font-style:italic;padding:6px 10px;font-size:11px}
 .ns{padding:24px}
 .ns a{color:var(--accent)}
 `.trim();
@@ -270,12 +291,15 @@ const SHELL_SCRIPT = `
 (function(){
   var tree=document.getElementById("tree");
   var treebody=document.getElementById("treebody");
+  var flatbody=document.getElementById("flatbody");
   var view=document.getElementById("view");
   var selected=null;
   var IMG=["png","jpg","jpeg","gif","svg","webp","bmp","ico","avif"];
   var sortKey="mtime",sortDir="desc";       // 既定: 更新日降順
+  var mode="tree";                            // 表示モード: tree | time
   var containers=[];                          // 既ロード children コンテナ（sort 再適用用）
   try{var p=JSON.parse(localStorage.getItem("filesSort")||"{}");if(p.key)sortKey=p.key;if(p.dir)sortDir=p.dir;}catch(e){}
+  try{if(localStorage.getItem("filesMode")==="time")mode="time";}catch(e){}
   function enc(segs){return segs.map(encodeURIComponent).join("/");}
   function dash(v){return (v===null||v===undefined||v==="")?"-":String(v);}
   function typeOf(name){
@@ -360,6 +384,64 @@ const SHELL_SCRIPT = `
     }).catch(function(){container.textContent="(error)";});
   }
   function loadDir(container,segs){return loadInto(container,segs,"/files/"+enc(segs)+"/?format=json");}
+  // ---- 時系列モード（flat list）: /files/_flat を表示。順序はサーバー確定（mtime 降順）----
+  function makeFlatNode(e){
+    var node=document.createElement("div");
+    node.className="node";
+    node.dataset.type=typeOf(e.name);
+    node._rootKey=e.rootKey;node._relPath=e.relPath;
+    var row=document.createElement("div");
+    row.className="row file flat";
+    row.title=e.rootKey+"/"+e.relPath;         // フルパスは tooltip で補完
+    var label=document.createElement("span");
+    label.className="label";
+    label.textContent=e.title||e.name;
+    var meta=document.createElement("span");
+    meta.className="meta";
+    meta.textContent=dash(e.mtimeLocal);
+    row.appendChild(label);row.appendChild(meta);
+    node.appendChild(row);
+    node._select=function(){
+      if(selected)selected.classList.remove("selected");
+      row.classList.add("selected");selected=row;
+      var segs=[e.rootKey],rest=String(e.relPath||"").split("/");
+      for(var i=0;i<rest.length;i++){if(rest[i])segs.push(rest[i]);}
+      view.src="/files/"+enc(segs);
+      node.scrollIntoView({block:"nearest"});
+    };
+    row.addEventListener("click",node._select);
+    return node;
+  }
+  function loadFlat(){
+    return fetch("/files/_flat").then(function(r){return r.json();}).then(function(data){
+      flatbody.textContent="";
+      var entries=(data&&data.entries)||[];
+      for(var i=0;i<entries.length;i++)flatbody.appendChild(makeFlatNode(entries[i]));
+      if(data&&data.truncated){var t=document.createElement("div");t.className="trunc";t.textContent="(truncated)";flatbody.appendChild(t);}
+    }).catch(function(){flatbody.textContent="(error)";});
+  }
+  function selectFlat(rootKey,relPath){
+    for(var i=0;i<flatbody.children.length;i++){
+      var n=flatbody.children[i];
+      if(n._rootKey===rootKey&&n._relPath===relPath){if(n._select)n._select();return true;}
+    }
+    return false;
+  }
+  // ---- mode header ----
+  var modeBtns=document.querySelectorAll("#modegrp .btn");
+  function applyMode(){
+    tree.classList.toggle("mode-time",mode==="time");
+    for(var i=0;i<modeBtns.length;i++)modeBtns[i].classList.toggle("on",modeBtns[i].dataset.mode===mode);
+    if(mode==="time")loadFlat();               // 切替のたびに再取得（新規ファイルを反映）
+  }
+  for(var mi=0;mi<modeBtns.length;mi++){(function(b){
+    b.addEventListener("click",function(){
+      if(mode===b.dataset.mode)return;
+      mode=b.dataset.mode;
+      try{localStorage.setItem("filesMode",mode);}catch(e){}
+      applyMode();
+    });
+  })(modeBtns[mi]);}
   // ---- sort header ----
   var sortBtns=document.querySelectorAll("#sortgrp .btn");
   function paintSort(){
@@ -407,9 +489,40 @@ const SHELL_SCRIPT = `
   }
   function pollFocus(){
     fetch("/files/_focus").then(function(r){return r.json();}).then(function(f){
-      if(f&&f.ts&&f.ts!==focusTs){focusTs=f.ts;expandTo(f.rootKey,f.relPath);}
+      if(f&&f.ts&&f.ts!==focusTs){
+        focusTs=f.ts;
+        if(mode==="time"){
+          // flat list に無い（新規作成直後の）ファイルは再取得してから選択
+          if(!selectFlat(f.rootKey,f.relPath))loadFlat().then(function(){selectFlat(f.rootKey,f.relPath);});
+        }else expandTo(f.rootKey,f.relPath);
+      }
     }).catch(function(){});
   }
+  // ---- スプリッター: pointer drag で左ペイン幅を変更（localStorage 永続化）----
+  var splitter=document.getElementById("splitter");
+  try{var w0=parseInt(localStorage.getItem("filesPaneW")||"",10);if(w0>=160)tree.style.width=w0+"px";}catch(e){}
+  splitter.addEventListener("pointerdown",function(ev){
+    ev.preventDefault();
+    splitter.setPointerCapture(ev.pointerId);
+    splitter.classList.add("drag");
+    view.style.pointerEvents="none";           // ドラッグ中に iframe が pointer を食わないように
+    function move(e2){
+      var maxW=Math.floor(window.innerWidth*0.7);
+      if(!(maxW>160))maxW=160;               // innerWidth が取れない / 極小時も下限 160 を保証
+      var w=Math.max(160,Math.min(e2.clientX,maxW));
+      tree.style.width=w+"px";
+    }
+    function up(){
+      splitter.removeEventListener("pointermove",move);
+      splitter.removeEventListener("pointerup",up);
+      splitter.classList.remove("drag");
+      view.style.pointerEvents="";
+      try{localStorage.setItem("filesPaneW",String(parseInt(tree.style.width,10)||280));}catch(e){}
+    }
+    splitter.addEventListener("pointermove",move);
+    splitter.addEventListener("pointerup",up);
+  });
+  applyMode();
   loadInto(treebody,[],"/files/?format=json").then(function(){pollFocus();}); // root ノード生成後に初回 poll
   setInterval(pollFocus,1000);
 })();
@@ -417,7 +530,9 @@ const SHELL_SCRIPT = `
 
 /**
  * 2 ペイン shell HTML（root index の差し替え）。
- *  - 左 `#tree`: rootKey / dir をクリックで lazy 展開（`?format=json`）するツリー
+ *  - 左 `#tree`: rootKey / dir をクリックで lazy 展開（`?format=json`）するツリー、
+ *    または時系列 flat list（`/files/_flat`、view チップで切替・localStorage 永続化）
+ *  - `#splitter`: pointer drag で左ペイン幅を変更（localStorage 永続化）
  *  - 右 `#view`: 既存 `/files/<path>` 配信経路を再利用する iframe（sandbox なし）
  *  - inline ダークテーマ CSS（SPA `style.css` と同配色トーン）
  *  - `<noscript>`: JS 無効時の 3 rootKey 直リンク（既存 root index assert の後継）
@@ -435,6 +550,9 @@ function renderFilesShellHtml(): string {
     `<div id="app">` +
     `<aside id="tree" aria-label="file tree">` +
     `<div id="treehdr">` +
+    `<div class="hgroup" id="modegrp"><span class="hlabel">view</span>` +
+    `<span class="btn" data-mode="tree" title="ツリー表示">tree</span>` +
+    `<span class="btn" data-mode="time" title="時系列表示（タイトル・更新日降順）">time</span></div>` +
     `<div class="hgroup" id="sortgrp"><span class="hlabel">sort</span>` +
     `<span class="btn" data-key="name" title="名前順">name</span>` +
     `<span class="btn" data-key="mtime" title="更新日時順">mtime</span>` +
@@ -445,7 +563,9 @@ function renderFilesShellHtml(): string {
     `<span class="btn" data-type="image" title="画像の表示切替">img</span></div>` +
     `</div>` +
     `<div id="treebody"></div>` +
+    `<div id="flatbody"></div>` +
     `</aside>` +
+    `<div id="splitter" title="ドラッグで幅変更"></div>` +
     `<main id="viewpane"><iframe id="view" title="file view"></iframe></main>` +
     `</div>` +
     `<noscript><div class="ns"><p>JavaScript を有効にするとツリー表示が使えます。</p>` +
@@ -483,6 +603,143 @@ function listDirEntries(absDir: string, prefix: string | null): DirEntryRow[] {
     a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : a.name.localeCompare(b.name),
   );
   return rows;
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// flat listing（時系列モード）
+// ────────────────────────────────────────────────────────────────────────
+
+/** flat list の返却上限。mtime 降順で新しい側から切る */
+const FLAT_MAX_ENTRIES = 500;
+/** flat walk の走査 file 数上限（巨大 output dir の暴走 backstop） */
+const FLAT_MAX_SCAN = 20000;
+/** md タイトル抽出で読む先頭バイト数 */
+const TITLE_HEAD_BYTES = 4096;
+
+/**
+ * md ファイルからタイトルを抽出する。優先順位:
+ *  1. frontmatter の `title:`（引用符は剥がす）
+ *  2. 最初の ATX 見出し（`# ...`）
+ *  3. どちらも無ければ null（呼び出し側がファイル名に fallback）
+ * 先頭 4KB しか読まない（タイトルは先頭にある前提。巨大ファイルを読み切らない）。
+ */
+export function extractMdTitle(absPath: string): string | null {
+  let head: string;
+  try {
+    const fd = openSync(absPath, "r");
+    try {
+      const buf = Buffer.alloc(TITLE_HEAD_BYTES);
+      const n = readSync(fd, buf, 0, TITLE_HEAD_BYTES, 0);
+      head = buf.subarray(0, n).toString("utf-8");
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+  const lines = head.split("\n");
+  if (lines[0]?.trim() === "---") {
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i]!;
+      if (line.trim() === "---") break;
+      const m = line.match(/^title:\s*(.+?)\s*$/);
+      if (m) {
+        const title = m[1]!.replace(/^(["'])(.*)\1$/, "$2").trim();
+        if (title !== "") return title;
+      }
+    }
+  }
+  for (const line of lines) {
+    const m = line.match(/^#{1,6}\s+(.+?)\s*#*\s*$/);
+    if (m) return m[1]!.trim();
+  }
+  return null;
+}
+
+interface FlatEntryRow {
+  rootKey: string;
+  relPath: string;
+  name: string;
+  size: number | null;
+  mtimeMs: number;
+}
+
+/**
+ * 全 rootKey を再帰走査して file を集める。symlink は file / dir とも辿らない
+ * （root 外への escape とループを walk 段階で断つ。tree 表示は従来どおり
+ * resolveFilePath の realpath 境界で個別に守られる）。
+ */
+function walkFlatEntries(projectRoot: string): { rows: FlatEntryRow[]; truncated: boolean } {
+  const rows: FlatEntryRow[] = [];
+  let truncated = false;
+  for (const [rootKey, rootRel] of Object.entries(ROOT_DIRS)) {
+    const rootAbs = join(projectRoot, rootRel);
+    const stack: string[] = [""];
+    while (stack.length > 0) {
+      const rel = stack.pop()!;
+      const absDir = rel === "" ? rootAbs : join(rootAbs, rel);
+      let names: string[];
+      try {
+        names = readdirSync(absDir);
+      } catch {
+        continue;
+      }
+      for (const name of names) {
+        if (rows.length >= FLAT_MAX_SCAN) {
+          truncated = true;
+          return { rows, truncated };
+        }
+        const relPath = rel === "" ? name : `${rel}/${name}`;
+        let st: ReturnType<typeof lstatSync>;
+        try {
+          st = lstatSync(join(absDir, name));
+        } catch {
+          continue;
+        }
+        if (st.isSymbolicLink()) continue;
+        if (st.isDirectory()) {
+          stack.push(relPath);
+        } else if (st.isFile()) {
+          rows.push({ rootKey, relPath, name, size: st.size, mtimeMs: st.mtimeMs });
+        }
+      }
+    }
+  }
+  return { rows, truncated };
+}
+
+/**
+ * 時系列モードの JSON payload。mtime 降順で上限 FLAT_MAX_ENTRIES 件。
+ * タイトル抽出は返却対象（上位 N 件）に絞ってから行う。
+ */
+export function listFlatEntries(projectRoot: string): {
+  entries: Array<{
+    rootKey: string;
+    relPath: string;
+    name: string;
+    title: string;
+    size: number | null;
+    mtimeLocal: string;
+  }>;
+  truncated: boolean;
+} {
+  const { rows, truncated } = walkFlatEntries(projectRoot);
+  rows.sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name));
+  const top = rows.slice(0, FLAT_MAX_ENTRIES);
+  const entries = top.map((r) => {
+    const abs = join(projectRoot, ROOT_DIRS[r.rootKey]!, r.relPath);
+    const title = r.name.toLowerCase().endsWith(".md") ? extractMdTitle(abs) : null;
+    return {
+      rootKey: r.rootKey,
+      relPath: r.relPath,
+      name: r.name,
+      title: title ?? r.name,
+      size: r.size,
+      // 表示専用のローカルタイム文字列のみ載せる（mtimeMs は JSON に出さない / m4）
+      mtimeLocal: formatLocalMtime(r.mtimeMs),
+    };
+  });
+  return { entries, truncated: truncated || rows.length > FLAT_MAX_ENTRIES };
 }
 
 function renderDirIndexHtml(
@@ -620,6 +877,10 @@ export function handleFilesRequest(
   // `.team/files-focus.json` を素通しで返す（無ければ空オブジェクト）。実 path 解決の前に分岐する。
   if (url.pathname === "/files/_focus") {
     return fileJsonResponse(readFilesFocus(projectRoot), baseHeaders);
+  }
+  // 時系列モード: 全 rootKey 横断の flat list（mtime 降順・タイトル付き）
+  if (url.pathname === "/files/_flat") {
+    return fileJsonResponse(listFlatEntries(projectRoot), baseHeaders);
   }
   const r = resolveFilePath(projectRoot, url.pathname);
   // dir / root_index は ?format=json で JSON serialize（ツリー lazy load 用）。

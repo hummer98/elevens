@@ -335,6 +335,7 @@ T038 で UI を **左サイドバー = ファイル/ディレクトリツリー�
 |---|---|
 | `GET /files`（`format` なし） | 2 ペイン shell HTML（左ツリー + 右 iframe、ダークテーマ inline） |
 | `GET /files/?format=json` | rootKey 一覧 JSON（`{ entries: [{ name, isDir:true }] }`） |
+| `GET /files/_flat` | 全 rootKey 横断の flat list JSON（時系列モード用、§8.8） |
 | `GET /files/<rootKey>/<dir>?format=json` | dir entries JSON（ツリー lazy load 用、後述） |
 | `GET /files/<rootKey>/` | ディレクトリ index HTML（`?format` なし時のフォールバック） |
 | `GET /files/<rootKey>/<relpath>` | ファイル配信 |
@@ -394,10 +395,11 @@ path 解決（`resolveFilePath`）は以下の順で判定し、**throw しな�
 - ツリー JSON の lazy fetch は `connect-src 'self'` で許可済み。
 - `default-src 'self'` のため**外部 CDN 等を参照する HTML は完全表示されない**。task report 等は self-contained HTML（CSS / JS inline）のみ完全表示できる、という制約を仕様として受け入れる（report 生成側がこの制約に合わせる）。`dashboard-server.ts` の変更は `/files` 委譲時の CSP 1 行差し替えのみで、routing 構造・`CSP_HEADER` 本体は不変。
 
-### 8.6 左ペインヘッダ — sort / type filter
+### 8.6 左ペインヘッダ — view / sort / type filter
 
-左ペイン `#tree` は **固定ヘッダ `#treehdr`（sticky）+ スクロール本体 `#treebody`** の 2 段構成。全処理は SPA の inline JS（外部 src なし）で完結し、サーバ JSON（§8.3 の `?format=json`）の追加は不要。
+左ペイン `#tree` は **固定ヘッダ `#treehdr`（sticky）+ スクロール本体（`#treebody` または `#flatbody`）** の 2 段構成。全処理は SPA の inline JS（外部 src なし）で完結する。
 
+- **view**: `tree` / `time` の表示モードチップ。`tree` は従来のツリー、`time` は全 rootKey 横断の時系列 flat list（§8.8）。切替は `#tree` への `mode-time` クラストグルのみで、ツリーの展開状態は破壊しない。`time` 中は sort チップを隠す（順序はサーバ確定の mtime 降順固定）。type filter は両モードに効く。設定は `localStorage["filesMode"]` に保存。
 - **sort**: `name` / `mtime` / `size` のアイコンチップ。アクティブキーを再クリックで昇順 ⇄ 降順をトグル（アクティブに `▾`/`▴` を表示）。**既定は `mtime` 降順**（新着アーティファクトが上＝observatory の既定）。
   - 並べ替えは**既存 DOM ノードを `appendChild` で移動**して行うため、展開済みサブツリー・選択状態を破壊しない。`mtime` は `mtimeLocal`（`YYYY-MM-DD HH:mm`）の辞書順＝時系列順を利用（数値 `mtimeMs` は §8.3 どおり JSON に載せない）。同値は名前で tiebreak。**ディレクトリは常に先頭・名前昇順固定**（ナビゲーション安定性のため）。
 - **type filter**: `md` / `html` / `image` の On/Off チップ。OFF にすると `#tree` に `hide-<type>` クラスが付き、CSS `#tree.hide-<type> .node[data-type="<type>"]{display:none}` で該当 **file ノードのみ**隠す（**dir は常に表示**、`other` 型は対象外で常に表示）。DOM 再構築せず class トグルのみなので展開状態を保つ。`image` は `png/jpg/jpeg/gif/svg/webp/bmp/ico/avif`。
@@ -415,6 +417,19 @@ path 解決（`resolveFilePath`）は以下の順で判定し、**throw しな�
 - **server**: `GET /files/_focus` が `.team/files-focus.json` を素通しで返す（無ければ `{}`）。実 path 解決の前に分岐する read-only endpoint。
 - **SPA**: ~1s 間隔で `/files/_focus` をポーリングし、`ts` が前回と変われば `expandTo(rootKey, relPath)` でツリーを該当パスまで lazy 展開しつつ右 iframe を差し替える（`_open`/`_select` を programmatic に呼ぶ。click と同じ経路）。`ts` 不変の間は何もしない。
 - **追加 state を持たない**: focus は単一ファイルの last-write-wins。複数 viewer が開いていれば全タブが同じ focus に追従する。`.team/files-focus.json` は per-project runtime（`.gitignore` 対象）。
+- **時系列モードとの関係**: `time` モード中の focus は flat list 内の該当行選択に置き換わる（無ければ `/files/_flat` を再取得してから選択）。
+
+### 8.8 時系列モード（`/files/_flat`）+ 可動スプリッター
+
+**時系列モード**は「いつ何が書かれたか」を横断的に追う observatory 向けビュー。左ペインを dir 階層でなく **mtime 降順の flat list** にし、各行は**ファイル名でなくタイトル**で表示する。
+
+- **server**: `GET /files/_flat` が全 rootKey（docs / artifacts / output）を再帰走査し、`{ entries: [{ rootKey, relPath, name, title, size, mtimeLocal }], truncated }` を返す。
+  - **順序はサーバ確定**（mtime 降順、同値は名前昇順）。`mtimeMs` は §8.3 どおり JSON に載せない。
+  - **title**: `.md` は frontmatter `title:` → 最初の ATX 見出し → ファイル名の優先順位（先頭 4KB のみ読む）。md 以外はファイル名。抽出は返却対象（上位 N 件）に絞ってから行う。
+  - **上限**: 返却 500 件（新しい側から）+ 走査 20,000 file の backstop。切り詰め時は `truncated: true`（SPA は末尾に `(truncated)` を表示し silent truncation を避ける）。
+  - **walk は symlink を file / dir とも辿らない**（root 外 escape とループを walk 段階で断つ。ツリー表示は従来どおり `resolveFilePath` の realpath 境界で個別に守られる）。
+- **SPA**: 行クリックで右 iframe に表示（ツリーと同じ `/files/<rootKey>/<relPath>` 経路）。行の tooltip にフルパス（`rootKey/relPath`）を出す。`time` モードへの切替のたびに `/files/_flat` を再取得して新規ファイルを反映する。
+- **スプリッター**: `#splitter`（左右ペイン間 5px）を pointer drag（`setPointerCapture`）して左ペイン幅を変更できる。幅は 160px〜画面幅 70% にクランプ（`innerWidth` が取れない環境でも下限 160px を保証）し、`localStorage["filesPaneW"]` に保存・リロードで復元。ドラッグ中は iframe の `pointer-events` を切って pointer の取りこぼしを防ぐ。
 
 ---
 

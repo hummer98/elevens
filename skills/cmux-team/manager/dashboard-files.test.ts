@@ -6,7 +6,7 @@
  * fs 依存は実 tmp dir で検証する（plan §8 / §9-2）。
  */
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtemp, rm, mkdir, writeFile, symlink } from "fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, symlink, utimes } from "fs/promises";
 import { realpathSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -15,6 +15,7 @@ import {
   contentTypeFor,
   handleFilesRequest,
   formatLocalMtime,
+  extractMdTitle,
 } from "./dashboard-files";
 
 const BASE_HEADERS = {
@@ -447,5 +448,131 @@ describe("dashboard-files: 2 ペイン shell + JSON / ローカルタイム (T03
     expect(shell).toContain('fetch("/files/_focus")');
     expect(shell).toContain("setInterval(pollFocus,1000)");
     expect(shell).toContain("function expandTo(");
+  });
+});
+
+describe("dashboard-files: 時系列モード + スプリッター (flat list)", () => {
+  let flatRoot: string;
+
+  beforeAll(async () => {
+    flatRoot = await mkdtemp(join(tmpdir(), "cmux-team-dashboard-flat-"));
+    await mkdir(join(flatRoot, "docs/sub"), { recursive: true });
+    await mkdir(join(flatRoot, ".team/artifacts"), { recursive: true });
+    await mkdir(join(flatRoot, ".team/output"), { recursive: true });
+    // frontmatter title 持ち（引用符付き）
+    await writeFile(
+      join(flatRoot, ".team/artifacts/A001-research.md"),
+      `---\nid: A001\ntitle: "調査: flat list の設計"\n---\n\n# 別見出し\n`,
+    );
+    // 見出しのみ
+    await writeFile(join(flatRoot, "docs/sub/guide.md"), "# ガイド見出し\n\n本文\n");
+    // タイトルなし md
+    await writeFile(join(flatRoot, "docs/plain.md"), "本文のみ\n");
+    // md 以外
+    await writeFile(join(flatRoot, ".team/output/report.html"), "<p>r</p>");
+    // root 外 symlink（flat walk は file / dir とも辿らない）
+    await writeFile(join(flatRoot, "outside.md"), "# outside\n");
+    await mkdir(join(flatRoot, "outside-dir"), { recursive: true });
+    await writeFile(join(flatRoot, "outside-dir/in.md"), "# in\n");
+    await symlink(join(flatRoot, "outside.md"), join(flatRoot, "docs/escape.md"));
+    await symlink(join(flatRoot, "outside-dir"), join(flatRoot, "docs/escape-dir"));
+    // mtime を固定して順序を決定論化（新しい順: A001 → guide → plain → report）
+    await utimes(join(flatRoot, ".team/artifacts/A001-research.md"), new Date(4000000), new Date(4000000));
+    await utimes(join(flatRoot, "docs/sub/guide.md"), new Date(3000000), new Date(3000000));
+    await utimes(join(flatRoot, "docs/plain.md"), new Date(2000000), new Date(2000000));
+    await utimes(join(flatRoot, ".team/output/report.html"), new Date(1000000), new Date(1000000));
+  });
+
+  afterAll(async () => {
+    await rm(flatRoot, { recursive: true, force: true });
+  });
+
+  function flatRequest(pathAndQuery: string): Response {
+    return handleFilesRequest(flatRoot, new URL(`http://127.0.0.1${pathAndQuery}`), {
+      ...BASE_HEADERS,
+    });
+  }
+
+  test("F1: extractMdTitle は frontmatter title > 先頭見出し > null の優先順位", () => {
+    expect(extractMdTitle(join(flatRoot, ".team/artifacts/A001-research.md"))).toBe(
+      "調査: flat list の設計",
+    );
+    expect(extractMdTitle(join(flatRoot, "docs/sub/guide.md"))).toBe("ガイド見出し");
+    expect(extractMdTitle(join(flatRoot, "docs/plain.md"))).toBeNull();
+    expect(extractMdTitle(join(flatRoot, "no-such.md"))).toBeNull();
+  });
+
+  test("F2: /files/_flat は mtime 降順 + title（fallback はファイル名）", async () => {
+    const res = flatRequest("/files/_flat");
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as {
+      entries: Array<Record<string, unknown>>;
+      truncated: boolean;
+    };
+    const names = data.entries.map((e) => e.name);
+    expect(names).toEqual(["A001-research.md", "guide.md", "plain.md", "report.html"]);
+    const titles = data.entries.map((e) => e.title);
+    expect(titles).toEqual([
+      "調査: flat list の設計",
+      "ガイド見出し",
+      "plain.md", // タイトルなし md はファイル名
+      "report.html", // md 以外はファイル名
+    ]);
+    expect(data.truncated).toBe(false);
+  });
+
+  test("F3: /files/_flat の entries は rootKey/relPath を持ち mtimeMs を出さない", async () => {
+    const data = (await flatRequest("/files/_flat").json()) as {
+      entries: Array<Record<string, unknown>>;
+    };
+    const top = data.entries[0]!;
+    expect(top.rootKey).toBe("artifacts");
+    expect(top.relPath).toBe("A001-research.md");
+    expect(top).not.toHaveProperty("mtimeMs");
+    expect(String(top.mtimeLocal)).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    const guide = data.entries.find((e) => e.name === "guide.md")!;
+    expect(guide.rootKey).toBe("docs");
+    expect(guide.relPath).toBe("sub/guide.md");
+  });
+
+  test("F4: flat walk は symlink を辿らない（escape.md が現れない）", async () => {
+    const data = (await flatRequest("/files/_flat").json()) as {
+      entries: Array<{ name: string }>;
+    };
+    expect(data.entries.map((e) => e.name)).not.toContain("escape.md");
+    expect(data.entries.map((e) => e.name)).not.toContain("outside.md");
+    expect(data.entries.map((e) => e.name)).not.toContain("in.md"); // symlink dir 配下
+  });
+
+  test("F5: /files/_flat にも baseHeaders（no-store / CSP）が付与される", async () => {
+    const res = flatRequest("/files/_flat");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(res.headers.get("Content-Security-Policy")).toBe("default-src 'self'");
+  });
+
+  test("F6: shell に view モードチップ + #flatbody + mode-time CSS がある", async () => {
+    const shell = await flatRequest("/files/").text();
+    expect(shell).toContain('id="modegrp"');
+    expect(shell).toContain('data-mode="tree"');
+    expect(shell).toContain('data-mode="time"');
+    expect(shell).toContain('<div id="flatbody">');
+    expect(shell).toContain("#tree.mode-time #treebody{display:none}");
+    expect(shell).toContain("#tree.mode-time #sortgrp{display:none}");
+    expect(shell).toContain('fetch("/files/_flat")');
+    expect(shell).toContain('localStorage.setItem("filesMode"');
+  });
+
+  test("F7: shell にスプリッター（#splitter + pointer drag + 幅永続化）がある", async () => {
+    const shell = await flatRequest("/files/").text();
+    expect(shell).toContain('<div id="splitter"');
+    expect(shell).toContain('addEventListener("pointerdown"');
+    expect(shell).toContain('localStorage.setItem("filesPaneW"');
+    expect(shell).toContain("cursor:col-resize");
+  });
+
+  test("F8: 追従モードは time モードで selectFlat 経由（無ければ再取得）", async () => {
+    const shell = await flatRequest("/files/").text();
+    expect(shell).toContain("function selectFlat(");
+    expect(shell).toContain('if(mode==="time")');
   });
 });
