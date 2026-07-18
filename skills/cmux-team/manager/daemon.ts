@@ -75,13 +75,6 @@ export interface DaemonState {
   pollInterval: number;
   maxConductors: number;
   /**
-   * `clear-conductor` で Conductor プールから明示的に外された surface の集合。
-   * Manager は二度とこの surface を Conductor として扱わない（再 self-register を拒否）。
-   * in-memory のみ（永続化しない）。daemon 再起動で config 由来の maxConductors に戻るのと
-   * 同じく、この除外もプロセス内限定。
-   */
-  clearedConductorSurfaces: Set<string>;
-  /**
    * `clear-master` / `reset-master` で Manager 管理から外された Master surface の集合。
    * Manager は二度とこの surface を Master として扱わない（再 self-register を拒否）。
    * in-memory のみ（永続化しない）。daemon 再起動でリセットされる。
@@ -439,7 +432,6 @@ export async function createDaemon(
     bootPhase: "infra",
     masters: new Map(),
     conductors: new Map(),
-    clearedConductorSurfaces: new Set(),
     clearedMasterSurfaces: new Set(),
     daemonSurface: null,
     projectRoot,
@@ -1760,13 +1752,16 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
     }
 
     case "CONDUCTOR_CLEAR": {
-      // broken Conductor を「Manager の Conductor プールから恒久的に外す」専用経路。
-      //   旧実装は surface 実在時に resetConductor を呼び、その内部 step1 で
-      //   listSiblingSurfaces（= conductor と同 pane の全 surface）を「自分の Agent 群」
-      //   とみなして全 close していた。pane に同居する無関係 surface まで巻き添えで
-      //   閉じる事故があったため、CONDUCTOR_CLEAR は surface に一切触れない方針に変更する。
-      //   代わりに entry 削除 + maxConductors 減算 + 再 self-register 拒否
-      //   (clearedConductorSurfaces) で「二度と Conductor として扱わない」を実現する。
+      // broken Conductor を Manager の Conductor プールから外す専用経路。
+      //   entry 削除 + maxConductors 減算 + 自分が spawn した Agent surface のみ close する。
+      //   所有判定は resetConductor step1 (41595d2) と同じく daemon が把握している
+      //   `conductor.agents` に限定し、pane に同居する無関係 surface には絶対に触れない
+      //   （旧 listSiblingSurfaces 全 close の巻き添え事故の再発防止）。
+      //   かつての clearedConductorSurfaces による再 self-register 恒久拒否は撤去した:
+      //   同根バグ（sibling 全 close）の回避策として bf7c3b6 で入ったが、1 時間後の
+      //   41595d2 で根本修正されて前提が消えた上、拒否が silent なため spawn-conductor が
+      //   SESSION_STARTED master fallback 経由で Master 誤登録される事故を生んでいた。
+      //   clear 後の surface は `elevens spawn-conductor` で意図的に再利用できる。
       //   slot 数は 1 減るが daemon 再起動 / `cmux-team start` で config 値に戻る。
       const conductor = state.conductors.get(message.surface);
       if (!conductor) {
@@ -1797,19 +1792,27 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
         try { conductor.mailboxWatcherStop(); } catch { /* best-effort */ }
         conductor.mailboxWatcherStop = undefined;
       }
-      // surface 実在性は観測ログ用にのみ取得する（分岐には使わない — どちらでも close しない）。
+      // surface 実在性は観測ログ用にのみ取得する（分岐には使わない）。
       const clearPane = await cmux.getPaneForSurface(
         conductor.surface,
         state.workspace ?? undefined,
       );
       const surfacePresent = clearPane !== undefined;
+      // 自分が spawn した Agent surface のみ閉じる。broken 遷移時の cascade で通常は
+      //   空になっているが、cascade が失敗した残存 Agent をここで確実に片付ける。
+      //   Conductor 自身の surface と pane 同居の未知 surface には触れない。
+      for (const agent of conductor.agents) {
+        if (agent.surface !== conductor.surface) {
+          await cmux
+            .closeSurface(agent.surface, "conductor_clear_agent")
+            .catch(() => {});
+        }
+      }
       // C-I2 invariant: status=broken ⇒ taskRunId == null。worktree archive も broken 遷移時に
-      //   実施済みのため、ここで worktree / surface には一切触れない。
+      //   実施済みのため、ここで worktree / Conductor 自身の surface には触れない。
       state.conductors.delete(conductor.surface);
       // maxConductors を 1 減らし、applyRestorePlan の deficit topup が穴埋めしないようにする。
       state.maxConductors = Math.max(0, state.maxConductors - 1);
-      // 同 surface からの CONDUCTOR_REGISTERED 再登録を恒久拒否する（soft cap では止まらない）。
-      state.clearedConductorSurfaces.add(conductor.surface);
       const aliveDetail = conductor.pid !== undefined
         ? String(cmux.isAlive(conductor.pid))
         : "unknown";
@@ -2557,15 +2560,10 @@ export async function handleMessage(state: DaemonState, message: QueueMessage): 
     }
 
     case "CONDUCTOR_REGISTERED": {
-      // clear-conductor でプールから外された surface は二度と Conductor として登録しない。
-      //   soft cap (size >= maxConductors は warn のみ) では止まらないため明示除外する。
-      if (state.clearedConductorSurfaces.has(message.surface)) {
-        await log(
-          "conductor_register_ignored",
-          `${formatSurface(message.surface, "C")} reason=cleared_by_user`,
-        );
-        break;
-      }
+      // NOTE: かつて clearedConductorSurfaces による恒久拒否がここにあったが撤去した。
+      //   silent 拒否のまま claude が起動し、SESSION_STARTED の master fallback で
+      //   Master 誤登録される事故があったため。clear-conductor 済み surface からの
+      //   再登録（= ユーザーの意図的な spawn-conductor 再利用）は通常経路で受け入れる。
       // T003: HTTP レスポンスの daemon_pid 添付は proxy.ts 側 (`/api/messages` 分岐) で
       //   行う。handleMessage の戻り値型は void のまま。registerSelf 側でこの daemon_pid を
       //   team.json.manager.pid と cross-check する。

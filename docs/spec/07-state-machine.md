@@ -33,7 +33,7 @@
 | `broken` | disconnected 300s 超過で自動復帰停止 (T250) | `monitorConductors` timeout |
 | `error` | StopFailure hook 受信（API エラー確定）— `lastApiError` を伴う (T392) | `STOP_FAILURE` |
 
-`broken` は **終端状態**。`cmux-team clear-conductor`（プールから恒久的に外す）または
+`broken` は **終端状態**。`cmux-team clear-conductor`（プールから外す）または
 `cmux-team reset-conductor`（T004、任意状態 → `reserved` の局所復旧 CLI）でのみ解除される。
 `error` は次の `SESSION_STARTED` / `SESSION_IDLE` / `SESSION_ASK` で自然解除される（`lastApiError` も undefined に戻る）。
 加えて **`USER_PROMPT_SUBMIT`（再開プロンプト投入）でも早期解除される (T449)**。「続けて」等の再開アクションや
@@ -42,9 +42,11 @@ Conductor / Agent に追加した。`error` 状態のときのみ `running` に�
 （error でなければ no-op。`broken` は対象外）。Master は proxy `/master-state` の busy POST 経路で
 `status="running"` 復帰時に同様に `lastApiError` をクリアする（Master 用の追加 hook は不要）。
 
-`clear-conductor` は idle 復帰ではなく、**team.json からの entry 削除 + `maxConductors -1` + 再 self-register 拒否**
-を行う（surface 実在性によらず常に同じ。surface には一切触れず close もしない — 同 pane 同居の無関係
-surface を巻き添えで閉じる事故を構造的に防ぐ）。`maxConductors` 減算は `applyRestorePlan` の deficit topup が
+`clear-conductor` は idle 復帰ではなく、**team.json からの entry 削除 + `maxConductors -1` + 自 Agent surface close**
+を行う（surface 実在性によらず常に同じ。close 対象は daemon が把握している `conductor.agents` のみで、
+Conductor 自身の surface と同 pane 同居の無関係 surface には触れない — 巻き添え close 事故を構造的に防ぐ）。
+クリア後の surface は `spawn-conductor` の通常経路で再登録・再利用できる（旧仕様の再 self-register 恒久拒否は
+silent 拒否による Master 誤登録事故のため撤去）。`maxConductors` 減算は `applyRestorePlan` の deficit topup が
 穴を埋めないようにするためで、daemon 再起動 / `cmux-team start` で config 値に戻る。
 daemon 起動時の `planLayoutRestore` も `status=broken && !surfaceExists` で entry を discard する。
 削除は state machine の遷移ではなく **machine 外の entry エビクション** であり、

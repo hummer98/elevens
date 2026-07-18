@@ -39,7 +39,6 @@ function makeState(projectRoot: string): DaemonState {
     bootPhase: "ready",
     masters: new Map(),
     conductors: new Map(),
-    clearedConductorSurfaces: new Set(),
     projectRoot,
     pollInterval: 10_000,
     maxConductors: 2,

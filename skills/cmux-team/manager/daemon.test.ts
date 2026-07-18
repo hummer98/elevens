@@ -3425,9 +3425,10 @@ describe("T250 broken status", () => {
     expect(conductor.status).toBe("broken");
   });
 
-  test("CONDUCTOR_CLEAR で broken Conductor がプールから外れる（surface は閉じない / maxConductors -1）", async () => {
-    // surface 実在ケース。旧実装は resetConductor で同 pane の sibling surface を全 close
-    //   していたが、現行は surface に一切触れず entry 削除 + maxConductors 減算のみ行う。
+  test("CONDUCTOR_CLEAR で broken Conductor がプールから外れる（自 Agent のみ close / maxConductors -1）", async () => {
+    // surface 実在ケース。所有判定は conductor.agents に限定する:
+    //   自分が spawn した Agent surface は閉じるが、Conductor 自身の surface と
+    //   pane に同居する無関係 surface（listSiblingSurfaces の結果）には触れない。
     const cmux = await import("./cmux");
     const { spyOn } = await import("bun:test");
     const paneSpy = spyOn(cmux, "getPaneForSurface").mockResolvedValue("pane:1");
@@ -3443,7 +3444,13 @@ describe("T250 broken status", () => {
         surface: "surface:broken-cc1",
         startedAt: new Date().toISOString(),
         disconnectedAt: new Date().toISOString(),
-        agents: [],
+        agents: [
+          {
+            surface: "surface:agent-of-cc1",
+            spawnedAt: new Date().toISOString(),
+            status: "idle",
+          },
+        ],
         status: "broken",
       };
       state.conductors.set(conductor.surface, conductor);
@@ -3459,10 +3466,10 @@ describe("T250 broken status", () => {
       expect(state.conductors.has(conductor.surface)).toBe(false);
       // maxConductors は 1 減る（topup が穴埋めしない）
       expect(state.maxConductors).toBe(maxBefore - 1);
-      // 再 self-register を拒否するための除外集合に入る
-      expect(state.clearedConductorSurfaces.has(conductor.surface)).toBe(true);
-      // 巻き添えバグの回帰防止: surface は一切閉じない
-      expect(closeSpy).not.toHaveBeenCalled();
+      // 自分が spawn した Agent surface だけを閉じる。
+      //   Conductor 自身・pane 同居の無関係 surface は閉じない（巻き添えバグの回帰防止）
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+      expect(closeSpy).toHaveBeenCalledWith("surface:agent-of-cc1", "conductor_clear_agent");
       const logContent = await readFile(join(testDir, ".team/logs/manager.log"), "utf-8");
       expect(logContent).toContain("conductor_pruned");
       expect(logContent).toMatch(/reason=user_clear /);
@@ -3473,7 +3480,10 @@ describe("T250 broken status", () => {
     }
   });
 
-  test("CONDUCTOR_CLEAR 後に同 surface が再 self-register しても無視される", async () => {
+  test("CONDUCTOR_CLEAR 後に同 surface が spawn-conductor で再 self-register できる", async () => {
+    // 旧仕様は clearedConductorSurfaces で恒久拒否していたが、silent 拒否のまま claude が
+    //   起動して SESSION_STARTED master fallback で Master 誤登録される事故があったため撤去。
+    //   ユーザーの意図的な再利用（spawn-conductor）は通常経路で受け入れる。
     const cmux = await import("./cmux");
     const { spyOn } = await import("bun:test");
     const paneSpy = spyOn(cmux, "getPaneForSurface").mockResolvedValue("pane:1");
@@ -3496,15 +3506,16 @@ describe("T250 broken status", () => {
       });
       expect(state.conductors.has(surface)).toBe(false);
 
-      // クリア後の再登録は拒否される
+      // クリア後の再登録は受け入れられ、Conductor として復帰する
       await handleMessage(state, {
         type: "CONDUCTOR_REGISTERED",
         surface,
         timestamp: new Date().toISOString(),
       });
-      expect(state.conductors.has(surface)).toBe(false);
+      expect(state.conductors.has(surface)).toBe(true);
+      expect(state.conductors.get(surface)!.status).toBe("starting");
       const logContent = await readFile(join(testDir, ".team/logs/manager.log"), "utf-8");
-      expect(logContent).toMatch(/conductor_register_ignored.*reason=cleared_by_user/);
+      expect(logContent).not.toContain("conductor_register_ignored");
     } finally {
       paneSpy.mockRestore();
     }

@@ -492,7 +492,7 @@ Notes:
 `,
 
   help_clear_conductor: `
-elevens clear-conductor -- remove a broken Conductor from the pool (does NOT close the surface)
+elevens clear-conductor -- remove a broken Conductor from the pool (closes only its own Agent surfaces)
 
 Usage:
   elevens clear-conductor [--surface <id>]
@@ -509,9 +509,11 @@ Examples:
 Notes:
   - Only Conductors currently in broken state can be cleared
   - For other states, use abort-task / restart-task
-  - The surface is left completely untouched (never closed). The Manager simply
-    stops treating it as a Conductor: the entry is dropped, maxConductors is
-    decremented by 1, and any re-registration from that surface is rejected
+  - The Conductor's own surface is never closed. Only Agent surfaces the daemon
+    knows this Conductor spawned are closed; unrelated surfaces sharing the pane
+    are never touched. The entry is dropped and maxConductors is decremented by 1
+  - The surface can be reused later: running 'elevens spawn-conductor' there
+    re-registers it as a Conductor through the normal path
   - maxConductors returns to the configured value on daemon restart / 'cmux-team start'
   - Worktree / branch residue is already cleaned up at the broken transition
 `,
@@ -1034,7 +1036,7 @@ Usage:
   elevens agents                             list running agents
   elevens close-agent --surface <surface>    close an agent (normal exit)
   elevens kill-agent --surface <surface>     kill an agent (crash/force)
-  elevens clear-conductor --surface <id>     reset a broken Conductor (broken -> idle)
+  elevens clear-conductor --surface <id>     remove a broken Conductor from the pool
   elevens reset-conductor [--surface <id>] [--force]   reset a Conductor surface to reserved
   elevens send-agent --surface <surface> <message>    send a message to a spawned Agent
   elevens create-task --title <title> [--priority <p>] [--status <s>] [--body <text>] [--depends-on <ids>] [--run-after-all] [--exclusive]
@@ -1668,7 +1670,7 @@ Notes:
 `,
 
   help_clear_conductor: `
-elevens clear-conductor -- broken Conductor をプールから外す（surface は閉じません）
+elevens clear-conductor -- broken Conductor をプールから外す（自分が spawn した Agent surface のみ閉じます）
 
 Usage:
   elevens clear-conductor [--surface <id>]
@@ -1685,9 +1687,11 @@ Examples:
 Notes:
   - broken 状態の Conductor のみクリアできます
   - 他の状態は abort-task / restart-task を使ってください
-  - surface には一切触れません（絶対に閉じない）。Manager がその surface を
-    Conductor として扱わなくなるだけです: entry を削除し、maxConductors を 1 減らし、
-    その surface からの再登録を拒否します
+  - Conductor 自身の surface は閉じません。daemon が把握している「この Conductor が
+    spawn した Agent surface」のみ閉じ、pane に同居する無関係 surface には触れません。
+    entry を削除し、maxConductors を 1 減らします
+  - クリア後の surface は再利用できます: その surface で "elevens spawn-conductor" を
+    実行すると通常経路で Conductor として再登録されます
   - maxConductors は daemon 再起動 / "cmux-team start" で config 値に戻ります
   - worktree / branch 残骸は broken 遷移時点で既に掃除済みのため、ここでは行いません
 `,
@@ -2209,7 +2213,7 @@ Usage:
   elevens agents                             稼働中エージェント一覧
   elevens close-agent --surface <surface>    Agent を正常終了
   elevens kill-agent --surface <surface>     Agent を強制停止（crash 扱い）
-  elevens clear-conductor --surface <id>     broken Conductor をリセット（broken → idle）
+  elevens clear-conductor --surface <id>     broken Conductor をプールから外す
   elevens reset-conductor [--surface <id>] [--force]   Conductor surface を reserved にリセット
   elevens send-agent --surface <surface> <message>    Agent にメッセージ送信
   elevens create-task --title <title> [--priority <p>] [--status <s>] [--body <text>] [--depends-on <ids>] [--run-after-all] [--exclusive]
