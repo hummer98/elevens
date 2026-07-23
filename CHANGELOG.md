@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.17.1] - 2026-07-23
+
+### Fixed
+
+- **worktree で起動した Agent が認証情報を失う不具合を修正**: Agent は worktree 内で `claude` を起動するが、worktree には `.envrc` がチェックアウトされないため direnv が親 `.envrc` の `CLAUDE_CONFIG_DIR` を unload し、Agent が認証済みの config ディレクトリを見失って認証が切れていた。認証済み config dir を `CLAUDE_CONFIG_DIR=... claude ...` の形（execve env prefix）で明示的に渡し、direnv に依存せず確実に引き継ぐようにした（token pool の `CLAUDE_CODE_OAUTH_TOKEN` 注入と同じ手法）。`CLAUDE_CONFIG_DIR` を使っていない環境（デフォルトの `~/.claude`）には影響しない
+
 ## [0.17.0] - 2026-07-19
 
 ### Added
