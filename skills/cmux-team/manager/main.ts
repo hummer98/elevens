@@ -23,7 +23,7 @@
  *   ./main.ts trace-hooks [--type <T>] [--surface <s>] [--task-run <id>] [--role <r>] [--task-id <id>] [--limit <N>] [--json]
  */
 
-import { join, dirname, basename, resolve } from "path";
+import { join, dirname, basename, resolve, isAbsolute } from "path";
 import { existsSync, writeFileSync, mkdirSync, watch, realpathSync, statSync, readFileSync } from "fs";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "os";
@@ -60,7 +60,7 @@ import {
   type ArchiveMeta,
   type ArchiveSummary,
 } from "./worktree-archive";
-import { buildLaunchCommand } from "./util";
+import { buildLaunchCommand, shellQuote } from "./util";
 import { ClaudeCodeBackend } from "./claude-code-backend";
 import { OpenCodeBackend } from "./opencode-backend";
 import { spawnOpenCodeAgent, killOpenCodeAgent, parseOcSurface, startOpenCodeServer, stopOpenCodeServer } from "./opencode-agent";
@@ -3344,6 +3344,38 @@ export function buildAgentClaudeFlags(opts: {
 }
 
 /**
+ * Agent の `claude` 起動コマンドに前置する execve env prefix を組み立てる。
+ *
+ * Agent は worktree（`.envrc` 未チェックアウト = direnv 管理外）に `cd` してから
+ * claude を起動するため、親 `.envrc` が direnv 経由で export していた
+ * `CLAUDE_CONFIG_DIR` が worktree への `cd` で unload され、認証情報を失う。
+ * これを防ぐため、認証済み config dir を execve env（`KEY=val claude ...`）として
+ * 明示注入し direnv 非依存にする。T371 の `CLAUDE_CODE_OAUTH_TOKEN` と同じ手法。
+ *
+ * - `configDir` 未設定（デフォルト `~/.claude` 運用）→ CLAUDE_CONFIG_DIR は注入しない
+ * - 相対パスは `projectRoot` 基準で絶対化する（worktree cwd では解決できないため）
+ * - token 側は `"$CMUX_CLAUDE_TOKEN"` の shell 展開が必要なので shellQuote しない
+ * - 返り値は末尾スペース込み（prefix が空なら空文字）
+ */
+export function buildAgentClaudeEnvPrefix(opts: {
+  configDir?: string;
+  projectRoot: string;
+  tokenInjected: boolean;
+}): string {
+  const parts: string[] = [];
+  if (opts.configDir && opts.configDir.length > 0) {
+    const abs = isAbsolute(opts.configDir)
+      ? opts.configDir
+      : resolve(opts.projectRoot, opts.configDir);
+    parts.push(`CLAUDE_CONFIG_DIR=${shellQuote(abs)}`);
+  }
+  if (opts.tokenInjected) {
+    parts.push(`CLAUDE_CODE_OAUTH_TOKEN="$CMUX_CLAUDE_TOKEN"`);
+  }
+  return parts.length > 0 ? parts.join(" ") + " " : "";
+}
+
+/**
  * T407: Conductor の claude 起動 args を組み立てる。テスト容易性のため別関数として export。
  * 引数順序: --dangerously-skip-permissions / --settings / --model / --append-system-prompt-file /
  *   --session-id / [taskPrompt 文字列]
@@ -3955,15 +3987,20 @@ async function cmdSpawnAgent(): Promise<void> {
       }
     }
 
-    // T371: token pool が token を注入した経路だけ inline env prefix を付ける。
-    // direnv の .envrc.local が CLAUDE_CODE_OAUTH_TOKEN を export していても、
-    // この prefix は execve env として優先される。
-    const tokenPrefix = tokenInjected ? `CLAUDE_CODE_OAUTH_TOKEN="$CMUX_CLAUDE_TOKEN" ` : "";
+    // execve env prefix を組み立てる（direnv 非依存で claude に環境変数を渡す）:
+    //   - CLAUDE_CONFIG_DIR: worktree への cd で direnv が親 .envrc の値を unload し
+    //     Agent が認証情報を失うのを防ぐ（daemon/spawn プロセスが持つ絶対パスを継承）
+    //   - CLAUDE_CODE_OAUTH_TOKEN: T371 token pool 注入経路のみ（.envrc.local 上書き対策）
+    const envPrefix = buildAgentClaudeEnvPrefix({
+      configDir: process.env.CLAUDE_CONFIG_DIR,
+      projectRoot: PROJECT_ROOT,
+      tokenInjected,
+    });
     let claudeCmd: string;
     if (effectivePromptFile) {
-      claudeCmd = `${tokenPrefix}claude ${claudeFlags.join(" ")} '${effectivePromptFile} を読んで指示に従ってください。'`;
+      claudeCmd = `${envPrefix}claude ${claudeFlags.join(" ")} '${effectivePromptFile} を読んで指示に従ってください。'`;
     } else {
-      claudeCmd = `${tokenPrefix}claude ${claudeFlags.join(" ")} '${prompt}'`;
+      claudeCmd = `${envPrefix}claude ${claudeFlags.join(" ")} '${prompt}'`;
     }
     await cmux.send(surface, claudeCmd + "\n");
 

@@ -21,6 +21,7 @@ import {
   generateSessionId,
   buildConductorClaudeArgs,
   buildAgentClaudeFlags,
+  buildAgentClaudeEnvPrefix,
   buildMasterClaudeArgs,
   makeShutdownGuard,
   formatDaemonStartedDetail,
@@ -3566,6 +3567,58 @@ describe("buildAgentClaudeFlags (T407)", () => {
       sessionId: "11111111-2222-4333-8444-555555555555",
     });
     expect(flags.join(" ")).not.toContain("--settings");
+  });
+});
+
+describe("buildAgentClaudeEnvPrefix (CLAUDE_CONFIG_DIR direnv unload 対策)", () => {
+  const ROOT = "/Users/x/git/elevens";
+
+  test("configDir(絶対) + tokenInjected=false → CLAUDE_CONFIG_DIR のみ、末尾スペース付き", () => {
+    const p = buildAgentClaudeEnvPrefix({
+      configDir: "/Users/x/git/elevens/.config",
+      projectRoot: ROOT,
+      tokenInjected: false,
+    });
+    expect(p).toBe("CLAUDE_CONFIG_DIR='/Users/x/git/elevens/.config' ");
+  });
+
+  test("configDir + tokenInjected=true → config dir が token より前、token は展開のため未quote", () => {
+    const p = buildAgentClaudeEnvPrefix({
+      configDir: "/Users/x/git/elevens/.config",
+      projectRoot: ROOT,
+      tokenInjected: true,
+    });
+    expect(p).toBe(
+      `CLAUDE_CONFIG_DIR='/Users/x/git/elevens/.config' CLAUDE_CODE_OAUTH_TOKEN="$CMUX_CLAUDE_TOKEN" `,
+    );
+  });
+
+  test("configDir 未設定 + tokenInjected=false → 空文字（何も注入しない）", () => {
+    expect(buildAgentClaudeEnvPrefix({ projectRoot: ROOT, tokenInjected: false })).toBe("");
+    expect(buildAgentClaudeEnvPrefix({ configDir: "", projectRoot: ROOT, tokenInjected: false })).toBe("");
+  });
+
+  test("configDir 未設定 + tokenInjected=true → 従来どおり token prefix のみ（後方互換）", () => {
+    const p = buildAgentClaudeEnvPrefix({ projectRoot: ROOT, tokenInjected: true });
+    expect(p).toBe(`CLAUDE_CODE_OAUTH_TOKEN="$CMUX_CLAUDE_TOKEN" `);
+  });
+
+  test("configDir(相対) → projectRoot 基準で絶対化する（worktree cwd では解決不能なため）", () => {
+    const p = buildAgentClaudeEnvPrefix({
+      configDir: ".config",
+      projectRoot: ROOT,
+      tokenInjected: false,
+    });
+    expect(p).toBe(`CLAUDE_CONFIG_DIR='${ROOT}/.config' `);
+  });
+
+  test("configDir にスペースが含まれても shellQuote で安全にエスケープされる", () => {
+    const p = buildAgentClaudeEnvPrefix({
+      configDir: "/Users/x/My Config/.config",
+      projectRoot: ROOT,
+      tokenInjected: false,
+    });
+    expect(p).toBe(`CLAUDE_CONFIG_DIR='/Users/x/My Config/.config' `);
   });
 });
 
