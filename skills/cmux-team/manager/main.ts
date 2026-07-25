@@ -1158,6 +1158,14 @@ async function cmdStart(): Promise<void> {
       `enabled=${poolDecision.enabled ? "on" : "off"} source=${poolDecision.source}`,
     );
     if (poolDecision.enabled) {
+      // 仕様変更により CLAUDE_CODE_OAUTH_TOKEN 経由の分散処理は従量課金対象となった。
+      // opt-in の再確認を促すため、有効化を検出したら毎起動時に警告を残す。
+      await log(
+        "warn",
+        `[POOL_METERED_BILLING] token pool is ENABLED (source=${poolDecision.source}). ` +
+          `CLAUDE_CODE_OAUTH_TOKEN 経由の Agent 分散は従量課金対象です。` +
+          `不要なら .team/config.json の tokenPool.enabled を false にするか CMUX_TEAM_TOKEN_POOL=0 で無効化してください。`,
+      );
       try {
         state.tokenDb = initTokenDB();
       } catch (e: any) {

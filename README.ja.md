@@ -414,7 +414,9 @@ overlay の最大サイズは 100 KB。dashboard TUI の `Settings` タブ（`4`
 
 複数の Claude アカウントを持っている場合、Agent spawn を自動的に振り分けてレート制限を回避できます。
 
-**有効化**（opt-in、プロジェクト単位）:
+> ⚠️ **従量課金**。上流の仕様変更により、`CLAUDE_CODE_OAUTH_TOKEN` を使った Agent の分散処理は従量課金（pay-as-you-go）の対象になりました。本機能は**デフォルト無効**（opt-in）です。従量課金が発生することを理解した上でのみ有効化してください。有効時は Manager daemon が起動のたびに `[POOL_METERED_BILLING]` 警告をログに残します。
+
+**有効化**（opt-in、プロジェクト単位・デフォルト無効）:
 
 ```json
 // .team/config.json

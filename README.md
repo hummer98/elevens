@@ -341,7 +341,9 @@ Max overlay size is 100 KB. The dashboard's `Settings` tab (`4` key) shows a rea
 
 When you have multiple Claude accounts, elevens can automatically distribute Agent spawns across them to avoid rate limits.
 
-**Enable** (opt-in, per-project):
+> ⚠️ **Metered billing.** Due to an upstream spec change, distributing Agent work via `CLAUDE_CODE_OAUTH_TOKEN` is now billed on a pay-as-you-go basis. This feature is **disabled by default** (opt-in). Only enable it if you understand it incurs usage-based charges. When enabled, the Manager daemon logs a `[POOL_METERED_BILLING]` warning on every boot.
+
+**Enable** (opt-in, per-project — off by default):
 
 ```json
 // .team/config.json

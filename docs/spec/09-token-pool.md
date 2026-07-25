@@ -2,6 +2,8 @@
 
 複数の Claude OAuth token を共有プールとして管理し、Agent spawn 時に最適な token を自動選択する機能（T318〜T325・T335）。
 
+> ⚠️ **従量課金 (仕様変更)**: 上流の仕様変更により、`CLAUDE_CODE_OAUTH_TOKEN` を使った Agent の分散処理は従量課金の対象となった。本機能は**デフォルト無効（opt-in）**であり、有効化時は Manager daemon が起動のたびに `token_pool_config` ログに続けて `warn [POOL_METERED_BILLING]` を残す（`main.ts` の boot 経路）。従量課金を許容する場合のみ有効化すること。
+
 ---
 
 ## 概要
@@ -21,8 +23,10 @@
 |------|------|-----|
 | `CMUX_TEAM_TOKEN_POOL` 環境変数 | 最優先 | `CMUX_TEAM_TOKEN_POOL=0` で無効 |
 | `.team/config.json` `tokenPool.enabled` | プロジェクト単位 | `"tokenPool": { "enabled": false }` |
-| `~/.cmux-team/config.yaml` `token_pool.enabled` | グローバルデフォルト | `token_pool: { enabled: true }` |
+| `~/.cmux-team/config.yaml` `token_pool.enabled` | グローバルデフォルト | `token_pool: { enabled: false }` |
 | 未指定 | — | **false（opt-in）** |
+
+> 従量課金化に伴い、有効化例は `enabled: false` を基準に記載する。有効化する場合のみ明示的に `true` を指定すること。
 
 Conductor / Agent 実行環境には `CMUX_TEAM_SKIP_SYNC_CHECK=1` が自動注入される（sync check は Conductor 環境では不要なため）。
 
