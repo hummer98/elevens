@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.18.0] - 2026-07-27
+
+### Added
+
+- **各エージェントが使う AI モデルを役割ごとに設定・変更できるようにした**: `.team/config.json` の `models` で Master / Conductor / Agent（全体の fallback）に加え、Agent の 8 つの sub-role（researcher / architect / planner / design-reviewer / implementer / inspector / dockeeper / task-manager）ごとに個別のモデルを指定できる（`models.agentRoles`）。Agent のモデル解決は「CLI `--model` → sub-role 個別指定 → agent fallback → デフォルト」の順。TUI の Settings タブでは各モデル行を `←`/`→`（または `h`/`l`）でその場で切り替えでき、変更は即座に `.team/config.json` へ保存される（従来は表示のみ）。これにより「実装は上位モデル、単純な調査・雑用は軽量モデル」といった役割別の使い分けが設定だけで可能になる。
+
+### Changed
+
+- **デフォルトモデルを `claude-opus-5` に更新**: 役割別に未設定の場合に使われる既定モデルを最新の Claude Opus 5 に引き上げた（opencode backend の既定モデルも同様）。
+- **トークンプールを従量課金前提でデフォルト無効に徹底**: 上流仕様変更で `CLAUDE_CODE_OAUTH_TOKEN` を用いた Agent 分散が従量課金対象になったため、`tokenPool` を有効化して起動すると毎回 `[POOL_METERED_BILLING]` 警告をログに出すようにした。既定は従来どおり無効。README / `docs/spec/09-token-pool.md` に注意書きを追記。
+
 ## [0.17.1] - 2026-07-23
 
 ### Fixed

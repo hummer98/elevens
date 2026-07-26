@@ -95,7 +95,8 @@ Created per-project by `elevens start`. All keys are optional — the file can b
 | `layout` | `"wide"` \| `"16x9"` | `"16x9"` | Pane layout preset at startup. Override: CLI `--layout`. |
 | `sleepPrevention` | `"off"` \| `"idle"` \| `"aggressive"` \| boolean | `"aggressive"` | macOS sleep prevention mode. `aggressive` = `caffeinate -dis` (block display + idle + system sleep, default since T256), `idle` = `caffeinate -i` (block user-idle only; allows display sleep), `off` = no caffeinate. Boolean is accepted for backward compatibility (`true` → `aggressive`, `false` → `off`). Override: CLI `--sleep-prevention <mode>` or `--no-sleep-prevention`. |
 | `autoUpdate` | `"off"` \| `"notify"` | `"off"` | Version detection mode (see above). Override: env `CMUX_TEAM_AUTO_UPDATE`. |
-| `models.master` / `models.conductor` / `models.agent` | string | Claude defaults | Per-role model selection (e.g. `"claude-sonnet-4-6"`). |
+| `models.master` / `models.conductor` / `models.agent` | string | `claude-opus-5` | Per-role model selection (e.g. `"claude-sonnet-5"`). `models.agent` is the fallback for all Agent sub-roles. Resolution: `--model` flag > `models.<role>` > built-in `DEFAULT_MODEL`. |
+| `models.agentRoles.<sub-role>` | string | inherits `models.agent` | Per-sub-role override for the 8 Agent roles (`researcher` / `architect` / `planner` / `design-reviewer` / `implementer` / `inspector` / `dockeeper` / `task-manager`). Agent resolution: `--model` flag > `models.agentRoles[subRole]` > `models.agent` > `DEFAULT_MODEL`. Edit interactively in the TUI `Settings` tab (`4` key) with `←/→` (`h`/`l`). |
 | `dashboard.port` | number | `0` (ephemeral) | Fixed listen port for the web dashboard server (T034). Accepts integers in `[1, 65535]` only. Pinning it keeps the URL stable across daemon restarts (bookmarkable). Unset / `0` / invalid values fall back to an ephemeral port. See `docs/spec/12-web-dashboard.md`. |
 | `dashboard.lanAccess` | boolean | `false` | Expose the web dashboard on your LAN so you can read `/files` from a phone or another machine. `true` binds to `0.0.0.0` and writes `dashboardServer.lanUrl` (`http://<LAN-IP>:<port>`) to `.team/team.json`; the TUI `Settings` tab (`4` key) then shows a QR code for the `/files` viewer. Only the literal value `true` enables it (anything else falls back to `false`). **⚠️ There is no authentication** — anyone who can reach your machine on the network can read `docs/` / `.team/artifacts/` / `.team/output/` and the metrics API. Enable it only on trusted networks. See `docs/spec/12-web-dashboard.md` §2.3.1. |
 | `envrcHookPromptSkipped` | boolean | `false` | Internal flag set when the user declines the direnv hook prompt — normally not edited by hand. |
@@ -109,7 +110,7 @@ Example:
   "layout": "16x9",
   "sleepPrevention": "idle",
   "autoUpdate": "notify",
-  "models": { "conductor": "claude-sonnet-4-6" }
+  "models": { "conductor": "claude-sonnet-5", "agentRoles": { "researcher": "claude-haiku-4-5" } }
 }
 ```
 

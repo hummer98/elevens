@@ -124,7 +124,7 @@ description: >
 
 **i18n**: 見出し文字列は `project_instructions_heading` キーで管理（ja: 「プロジェクト固有の追加指示」/ en: "Project-Specific Instructions"）。`tFor(locale, key)` で explicit locale lookup する。Master / Conductor も同じ見出しを流用する。
 
-**Dashboard Settings タブ**: `4` キーで overlay 10 ロール + config 抜粋を read-only プレビュー表示。Enter で該当 overlay ファイルをビューアで開く。
+**Dashboard Settings タブ**: `4` キーで overlay 10 ロール + config 抜粋をプレビュー表示。Enter で該当 overlay ファイルをビューアで開く。model 行（master / conductor / agent fallback + 8 sub-role の計 11 行）は選択して **←/→（h/l）でサイクル編集**でき、`setConfigModel` が `.team/config.json` に即時 atomic 書き戻しする（解決順・KNOWN_MODELS は [`05-install-and-infrastructure.md`](05-install-and-infrastructure.md) の `config.models` 参照）。それ以外の行は read-only。
 
 **Dashboard Artifacts タブのキー (T435 / T439)**:
 

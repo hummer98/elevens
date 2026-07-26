@@ -516,14 +516,23 @@ daemon の `state.rateLimit`（最後に観測した Anthropic API の 5h/7d 使
 
 ```json
 {
-  "models": { "master": "claude-opus-4-8", "conductor": "claude-opus-4-8", "agent": "claude-opus-4-8" },
+  "models": {
+    "master": "claude-opus-5",
+    "conductor": "claude-opus-5",
+    "agent": "claude-opus-5",
+    "agentRoles": { "researcher": "claude-haiku-4-5", "implementer": "claude-opus-5" }
+  },
   "envrcHookPromptSkipped": false,
   "autoUpdate": "off",
   "mainBranch": "main"
 }
 ```
 
-- `models` — Master / Conductor / Agent のモデル指定（**任意 override**。このフィールドは自動生成されず、未指定のロールはコード既定 `DEFAULT_MODEL`（`config.ts`、現在 `claude-opus-4-8`）に解決される）。解決順: `--model` CLI フラグ > `config.models[role]` > `DEFAULT_MODEL`。コスト調整でロール別に下げる例: `"agent": "claude-haiku-4-5-20251001"`。TUI dashboard の **Settings タブ**に解決後の値が `models.<role>` として表示される
+- `models` — Master / Conductor / Agent のモデル指定（**任意 override**。このフィールドは自動生成されず、未指定のロールはコード既定 `DEFAULT_MODEL`（`config.ts`、現在 `claude-opus-5`）に解決される）。
+  - `master` / `conductor` — 各ロールの解決順: `--model` CLI フラグ > `config.models[role]` > `DEFAULT_MODEL`。
+  - `agent` — Agent 全 sub-role の **fallback**。sub-role 個別指定が無いときに使われる。
+  - `agentRoles` — Agent の 8 sub-role（`researcher` / `architect` / `planner` / `design-reviewer` / `implementer` / `inspector` / `dockeeper` / `task-manager`）を**個別に**上書きする `Partial<Record<AgentRole, string>>`。Agent の解決順は `--model` CLI フラグ > `config.models.agentRoles[subRole]` > `config.models.agent` > `DEFAULT_MODEL`（`getModelForRole` in `main.ts`）。コスト調整で軽いロールだけ下げる例: `"agentRoles": { "researcher": "claude-haiku-4-5" }`。
+  - TUI dashboard の **Settings タブ**（`4` キー）に master / conductor / agent（fallback）+ 8 sub-role の計 11 行が表示され、選択行を **←/→（h/l）でサイクル編集**できる（`KNOWN_MODELS`: `claude-fable-5` / `claude-opus-5` / `claude-sonnet-5` / `claude-haiku-4-5` + 未設定=default/fallback 継承 を巡回）。変更は `setConfigModel` が `.team/config.json` に atomic 書き戻しする。sub-role 行を未設定に戻すと `agent` fallback → `DEFAULT_MODEL` の解決結果を inherit 表示する
 - `envrcHookPromptSkipped` — `.envrc` への `CMUX_CLAUDE_HOOKS_DISABLED=1` 追記提案をスキップ済みかどうかのフラグ（`claude` 直接起動時向けの optional 機能。`cmux-team` 経由の spawn には不要）
 - `autoUpdate` — auto-update モード（`"off" | "notify"`、デフォルト `off`）。env `CMUX_TEAM_AUTO_UPDATE` で上書き可。**T294 (v4.5.0) 破壊的変更:** `"task"` モードと boolean 後方互換（`true` / `false`）を削除した。旧値が残る config / env は起動時に exit 1 で reject される。移行は "notify" または "off" に書き換える
 - `mainBranch` — プロジェクトの主開発ブランチ名（T213）。Conductor が worktree のベース・マージ先として使用する。解決順位は env `CMUX_TEAM_MAIN_BRANCH` > `config.mainBranch` > `git symbolic-ref refs/remotes/origin/HEAD` による自動検出。**T253 破壊的変更:** 全て失敗した場合は `cmux-team start` が `MainBranchResolutionError` を throw → console.error に解決手段（env / config / `--main-branch`）を案内した上で `process.exit(1)` する（旧: `"main"` へのサイレントフォールバック）。`cmux-team start` は解決結果を `main_branch_resolved branch=<name> source=<config|detected>` としてログ出力し、source が `detected` の場合のみ `.team/config.json` に書き戻す（初回起動後は常に `config` 経路）。**worktree 作成時の start-point** は `worktree-base.ts:resolveWorktreeBase` が以下の順で解決する（T242 / T275）: (1) task.md `base_branch:` 明示（`explicit`）→ (2) local `<mainBranch>` が `origin/<mainBranch>` より strict ahead（`config-local-ahead`、T275）→ (3) `origin/<mainBranch>` 存在（`config-origin`）→ (4) local `<mainBranch>` 存在（`config-local`）→ (5) HEAD フォールバック（`head-fallback`）。`config-local-ahead` は local `<main>` が `origin/<main>` より strict ahead（同一 SHA でない・origin が local の ancestor）のときのみ採用される。push しない運用や origin が古いケースで、stale な origin から worktree が切られるのを防ぐ（T275）。ログは `worktree_created branch=<new> base=<ref> source=<...> path=<...>`。`CMUX_TEAM_FETCH_BEFORE_WORKTREE`（T283 でデフォルト ON に反転）: worktree 作成前に `git fetch --quiet origin <mainBranch>`（タイムアウト 30 秒、失敗はログのみで継続）を実行するかを制御する。デフォルト ON は stale origin 起点で worktree が切られる事故を防ぐため。offline 環境・rate limit 対策で OFF にしたい場合は `CMUX_TEAM_FETCH_BEFORE_WORKTREE=0` を設定する。起動時に `cmdStart` が `fetch_before_worktree enabled=<on|off> source=<env|default>` を `manager.log` に 1 回 emit する。
