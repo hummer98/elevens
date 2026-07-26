@@ -1,15 +1,29 @@
 {
   "mainBranch": "main",
   "models": {
-    "master": "claude-opus-4-8",
-    "conductor": "claude-opus-4-8",
-    "agent": "claude-opus-4-8"
+    "master": "claude-fable-5",
+    "conductor": "claude-fable-5",
+    "agent": "claude-sonnet-5",
+    "agentRoles": {
+      "implementer": "claude-opus-5",
+      "architect": "claude-opus-5",
+      "design-reviewer": "claude-opus-5",
+      "inspector": "claude-opus-5",
+      "researcher": "claude-sonnet-5",
+      "planner": "claude-sonnet-5",
+      "dockeeper": "claude-sonnet-5",
+      "task-manager": "claude-sonnet-5"
+    }
   },
   "tokenPool": {
     "enabled": false,
     "default": "@tayo",
     "include": [],
-    "exclude": ["@kddi"]
+    "exclude": [
+      "@kddi"
+    ]
   },
-  "project_tags": ["any"]
+  "project_tags": [
+    "any"
+  ]
 }

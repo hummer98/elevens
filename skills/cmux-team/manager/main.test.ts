@@ -23,6 +23,7 @@ import {
   buildAgentClaudeFlags,
   buildAgentClaudeEnvPrefix,
   buildMasterClaudeArgs,
+  getModelForRole,
   makeShutdownGuard,
   formatDaemonStartedDetail,
   registerSelf,
@@ -34,6 +35,8 @@ import {
   resolveAutoUpdateMode,
   resolveTokenPoolEnabled,
   isTokenPoolEnabled,
+  DEFAULT_MODEL,
+  type TeamConfig,
 } from "./config";
 import * as cmux from "./cmux";
 import { normalizeAutoUpdate } from "./schema";
@@ -3567,6 +3570,55 @@ describe("buildAgentClaudeFlags (T407)", () => {
       sessionId: "11111111-2222-4333-8444-555555555555",
     });
     expect(flags.join(" ")).not.toContain("--settings");
+  });
+});
+
+describe("getModelForRole (role 別モデル解決)", () => {
+  test("config 未指定 → DEFAULT_MODEL", () => {
+    const cfg: TeamConfig = {};
+    expect(getModelForRole(cfg, "master")).toBe(DEFAULT_MODEL);
+    expect(getModelForRole(cfg, "conductor")).toBe(DEFAULT_MODEL);
+    expect(getModelForRole(cfg, "agent")).toBe(DEFAULT_MODEL);
+  });
+
+  test("CLI override が最優先", () => {
+    const cfg: TeamConfig = { models: { master: "claude-fable-5" } };
+    expect(getModelForRole(cfg, "master", "claude-opus-5")).toBe("claude-opus-5");
+  });
+
+  test("master/conductor は config.models[role] を使う", () => {
+    const cfg: TeamConfig = {
+      models: { master: "claude-fable-5", conductor: "claude-fable-5" },
+    };
+    expect(getModelForRole(cfg, "master")).toBe("claude-fable-5");
+    expect(getModelForRole(cfg, "conductor")).toBe("claude-fable-5");
+  });
+
+  test("agent: sub-role 個別 (agentRoles) > agent fallback > DEFAULT の3段解決", () => {
+    const cfg: TeamConfig = {
+      models: {
+        agent: "claude-sonnet-5",
+        agentRoles: { implementer: "claude-opus-5" },
+      },
+    };
+    // sub-role 個別指定あり
+    expect(getModelForRole(cfg, "agent", undefined, "implementer")).toBe("claude-opus-5");
+    // sub-role 個別指定なし → agent fallback
+    expect(getModelForRole(cfg, "agent", undefined, "researcher")).toBe("claude-sonnet-5");
+    // sub-role を渡さない → agent fallback
+    expect(getModelForRole(cfg, "agent")).toBe("claude-sonnet-5");
+  });
+
+  test("agent: agentRoles も agent も無い sub-role → DEFAULT", () => {
+    const cfg: TeamConfig = { models: { agentRoles: { implementer: "claude-opus-5" } } };
+    expect(getModelForRole(cfg, "agent", undefined, "researcher")).toBe(DEFAULT_MODEL);
+  });
+
+  test("agent: CLI override は sub-role 指定より優先", () => {
+    const cfg: TeamConfig = { models: { agentRoles: { implementer: "claude-opus-5" } } };
+    expect(getModelForRole(cfg, "agent", "claude-haiku-4-5", "implementer")).toBe(
+      "claude-haiku-4-5",
+    );
   });
 });
 

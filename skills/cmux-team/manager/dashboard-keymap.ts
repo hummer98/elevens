@@ -96,6 +96,12 @@ export type KeymapDeps = Readonly<{
   navigateHalfPageUp: (state: AppState) => AppState;
   cycleArtifactSort: (state: AppState) => AppState;
   cycleArtifactFilter: (state: AppState) => AppState;
+  /**
+   * Settings タブで選択中の editable model 行の値を dir(+1/-1) 方向にサイクルし、
+   * config.json へ保存して Settings を再読込する（非同期・fire-and-forget）。
+   * config 行以外 / 非 editable 行では no-op。
+   */
+  cycleSettingsModel: (state: AppState, dir: 1 | -1) => void;
   reload: () => void;
   quit: () => void;
   /** "Y" 確定時に呼ばれる。state.confirmingFullQuit が true の前提 */
@@ -366,6 +372,26 @@ export function createDashboardBindings(deps: KeymapDeps): ReadonlyArray<Binding
     category: "action",
     description: "key_artifact_filter",
     handler: (ctx) => ctx.update((s) => deps.cycleArtifactFilter(s)),
+  });
+  // Settings タブ: editable model 行を ←/→ (h/l) でサイクル編集。
+  // dep 側が config 行以外 / 非 editable 行を no-op で弾くため when ガードは不要。
+  bindings.push({
+    id: "settings.model-prev",
+    keys: ["Left", "h"],
+    scope: { kind: "focus", areas: ["settings"] },
+    category: "action",
+    description: "key_settings_model_prev",
+    statusBarKey: "←/→",
+    handler: (ctx) => deps.cycleSettingsModel(ctx.state, -1),
+  });
+  bindings.push({
+    id: "settings.model-next",
+    keys: ["Right", "l"],
+    scope: { kind: "focus", areas: ["settings"] },
+    category: "action",
+    description: "key_settings_model_next",
+    showInStatusBar: false,
+    handler: (ctx) => deps.cycleSettingsModel(ctx.state, 1),
   });
   // /  は予約のみ（D10）。handler は no-op + 注記
   bindings.push({

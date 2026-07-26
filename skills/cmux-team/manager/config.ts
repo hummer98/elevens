@@ -7,9 +7,9 @@
  */
 
 import { join } from "path";
-import { readFile } from "fs/promises";
+import { readFile, writeFile, rename } from "fs/promises";
 import { homedir } from "os";
-import type { LayoutMode, AutoUpdateMode, SleepPreventionMode } from "./schema";
+import type { LayoutMode, AutoUpdateMode, SleepPreventionMode, AgentRole } from "./schema";
 import { normalizeAutoUpdate, normalizeSleepPrevention } from "./schema";
 
 /**
@@ -18,13 +18,32 @@ import { normalizeAutoUpdate, normalizeSleepPrevention } from "./schema";
  * main.ts（getModelForRole）と dashboard.tsx（Settings タブ表示）の両方が参照するため、
  * literal の drift を避けて config モジュールに集約する。
  */
-export const DEFAULT_MODEL = "claude-opus-4-8";
+export const DEFAULT_MODEL = "claude-opus-5";
+
+/**
+ * Settings タブの model picker が巡回する現行モデル ID の一覧。
+ * 2026-07 時点の公式最新一覧（Fable 5 / Opus 5 / Sonnet 5 / Haiku 4.5）に対応。
+ * picker では先頭に「未設定 (default 継承)」を回せるようにするため、UI 側で
+ * この配列 + undefined を巡回する。
+ */
+export const KNOWN_MODELS = [
+  "claude-fable-5",
+  "claude-opus-5",
+  "claude-sonnet-5",
+  "claude-haiku-4-5",
+] as const;
 
 export interface TeamConfig {
   models?: {
     master?: string;
     conductor?: string;
+    /** 個別未設定の Agent sub-role が継承する fallback モデル。 */
     agent?: string;
+    /**
+     * Agent sub-role 個別のモデル上書き。ここに値がある role は
+     * `agent` fallback より優先される（解決順は getModelForRole 参照）。
+     */
+    agentRoles?: Partial<Record<AgentRole, string>>;
   };
   envrcHookPromptSkipped?: boolean;
   layout?: LayoutMode;
@@ -45,10 +64,10 @@ export interface TeamConfig {
      */
     agentEnabled?: boolean;
     /**
-     * opencode Agent で使うモデル名（デフォルト: "anthropic/claude-opus-4-8"）。Issue #37
+     * opencode Agent で使うモデル名（デフォルト: "anthropic/claude-opus-5"）。Issue #37
      * "providerID/modelID" 形式（スラッシュ必須）で opencode provider layer に渡す。
      * スラッシュが無い値は model 指定として渡らず opencode 側デフォルトにフォールバックする。
-     * 例: "anthropic/claude-opus-4-8", "openrouter/anthropic/claude-haiku-4.5"
+     * 例: "anthropic/claude-opus-5", "openrouter/anthropic/claude-haiku-4.5"
      */
     agentModel?: string;
   };
@@ -605,6 +624,73 @@ export async function loadConfig(projectRoot: string): Promise<TeamConfig> {
   } catch {
     return {};
   }
+}
+
+/**
+ * `.team/config.json` を read-modify-write で atomic に更新する。
+ *
+ * - 既存 JSON を parse したオブジェクトに `mutate` を適用するため、`TeamConfig` に
+ *   型付けされていない未知フィールドも保持される（生オブジェクトを直接変更する）。
+ * - temp file へ書き出して `rename` で差し替えることで、書き込み途中の破損を防ぐ。
+ * - config.json は tasks / team.json と異なり CLI ゲート対象ではない通常設定ファイルなので
+ *   直接 write してよい。
+ *
+ * `mutate` はオブジェクトを in-place 変更しても、新しいオブジェクトを返してもよい
+ * （返り値があればそれを、無ければ変更後の元オブジェクトを書き込む）。
+ */
+export async function updateConfig(
+  projectRoot: string,
+  mutate: (config: Record<string, unknown>) => Record<string, unknown> | void,
+): Promise<void> {
+  const configPath = join(projectRoot, ".team/config.json");
+  let current: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(await readFile(configPath, "utf-8"));
+    if (parsed && typeof parsed === "object") current = parsed;
+  } catch {
+    current = {}; // 不在 / 破損時は新規作成
+  }
+  const next = mutate(current) ?? current;
+  const tmpPath = `${configPath}.${process.pid}.tmp`;
+  await writeFile(tmpPath, JSON.stringify(next, null, 2) + "\n", "utf-8");
+  await rename(tmpPath, configPath);
+}
+
+/**
+ * `config.models` の 1 ロールのモデルを設定する（`updateConfig` の薄いラッパ）。
+ *
+ * - `role` は `"master"` / `"conductor"` / `"agent"`（fallback）/ `"agentRoles.<sub-role>"`。
+ * - `model` が undefined のときは該当キーを削除して default 継承へ戻す。
+ * - 空になった `agentRoles` / `models` は掃除して config.json をクリーンに保つ。
+ */
+export async function setConfigModel(
+  projectRoot: string,
+  role: "master" | "conductor" | "agent" | `agentRoles.${AgentRole}`,
+  model: string | undefined,
+): Promise<void> {
+  await updateConfig(projectRoot, (cfg) => {
+    const models = (cfg.models && typeof cfg.models === "object"
+      ? cfg.models
+      : {}) as Record<string, unknown>;
+
+    if (role.startsWith("agentRoles.")) {
+      const subRole = role.slice("agentRoles.".length);
+      const agentRoles = (models.agentRoles && typeof models.agentRoles === "object"
+        ? models.agentRoles
+        : {}) as Record<string, unknown>;
+      if (model === undefined) delete agentRoles[subRole];
+      else agentRoles[subRole] = model;
+      if (Object.keys(agentRoles).length > 0) models.agentRoles = agentRoles;
+      else delete models.agentRoles;
+    } else {
+      if (model === undefined) delete models[role];
+      else models[role] = model;
+    }
+
+    if (Object.keys(models).length > 0) cfg.models = models;
+    else delete cfg.models;
+    return cfg;
+  });
 }
 
 /**

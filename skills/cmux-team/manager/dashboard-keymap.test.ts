@@ -43,6 +43,7 @@ function makeDeps(overrides: Partial<KeymapDeps> = {}): KeymapDeps {
     navigateHalfPageUp: (s) => s,
     cycleArtifactSort: (s) => s,
     cycleArtifactFilter: (s) => s,
+    cycleSettingsModel: () => {},
     reload: () => {},
     quit: () => {},
     fullQuit: () => {},

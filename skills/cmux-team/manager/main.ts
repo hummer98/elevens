@@ -597,8 +597,20 @@ const execFileAsync = promisify(execFile);
 // --- config ---
 // DEFAULT_MODEL は config.ts に集約（dashboard Settings タブと共有）。
 
-function getModelForRole(config: TeamConfig, role: "master" | "conductor" | "agent", cliOverride?: string): string {
-  return cliOverride ?? config.models?.[role] ?? DEFAULT_MODEL;
+export function getModelForRole(
+  config: TeamConfig,
+  role: "master" | "conductor" | "agent",
+  cliOverride?: string,
+  agentSubRole?: AgentRole,
+): string {
+  if (cliOverride) return cliOverride;
+  // Agent は sub-role 個別指定 (config.models.agentRoles[subRole]) を最優先し、
+  // 無ければ agent fallback → DEFAULT_MODEL の順に解決する。
+  if (role === "agent" && agentSubRole) {
+    const perRole = config.models?.agentRoles?.[agentSubRole];
+    if (perRole) return perRole;
+  }
+  return config.models?.[role] ?? DEFAULT_MODEL;
 }
 
 /**
@@ -3720,7 +3732,7 @@ async function cmdSpawnAgent(): Promise<void> {
   const spawnConfig = await loadConfig(PROJECT_ROOT);
   if (spawnConfig.opencode?.agentEnabled) {
     const ocServerUrl = spawnConfig.opencode.serverUrl ?? "http://localhost:54321";
-    const ocModel = spawnConfig.opencode.agentModel ?? "anthropic/claude-opus-4-8";
+    const ocModel = spawnConfig.opencode.agentModel ?? "anthropic/claude-opus-5";
 
     // prompt テキストを解決（promptFile があれば読んで展開する）
     let ocPromptText = prompt ?? "";
@@ -3829,7 +3841,8 @@ async function cmdSpawnAgent(): Promise<void> {
     // --- 3. Claude Code 起動 ---
     // モデル解決
     const config = await loadConfig(PROJECT_ROOT);
-    const model = getModelForRole(config, "agent", getArg("model"));
+    // sub-role (implementer / researcher 等) を渡し、config.models.agentRoles の個別指定を優先する。
+    const model = getModelForRole(config, "agent", getArg("model"), role);
 
     // Agent 用 settings.json 生成（T181: Stop / SessionEnd hook + statusLine）
     // T403: cmdSpawnAgent では既に team.json から taskId を解決済み（line 2740 付近）。

@@ -19,6 +19,9 @@ import {
   resolveDashboardPort,
   resolveDashboardLanAccess,
   loadGlobalConfig,
+  loadConfig,
+  updateConfig,
+  setConfigModel,
   type TeamConfig,
   type GlobalConfig,
 } from "./config";
@@ -690,5 +693,92 @@ describe("resolveDashboardLanAccess", () => {
         resolveDashboardLanAccess({ dashboard: { lanAccess: v as boolean } }),
       ).toBe(false);
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// updateConfig / setConfigModel（config.json 書き戻し）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("updateConfig / setConfigModel", () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "cmux-team-cfgwrite-"));
+    mkdirSync(join(root, ".team"), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("updateConfig: 不在の config.json を新規作成する", async () => {
+    await updateConfig(root, (cfg) => {
+      cfg.layout = "wide";
+      return cfg;
+    });
+    const loaded = await loadConfig(root);
+    expect(loaded.layout).toBe("wide");
+  });
+
+  test("updateConfig: 未知フィールドを保持する（read-modify-write）", async () => {
+    writeFileSync(
+      join(root, ".team/config.json"),
+      JSON.stringify({ unknownField: 42, mainBranch: "trunk" }),
+    );
+    await updateConfig(root, (cfg) => {
+      cfg.layout = "16x9";
+    });
+    const raw = JSON.parse(
+      // 生 JSON を読み直して未知フィールド保持を確認
+      require("fs").readFileSync(join(root, ".team/config.json"), "utf-8"),
+    );
+    expect(raw.unknownField).toBe(42);
+    expect(raw.mainBranch).toBe("trunk");
+    expect(raw.layout).toBe("16x9");
+  });
+
+  test("setConfigModel: master/conductor/agent の設定", async () => {
+    await setConfigModel(root, "master", "claude-fable-5");
+    await setConfigModel(root, "conductor", "claude-fable-5");
+    await setConfigModel(root, "agent", "claude-sonnet-5");
+    const cfg = await loadConfig(root);
+    expect(cfg.models?.master).toBe("claude-fable-5");
+    expect(cfg.models?.conductor).toBe("claude-fable-5");
+    expect(cfg.models?.agent).toBe("claude-sonnet-5");
+  });
+
+  test("setConfigModel: agentRoles sub-role 個別設定", async () => {
+    await setConfigModel(root, "agentRoles.implementer", "claude-opus-5");
+    await setConfigModel(root, "agentRoles.researcher", "claude-sonnet-5");
+    const cfg = await loadConfig(root);
+    expect(cfg.models?.agentRoles?.implementer).toBe("claude-opus-5");
+    expect(cfg.models?.agentRoles?.researcher).toBe("claude-sonnet-5");
+  });
+
+  test("setConfigModel: undefined で該当キーを削除し default 継承へ戻す", async () => {
+    await setConfigModel(root, "master", "claude-fable-5");
+    await setConfigModel(root, "agentRoles.implementer", "claude-opus-5");
+    // master を unset
+    await setConfigModel(root, "master", undefined);
+    let cfg = await loadConfig(root);
+    expect(cfg.models?.master).toBeUndefined();
+    expect(cfg.models?.agentRoles?.implementer).toBe("claude-opus-5");
+    // 最後の agentRole を unset → 空 agentRoles / 空 models が掃除される
+    await setConfigModel(root, "agentRoles.implementer", undefined);
+    cfg = await loadConfig(root);
+    expect(cfg.models).toBeUndefined();
+  });
+
+  test("setConfigModel: 他フィールドを壊さない", async () => {
+    await updateConfig(root, (cfg) => {
+      cfg.mainBranch = "main";
+      cfg.layout = "wide";
+    });
+    await setConfigModel(root, "master", "claude-fable-5");
+    const cfg = await loadConfig(root);
+    expect(cfg.mainBranch).toBe("main");
+    expect(cfg.layout).toBe("wide");
+    expect(cfg.models?.master).toBe("claude-fable-5");
   });
 });

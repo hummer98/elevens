@@ -27,10 +27,12 @@ import type { ArtifactMeta } from "./artifact";
 import { listProjectInstructions, readProjectInstructions } from "./agent-instructions";
 import {
   loadConfig,
+  setConfigModel,
   resolveMetricsRefreshIntervalMs,
   resolveProjectTokenPool,
   resolveDashboardLanAccess,
   DEFAULT_MODEL,
+  KNOWN_MODELS,
   type TeamConfig,
 } from "./config";
 import { readDashboardLanUrl, filesViewerUrl } from "./files-open";
@@ -40,7 +42,8 @@ import { applyTaskEvent } from "./state-machine/task-state-store";
 import { runReadySyncGuard } from "./ready-guard";
 import { promoteTaskToReady } from "./dashboard-promote";
 import { listTokens, getLatestUsageSnapshot } from "./token-store";
-import type { OverlayRole } from "./schema";
+import type { OverlayRole, AgentRole } from "./schema";
+import { AGENT_ROLES } from "./schema";
 import { resolveOriginRepo } from "./gh-cache-repo";
 import { resolveGithubToken, tokenHash } from "./gh-cache-auth";
 import {
@@ -536,14 +539,28 @@ async function loadSettingsItems(projectRoot: string): Promise<SettingsItem[]> {
     value: cfg.autoUpdate ?? "off (default)",
   });
   items.push({ kind: "config", label: "mainBranch", value: cfg.mainBranch ?? "(unresolved)" });
-  // ロール別 spawn モデル。未指定なら DEFAULT_MODEL に解決される旨を明示（観察箱として
-  // 「今どのロールがどのモデルか」を pane から見えるようにする）。
+  // ロール別 spawn モデル。未指定なら DEFAULT_MODEL / fallback に解決される旨を明示
+  // （観察箱として「今どのロールがどのモデルか」を pane から見えるようにする）。
+  // model 行は edit メタを持たせ、Settings タブで ←/→ による値サイクル編集を可能にする。
   for (const role of ["master", "conductor", "agent"] as const) {
     const configured = cfg.models?.[role];
+    const suffix = role === "agent" ? " (default; agent fallback)" : " (default)";
     items.push({
       kind: "config",
       label: `models.${role}`,
-      value: configured ?? `${DEFAULT_MODEL} (default)`,
+      value: configured ?? `${DEFAULT_MODEL}${suffix}`,
+      edit: { target: role, current: configured },
+    });
+  }
+  // Agent sub-role 個別モデル。未設定は agent fallback → DEFAULT_MODEL の解決結果を inherit 表示。
+  const agentFallback = cfg.models?.agent ?? `${DEFAULT_MODEL} (default)`;
+  for (const subRole of AGENT_ROLES) {
+    const configured = cfg.models?.agentRoles?.[subRole];
+    items.push({
+      kind: "config",
+      label: `  models.agentRoles.${subRole}`,
+      value: configured ?? `→ ${agentFallback} (inherit)`,
+      edit: { target: `agentRoles.${subRole}`, current: configured },
     });
   }
   items.push({
@@ -607,6 +624,16 @@ type SettingsItem =
       kind: "config";
       label: string;
       value: string;
+      /**
+       * 編集可能な config 行のみ設定される。設定されていれば Settings タブで
+       * ←/→ による値サイクル編集の対象になる（現状は model 行のみ）。
+       * `target` は setConfigModel の第2引数に渡す。`current` は現在の設定値
+       * （未設定なら undefined = default 継承）。
+       */
+      edit?: {
+        target: "master" | "conductor" | "agent" | `agentRoles.${AgentRole}`;
+        current: string | undefined;
+      };
     }
   | {
       // docs WebServer の LAN QR（lanAccess 有効時のみ matrix/url が埋まる）
@@ -1420,6 +1447,22 @@ function buildQrUiRows(matrix: boolean[][]): any[] {
   return rows;
 }
 
+/**
+ * model picker のサイクル値を計算する純関数（テスト対象）。
+ * 巡回順: undefined (未設定=default/fallback 継承) → KNOWN_MODELS[...] → undefined …
+ * dir=+1 で次、-1 で前へ。current が KNOWN_MODELS 外の legacy 値でも undefined 起点で復帰できる。
+ */
+export function cycleModelValue(
+  current: string | undefined,
+  dir: 1 | -1,
+): string | undefined {
+  const cycle: (string | undefined)[] = [undefined, ...KNOWN_MODELS];
+  let idx = cycle.findIndex((v) => v === current);
+  if (idx === -1) idx = 0;
+  const next = (idx + dir + cycle.length) % cycle.length;
+  return cycle[next];
+}
+
 export function buildSettingsRows(state: AppState): any[] {
   const items = state.settingsItems;
   if (items.length === 0) {
@@ -1501,8 +1544,11 @@ export function buildSettingsRows(state: AppState): any[] {
         }
       }
     } else if (selected.kind === "config") {
-      rows.push(ui.text(`── ${selected.label} ──`, { dim: true }));
+      rows.push(ui.text(`── ${selected.label.trim()} ──`, { dim: true }));
       rows.push(ui.text(`  ${selected.value}`, { dim: true }));
+      if (selected.edit) {
+        rows.push(ui.text("  ←/→ でモデルを変更（未設定に戻すと default/fallback 継承）", { dim: true }));
+      }
     }
   }
 
@@ -2466,6 +2512,7 @@ export async function startDashboard(
     navigateHalfPageUp: navigateHalfPageUpPure,
     cycleArtifactSort: cycleArtifactSortPure,
     cycleArtifactFilter: cycleArtifactFilterPure,
+    cycleSettingsModel: (state, dir) => { cycleSettingsModel(state, dir).catch(() => {}); },
     reload: () => opts?.onReload?.(),
     quit: () => { cleanup(); opts?.onQuit?.(); },
     fullQuit: () => {
@@ -2713,6 +2760,30 @@ export async function startDashboard(
       db.close();
     }
     await loadIssuesFromCache();
+  }
+
+  /**
+   * Settings タブで選択中の editable model 行の値を ←/→ でサイクルし、
+   * `.team/config.json` へ即時保存して Settings を再読込する。
+   * config 行以外 / edit を持たない行では no-op。
+   */
+  async function cycleSettingsModel(state: AppState, dir: 1 | -1): Promise<void> {
+    const item = state.settingsItems[state.settingsCursor];
+    if (!item || item.kind !== "config" || !item.edit) return;
+    const nextModel = cycleModelValue(item.edit.current, dir);
+    const projectRoot = getState().projectRoot;
+    try {
+      await setConfigModel(projectRoot, item.edit.target, nextModel);
+    } catch (e: any) {
+      log(
+        "settings_model_save_failed",
+        `target=${item.edit.target} ${e?.message ?? String(e)}`,
+      ).catch(() => {});
+      return;
+    }
+    cachedConfig = await loadConfig(projectRoot);
+    const items = await loadSettingsItems(projectRoot);
+    app.update((s) => ({ ...s, settingsItems: items }));
   }
 
   /**
